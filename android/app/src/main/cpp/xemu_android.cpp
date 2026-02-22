@@ -295,6 +295,28 @@ static int GetPrefInt(JNIEnv* env, jobject activity, const char* key, int defaul
   return result;
 }
 
+static bool GetPrefBool(JNIEnv* env, jobject activity, const char* key, bool defaultValue) {
+  jclass activityClass = env->GetObjectClass(activity);
+  jmethodID getPrefs = env->GetMethodID(activityClass, "getSharedPreferences",
+                                        "(Ljava/lang/String;I)Landroid/content/SharedPreferences;");
+  if (!getPrefs) return defaultValue;
+  jstring prefsName = env->NewStringUTF(kPrefsName);
+  jobject prefs = env->CallObjectMethod(activity, getPrefs, prefsName, 0);
+  env->DeleteLocalRef(prefsName);
+  if (HasException(env, "getSharedPreferences") || !prefs) return defaultValue;
+
+  jclass prefsClass = env->GetObjectClass(prefs);
+  jmethodID getBool = env->GetMethodID(prefsClass, "getBoolean", "(Ljava/lang/String;Z)Z");
+  if (!getBool) return defaultValue;
+
+  jstring jkey = env->NewStringUTF(key);
+  jboolean result = env->CallBooleanMethod(prefs, getBool, jkey, (jboolean)defaultValue);
+  env->DeleteLocalRef(jkey);
+  if (HasException(env, "SharedPreferences.getBoolean")) return defaultValue;
+
+  return result;
+}
+
 static bool CopyUriToPath(JNIEnv* env, jobject activity, const std::string& uriString, const std::string& path) {
   if (uriString.empty() || path.empty()) return false;
 
@@ -359,13 +381,21 @@ struct SetupFiles {
   std::string inline_aio_flag_path;
 };
 
+struct DisplaySettings {
+  int surface_scale = 1;
+  bool vsync = false;
+  std::string filtering = "nearest";
+  std::string aspect_ratio = "auto";
+};
+
 static bool WriteConfigToml(const std::string& config_path,
                             const std::string& mcpx,
                             const std::string& flash,
                             const std::string& hdd,
                             const std::string& dvd,
                             const std::string& eeprom,
-                            int tcg_tb_size = 128) {
+                            int tcg_tb_size = 128,
+                            const DisplaySettings& ds = {}) {
   if (config_path.empty()) return false;
   toml::table tbl;
 
@@ -403,11 +433,17 @@ static bool WriteConfigToml(const std::string& config_path,
 
   general->insert_or_assign("show_welcome", false);
   display->insert_or_assign("renderer", "vulkan");
-  if (!display->contains("filtering")) {
-    display->insert_or_assign("filtering", "nearest");
+  display->insert_or_assign("filtering", ds.filtering);
+  display_window->insert_or_assign("vsync", ds.vsync);
+
+  toml::table* display_quality = EnsureTable(*display, "quality");
+  if (display_quality) {
+    display_quality->insert_or_assign("surface_scale", ds.surface_scale);
   }
-  if (!display_window->contains("vsync")) {
-    display_window->insert_or_assign("vsync", false);
+
+  toml::table* display_ui = EnsureTable(*display, "ui");
+  if (display_ui) {
+    display_ui->insert_or_assign("aspect_ratio", ds.aspect_ratio);
   }
   if (!audio_vp->contains("num_workers")) {
     audio_vp->insert_or_assign("num_workers", 0);
@@ -540,7 +576,18 @@ static SetupFiles SyncSetupFiles() {
 
   out.config_path = base + "/xemu.toml";
   int tbSize = GetPrefInt(env, activity, "tcg_tb_size", 128);
-  WriteConfigToml(out.config_path, out.mcpx, out.flash, out.hdd, out.dvd, out.eeprom, tbSize);
+
+  DisplaySettings ds;
+  ds.surface_scale = GetPrefInt(env, activity, "surface_scale", 1);
+  if (ds.surface_scale < 1) ds.surface_scale = 1;
+  if (ds.surface_scale > 4) ds.surface_scale = 4;
+  ds.vsync = GetPrefBool(env, activity, "vsync", false);
+  std::string filterPref = GetPrefString(env, activity, "filtering");
+  if (!filterPref.empty()) ds.filtering = filterPref;
+  std::string arPref = GetPrefString(env, activity, "aspect_ratio");
+  if (!arPref.empty()) ds.aspect_ratio = arPref;
+
+  WriteConfigToml(out.config_path, out.mcpx, out.flash, out.hdd, out.dvd, out.eeprom, tbSize, ds);
   LogInfoFmt("SyncSetupFiles: config %s", out.config_path.c_str());
   LogInfoFmt("Resolved mcpx=%s", out.mcpx.c_str());
   LogInfoFmt("Resolved flash=%s", out.flash.c_str());

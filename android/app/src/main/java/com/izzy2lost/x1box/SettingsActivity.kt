@@ -84,6 +84,10 @@ class SettingsActivity : AppCompatActivity() {
       clearTbCacheHints()
     }
 
+    setupResolutionScale()
+    setupFilteringPicker()
+    setupAspectRatioPicker()
+
     refreshDriverStatus()
   }
 
@@ -109,6 +113,71 @@ class SettingsActivity : AppCompatActivity() {
         .setTitle(R.string.settings_tb_cache_size)
         .setSingleChoiceItems(labels, sel) { dialog, which ->
           prefs.edit().putInt("tcg_tb_size", values[which]).apply()
+          btn.text = labels[which]
+          dialog.dismiss()
+        }
+        .setNegativeButton(android.R.string.cancel, null)
+        .show()
+    }
+  }
+
+  private fun setupResolutionScale() {
+    val btn = findViewById<MaterialButton>(R.id.btn_resolution_scale)
+    val labels = arrayOf("1x (Native)", "2x", "3x", "4x")
+    val values = intArrayOf(1, 2, 3, 4)
+    val current = prefs.getInt("surface_scale", 1)
+    val idx = values.indexOf(current).coerceAtLeast(0)
+    btn.text = labels[idx]
+    btn.setOnClickListener {
+      val sel = values.indexOf(prefs.getInt("surface_scale", 1)).coerceAtLeast(0)
+      MaterialAlertDialogBuilder(this)
+        .setTitle(R.string.settings_resolution_scale)
+        .setSingleChoiceItems(labels, sel) { dialog, which ->
+          prefs.edit().putInt("surface_scale", values[which]).apply()
+          btn.text = labels[which]
+          dialog.dismiss()
+        }
+        .setNegativeButton(android.R.string.cancel, null)
+        .show()
+    }
+  }
+
+  private fun setupFilteringPicker() {
+    val btn = findViewById<MaterialButton>(R.id.btn_filtering)
+    val labels = arrayOf("Nearest", "Linear")
+    val keys = arrayOf("nearest", "linear")
+    val current = prefs.getString("filtering", "nearest") ?: "nearest"
+    val idx = keys.indexOf(current).coerceAtLeast(0)
+    btn.text = labels[idx]
+    btn.setOnClickListener {
+      val cur = prefs.getString("filtering", "nearest") ?: "nearest"
+      val sel = keys.indexOf(cur).coerceAtLeast(0)
+      MaterialAlertDialogBuilder(this)
+        .setTitle(R.string.settings_filtering)
+        .setSingleChoiceItems(labels, sel) { dialog, which ->
+          prefs.edit().putString("filtering", keys[which]).apply()
+          btn.text = labels[which]
+          dialog.dismiss()
+        }
+        .setNegativeButton(android.R.string.cancel, null)
+        .show()
+    }
+  }
+
+  private fun setupAspectRatioPicker() {
+    val btn = findViewById<MaterialButton>(R.id.btn_aspect_ratio)
+    val labels = arrayOf("Auto", "Native (4:3)", "16:9", "Fit")
+    val keys = arrayOf("auto", "native", "16:9", "fit")
+    val current = prefs.getString("aspect_ratio", "auto") ?: "auto"
+    val idx = keys.indexOf(current).coerceAtLeast(0)
+    btn.text = labels[idx]
+    btn.setOnClickListener {
+      val cur = prefs.getString("aspect_ratio", "auto") ?: "auto"
+      val sel = keys.indexOf(cur).coerceAtLeast(0)
+      MaterialAlertDialogBuilder(this)
+        .setTitle(R.string.settings_aspect_ratio)
+        .setSingleChoiceItems(labels, sel) { dialog, which ->
+          prefs.edit().putString("aspect_ratio", keys[which]).apply()
           btn.text = labels[which]
           dialog.dismiss()
         }

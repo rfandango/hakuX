@@ -113,4 +113,8 @@
 
   <string name="settings_display_title">Display</string>
   <string name="settings_show_fps">Show FPS counter</string>
+  <string name="settings_resolution_scale">Resolution Scale</string>
+  <string name="settings_resolution_scale_desc">Internal rendering resolution multiplier (requires restart)</string>
+  <string name="settings_filtering">Texture Filtering</string>
+  <string name="settings_aspect_ratio">Aspect Ratio</string>
 </resources>

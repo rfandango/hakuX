@@ -255,6 +255,25 @@ bool xemu_settings_load(void)
             g_config.display.window.vsync = *vsync;
         }
 
+        auto display_quality = display["quality"];
+        if (auto scale = display_quality["surface_scale"].value<int64_t>()) {
+            int s = (int)*scale;
+            if (s >= 1 && s <= 10) {
+                g_config.display.quality.surface_scale = s;
+            }
+        }
+
+        auto display_ui = display["ui"];
+        if (auto ar = display_ui["aspect_ratio"].value<std::string>()) {
+            if (*ar == "native" || *ar == "4:3") {
+                g_config.display.ui.aspect_ratio = CONFIG_DISPLAY_UI_ASPECT_RATIO_NATIVE;
+            } else if (*ar == "auto") {
+                g_config.display.ui.aspect_ratio = CONFIG_DISPLAY_UI_ASPECT_RATIO_AUTO;
+            } else if (*ar == "16:9") {
+                g_config.display.ui.aspect_ratio = CONFIG_DISPLAY_UI_ASPECT_RATIO_16X9;
+            }
+        }
+
         // Performance settings
         if (auto hard_fpu = perf["hard_fpu"].value<bool>()) {
             g_config.perf.hard_fpu = *hard_fpu;

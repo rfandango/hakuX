@@ -314,6 +314,49 @@
             android:layout_marginTop="16dp"
             android:text="@string/settings_show_fps"
             android:textColor="@color/xemu_text_muted" />
+
+          <!-- Resolution Scale -->
+          <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/settings_resolution_scale"
+            android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
+          <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_resolution_scale_desc"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            android:textColor="@color/xemu_text_muted" />
+          <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_resolution_scale"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="1x (Native)"
+            android:textColor="@color/xemu_text_muted" />
+
+          <!-- Texture Filtering -->
+          <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_filtering"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Nearest"
+            android:textColor="@color/xemu_text_muted" />
+
+          <!-- Aspect Ratio -->
+          <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_aspect_ratio"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Auto"
+            android:textColor="@color/xemu_text_muted" />
         </LinearLayout>
       </com.google.android.material.card.MaterialCardView>
 
