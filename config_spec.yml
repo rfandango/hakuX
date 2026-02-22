@@ -370,12 +370,3 @@ perf:
   cache_shaders:
     type: bool
     default: true
-  cache_code:
-    type: bool
-    default: true
-  native_float_ops:
-    type: bool
-    default: true
-  tcg_optimizer:
-    type: bool
-    default: true

@@ -101,9 +101,6 @@ static void xemu_settings_apply_defaults(void)
 
     g_config.perf.hard_fpu = true;
     g_config.perf.cache_shaders = true;
-    g_config.perf.cache_code = true;
-    g_config.perf.native_float_ops = true;
-    g_config.perf.tcg_optimizer = true;
 }
 
 // Optimized parsers - avoid string allocations
@@ -264,15 +261,6 @@ bool xemu_settings_load(void)
         }
         if (auto cache_shaders = perf["cache_shaders"].value<bool>()) {
             g_config.perf.cache_shaders = *cache_shaders;
-        }
-        if (auto cache_code = perf["cache_code"].value<bool>()) {
-            g_config.perf.cache_code = *cache_code;
-        }
-        if (auto native_float_ops = perf["native_float_ops"].value<bool>()) {
-            g_config.perf.native_float_ops = *native_float_ops;
-        }
-        if (auto tcg_optimizer = perf["tcg_optimizer"].value<bool>()) {
-            g_config.perf.tcg_optimizer = *tcg_optimizer;
         }
 
         // Audio settings

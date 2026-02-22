@@ -1580,10 +1580,6 @@ static bool fold_bitsel_vec(OptContext *ctx, TCGOp *op)
 
 static bool fold_brcond(OptContext *ctx, TCGOp *op)
 {
-#ifdef XBOX
-    extern int g_use_tcg_optimizer;
-    if (g_use_tcg_optimizer) {
-#endif
     /*
      * Peephole: fuse setcond + brcond.
      *
@@ -1618,9 +1614,6 @@ static bool fold_brcond(OptContext *ctx, TCGOp *op)
             tcg_op_remove(ctx->tcg, prev);
         }
     }
-#ifdef XBOX
-    }
-#endif
 
     int i = do_constant_folding_cond1(ctx, op, NO_DEST, &op->args[0],
                                       &op->args[1], &op->args[2]);

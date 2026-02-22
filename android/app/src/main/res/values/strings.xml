@@ -92,15 +92,6 @@
   <string name="settings_gpu_driver_install_failed">Failed to install driver. The ZIP may be invalid or incompatible.</string>
   <string name="settings_gpu_driver_none_available">No driver ZIPs found. Use \"Install Driver from ZIP\" to add one first.</string>
 
-  <string name="settings_perf_title">Performance</string>
-  <string name="settings_perf_desc">Options that affect emulation speed and startup time</string>
-  <string name="settings_cache_code">Cache translated code</string>
-  <string name="settings_cache_code_desc">Pre-translate frequently used code blocks on startup to reduce stutter (requires restart)</string>
-  <string name="settings_native_float_ops">Native float operations</string>
-  <string name="settings_native_float_ops_desc">Use hardware FPU for SSE and x87 float math instead of software emulation (requires restart)</string>
-  <string name="settings_tcg_optimizer">TCG optimizer peephole</string>
-  <string name="settings_tcg_optimizer_desc">Enable setcond+brcond fusion in the code generator (requires restart)</string>
-
   <string name="settings_hdd_title">Hard Disk</string>
   <string name="settings_hdd_desc">Manage the emulated Xbox hard disk image</string>
   <string name="settings_clear_cache">Clear Cache Partitions (X, Y, Z)</string>

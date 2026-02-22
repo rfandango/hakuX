@@ -68,15 +68,6 @@ void MainMenuGeneralView::Draw()
     Toggle("Cache shaders to disk", &g_config.perf.cache_shaders,
            "Reduce stutter in games by caching previously generated shaders");
 
-    Toggle("Cache translated code", &g_config.perf.cache_code,
-           "Pre-translate frequently used code blocks on startup to reduce stutter (requires restart)");
-
-    Toggle("Native float operations", &g_config.perf.native_float_ops,
-           "Use hardware FPU for SSE and x87 float math instead of software emulation (requires restart)");
-
-    Toggle("TCG optimizer peephole", &g_config.perf.tcg_optimizer,
-           "Enable setcond+brcond fusion in the code generator (requires restart)");
-
     SectionTitle("Miscellaneous");
     Toggle("Skip startup animation", &g_config.general.skip_boot_anim,
            "Skip the full Xbox boot animation sequence");

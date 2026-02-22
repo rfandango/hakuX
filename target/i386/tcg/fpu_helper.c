@@ -86,8 +86,6 @@
 
 #include <string.h>
 
-extern int g_use_native_float_ops;
-
 static inline double fx80_to_f64(floatx80 a)
 {
     uint64_t mant = a.low;
@@ -96,9 +94,10 @@ static inline double fx80_to_f64(floatx80 a)
     int exp = exp_sign & 0x7FFF;
 
     if (exp == 0x7FFF) {
+        /* Infinity or NaN */
         uint64_t d_bits = ((uint64_t)sign << 63) | (UINT64_C(0x7FF) << 52);
         if (mant & UINT64_C(0x7FFFFFFFFFFFFFFF)) {
-            d_bits |= UINT64_C(0x8000000000000);
+            d_bits |= UINT64_C(0x8000000000000); /* quiet NaN */
         }
         double d;
         memcpy(&d, &d_bits, sizeof(d));
@@ -106,9 +105,11 @@ static inline double fx80_to_f64(floatx80 a)
     }
 
     if (exp == 0 || !(mant & UINT64_C(0x8000000000000000))) {
+        /* Zero or denormal -- treat as zero (sufficient for Xbox games) */
         return sign ? -0.0 : 0.0;
     }
 
+    /* Normal: rebias exponent from 16383 to 1023 */
     int d_exp = exp - 16383 + 1023;
     if (d_exp >= 0x7FF) {
         return sign ? -INFINITY : INFINITY;
@@ -117,6 +118,7 @@ static inline double fx80_to_f64(floatx80 a)
         return sign ? -0.0 : 0.0;
     }
 
+    /* Drop explicit integer bit, take top 52 bits of remaining 63 */
     uint64_t d_mant = (mant & UINT64_C(0x7FFFFFFFFFFFFFFF)) >> 11;
     uint64_t d_bits = ((uint64_t)sign << 63) | ((uint64_t)d_exp << 52) | d_mant;
     double d;
@@ -133,6 +135,7 @@ static inline floatx80 f64_to_fx80(double d)
     uint64_t d_mant = d_bits & UINT64_C(0xFFFFFFFFFFFFF);
 
     if (d_exp == 0x7FF) {
+        /* Infinity or NaN */
         uint64_t low = UINT64_C(0x8000000000000000);
         if (d_mant) {
             low |= (d_mant << 11) | UINT64_C(0x4000000000000000);
@@ -144,9 +147,11 @@ static inline floatx80 f64_to_fx80(double d)
         if (d_mant == 0) {
             return make_floatx80((uint16_t)(sign << 15), 0);
         }
+        /* Denormal double -- flush to zero for simplicity */
         return make_floatx80((uint16_t)(sign << 15), 0);
     }
 
+    /* Normal: rebias exponent from 1023 to 16383, add explicit integer bit */
     int x_exp = d_exp - 1023 + 16383;
     uint64_t low = UINT64_C(0x8000000000000000) | (d_mant << 11);
     return make_floatx80((sign << 15) | x_exp, low);
@@ -161,9 +166,14 @@ static inline floatx80 pack_arm64(floatx80 v, float_status *status)
     }
     case floatx80_precision_d:
     default:
-        return v;
+        return v; /* already at double precision */
     }
 }
+
+#define floatx80_add(a, b, s)          pack_arm64(f64_to_fx80(fx80_to_f64(a) + fx80_to_f64(b)), s)
+#define floatx80_sub(a, b, s)          pack_arm64(f64_to_fx80(fx80_to_f64(a) - fx80_to_f64(b)), s)
+#define floatx80_mul(a, b, s)          pack_arm64(f64_to_fx80(fx80_to_f64(a) * fx80_to_f64(b)), s)
+#define floatx80_div(a, b, s)          pack_arm64(f64_to_fx80(fx80_to_f64(a) / fx80_to_f64(b)), s)
 
 static inline
 FloatRelation floatx80_compare_arm64(floatx80 a, floatx80 b, float_status *status)
@@ -175,6 +185,7 @@ FloatRelation floatx80_compare_arm64(floatx80 a, floatx80 b, float_status *statu
     if (da == db) return float_relation_equal;
     return float_relation_unordered;
 }
+#define floatx80_compare      floatx80_compare_arm64
 
 static inline floatx80 float32_to_floatx80_arm64(float32 val, float_status *s)
 {
@@ -182,6 +193,7 @@ static inline floatx80 float32_to_floatx80_arm64(float32 val, float_status *s)
     u.i = val;
     return f64_to_fx80((double)u.f);
 }
+#define float32_to_floatx80   float32_to_floatx80_arm64
 
 static inline float32 floatx80_to_float32_arm64(floatx80 a, float_status *s)
 {
@@ -189,6 +201,7 @@ static inline float32 floatx80_to_float32_arm64(floatx80 a, float_status *s)
     u.f = (float)fx80_to_f64(a);
     return u.i;
 }
+#define floatx80_to_float32   floatx80_to_float32_arm64
 
 static inline floatx80 float64_to_floatx80_arm64(float64 val, float_status *s)
 {
@@ -196,6 +209,7 @@ static inline floatx80 float64_to_floatx80_arm64(float64 val, float_status *s)
     u.i = val;
     return f64_to_fx80(u.d);
 }
+#define float64_to_floatx80   float64_to_floatx80_arm64
 
 static inline float64 floatx80_to_float64_arm64(floatx80 a, float_status *s)
 {
@@ -203,73 +217,13 @@ static inline float64 floatx80_to_float64_arm64(floatx80 a, float_status *s)
     u.d = fx80_to_f64(a);
     return u.i;
 }
+#define floatx80_to_float64   floatx80_to_float64_arm64
 
 static inline floatx80 int32_to_floatx80_arm64(int32_t a, float_status *s)
 {
     return f64_to_fx80((double)a);
 }
-
-/*
- * Save references to original softfloat functions before macros shadow them.
- * These inline wrappers capture the real function symbols at preprocessing time.
- */
-static inline floatx80 floatx80_add_soft(floatx80 a, floatx80 b, float_status *s) {
-    return floatx80_add(a, b, s);
-}
-static inline floatx80 floatx80_sub_soft(floatx80 a, floatx80 b, float_status *s) {
-    return floatx80_sub(a, b, s);
-}
-static inline floatx80 floatx80_mul_soft(floatx80 a, floatx80 b, float_status *s) {
-    return floatx80_mul(a, b, s);
-}
-static inline floatx80 floatx80_div_soft(floatx80 a, floatx80 b, float_status *s) {
-    return floatx80_div(a, b, s);
-}
-static inline FloatRelation floatx80_compare_soft(floatx80 a, floatx80 b, float_status *s) {
-    return floatx80_compare(a, b, s);
-}
-static inline floatx80 float32_to_floatx80_soft(float32 v, float_status *s) {
-    return float32_to_floatx80(v, s);
-}
-static inline float32 floatx80_to_float32_soft(floatx80 a, float_status *s) {
-    return floatx80_to_float32(a, s);
-}
-static inline floatx80 float64_to_floatx80_soft(float64 v, float_status *s) {
-    return float64_to_floatx80(v, s);
-}
-static inline float64 floatx80_to_float64_soft(floatx80 a, float_status *s) {
-    return floatx80_to_float64(a, s);
-}
-static inline floatx80 int32_to_floatx80_soft(int32_t a, float_status *s) {
-    return int32_to_floatx80(a, s);
-}
-
-#define floatx80_add(a, b, s) (g_use_native_float_ops ? \
-    pack_arm64(f64_to_fx80(fx80_to_f64(a) + fx80_to_f64(b)), s) : \
-    floatx80_add_soft(a, b, s))
-#define floatx80_sub(a, b, s) (g_use_native_float_ops ? \
-    pack_arm64(f64_to_fx80(fx80_to_f64(a) - fx80_to_f64(b)), s) : \
-    floatx80_sub_soft(a, b, s))
-#define floatx80_mul(a, b, s) (g_use_native_float_ops ? \
-    pack_arm64(f64_to_fx80(fx80_to_f64(a) * fx80_to_f64(b)), s) : \
-    floatx80_mul_soft(a, b, s))
-#define floatx80_div(a, b, s) (g_use_native_float_ops ? \
-    pack_arm64(f64_to_fx80(fx80_to_f64(a) / fx80_to_f64(b)), s) : \
-    floatx80_div_soft(a, b, s))
-
-#define floatx80_compare(a, b, s) (g_use_native_float_ops ? \
-    floatx80_compare_arm64(a, b, s) : floatx80_compare_soft(a, b, s))
-
-#define float32_to_floatx80(v, s) (g_use_native_float_ops ? \
-    float32_to_floatx80_arm64(v, s) : float32_to_floatx80_soft(v, s))
-#define floatx80_to_float32(a, s) (g_use_native_float_ops ? \
-    floatx80_to_float32_arm64(a, s) : floatx80_to_float32_soft(a, s))
-#define float64_to_floatx80(v, s) (g_use_native_float_ops ? \
-    float64_to_floatx80_arm64(v, s) : float64_to_floatx80_soft(v, s))
-#define floatx80_to_float64(a, s) (g_use_native_float_ops ? \
-    floatx80_to_float64_arm64(a, s) : floatx80_to_float64_soft(a, s))
-#define int32_to_floatx80(a, s) (g_use_native_float_ops ? \
-    int32_to_floatx80_arm64(a, s) : int32_to_floatx80_soft(a, s))
+#define int32_to_floatx80     int32_to_floatx80_arm64
 
 #endif /* XBOX && __aarch64__ */
 

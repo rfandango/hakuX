@@ -17,7 +17,6 @@
 #include "internal-common.h"
 #include "qemu/log.h"
 #include "qemu/crc32c.h"
-#include "xemu-settings.h"
 #include <string.h>
 #ifdef __ANDROID__
 #include <android/log.h>
@@ -140,9 +139,6 @@ static bool dedup_contains_or_insert(const TBCacheHint *h, int idx)
 
 void tb_cache_record_hint(const TranslationBlock *tb)
 {
-    if (!g_config.perf.cache_code) {
-        return;
-    }
     /* Skip one-shot TBs and invalid entries. */
     if (tb_page_addr0(tb) == (tb_page_addr_t)-1) {
         return;
@@ -215,9 +211,6 @@ void tb_cache_record_hint(const TranslationBlock *tb)
 
 void tb_cache_save(const char *path, uint32_t game_hash)
 {
-    if (!g_config.perf.cache_code) {
-        return;
-    }
     if (!recorded_hints || recorded_count < 100) {
         qemu_log("tb_cache_save: too few hints (%d), skipping\n",
                  recorded_count);
@@ -257,9 +250,6 @@ fail:
 
 int tb_cache_load(const char *path, uint32_t game_hash)
 {
-    if (!g_config.perf.cache_code) {
-        return 0;
-    }
     FILE *f = fopen(path, "rb");
     if (!f) {
         return 0;
@@ -373,9 +363,6 @@ static int hint_tier_cmp(const void *a, const void *b)
 
 void tb_cache_prewarm(CPUState *cpu)
 {
-    if (!g_config.perf.cache_code) {
-        return;
-    }
     if (!loaded_hints || loaded_count == 0) {
         return;
     }
@@ -511,9 +498,6 @@ static bool rewarm_in_progress;
 
 void tb_cache_rewarm_after_flush(CPUState *cpu)
 {
-    if (!g_config.perf.cache_code) {
-        return;
-    }
     if (!recorded_hints || recorded_count == 0) {
         return;
     }

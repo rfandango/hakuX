@@ -273,28 +273,6 @@ static std::string GetPrefString(JNIEnv* env, jobject activity, const char* key)
   return out;
 }
 
-static bool GetPrefBool(JNIEnv* env, jobject activity, const char* key, bool defaultValue) {
-  jclass activityClass = env->GetObjectClass(activity);
-  jmethodID getPrefs = env->GetMethodID(activityClass, "getSharedPreferences",
-                                        "(Ljava/lang/String;I)Landroid/content/SharedPreferences;");
-  if (!getPrefs) return defaultValue;
-  jstring prefsName = env->NewStringUTF(kPrefsName);
-  jobject prefs = env->CallObjectMethod(activity, getPrefs, prefsName, 0);
-  env->DeleteLocalRef(prefsName);
-  if (HasException(env, "getSharedPreferences") || !prefs) return defaultValue;
-
-  jclass prefsClass = env->GetObjectClass(prefs);
-  jmethodID getBool = env->GetMethodID(prefsClass, "getBoolean", "(Ljava/lang/String;Z)Z");
-  if (!getBool) return defaultValue;
-
-  jstring jkey = env->NewStringUTF(key);
-  jboolean result = env->CallBooleanMethod(prefs, getBool, jkey, (jboolean)defaultValue);
-  env->DeleteLocalRef(jkey);
-  if (HasException(env, "SharedPreferences.getBoolean")) return defaultValue;
-
-  return result;
-}
-
 static bool CopyUriToPath(JNIEnv* env, jobject activity, const std::string& uriString, const std::string& path) {
   if (uriString.empty() || path.empty()) return false;
 
@@ -364,10 +342,7 @@ static bool WriteConfigToml(const std::string& config_path,
                             const std::string& flash,
                             const std::string& hdd,
                             const std::string& dvd,
-                            const std::string& eeprom,
-                            bool cache_code = true,
-                            bool native_float_ops = true,
-                            bool tcg_optimizer = true) {
+                            const std::string& eeprom) {
   if (config_path.empty()) return false;
   toml::table tbl;
 
@@ -395,11 +370,10 @@ static bool WriteConfigToml(const std::string& config_path,
   toml::table* audio = EnsureTable(tbl, "audio");
   toml::table* audio_vp = EnsureTable(*audio, "vp");
   toml::table* android = EnsureTable(tbl, "android");
-  toml::table* perf = EnsureTable(tbl, "perf");
   toml::table* sys = EnsureTable(tbl, "sys");
   toml::table* files = EnsureTable(*sys, "files");
   if (!general || !display || !display_window || !audio || !audio_vp ||
-      !android || !perf || !sys || !files) {
+      !android || !sys || !files) {
     LogErrorFmt("Failed to build config tables at %s", config_path.c_str());
     return false;
   }
@@ -433,10 +407,6 @@ static bool WriteConfigToml(const std::string& config_path,
   if (!android->contains("tcg_tb_size")) {
     android->insert_or_assign("tcg_tb_size", 128);
   }
-
-  perf->insert_or_assign("cache_code", cache_code);
-  perf->insert_or_assign("native_float_ops", native_float_ops);
-  perf->insert_or_assign("tcg_optimizer", tcg_optimizer);
 
   files->insert_or_assign("bootrom_path", mcpx);
   files->insert_or_assign("flashrom_path", flash);
@@ -548,11 +518,7 @@ static SetupFiles SyncSetupFiles() {
   }
 
   out.config_path = base + "/xemu.toml";
-  bool cacheCode = GetPrefBool(env, activity, "cache_code", true);
-  bool nativeFloatOps = GetPrefBool(env, activity, "native_float_ops", true);
-  bool tcgOptimizer = GetPrefBool(env, activity, "tcg_optimizer", true);
-  WriteConfigToml(out.config_path, out.mcpx, out.flash, out.hdd, out.dvd, out.eeprom,
-                  cacheCode, nativeFloatOps, tcgOptimizer);
+  WriteConfigToml(out.config_path, out.mcpx, out.flash, out.hdd, out.dvd, out.eeprom);
   LogInfoFmt("SyncSetupFiles: config %s", out.config_path.c_str());
   LogInfoFmt("Resolved mcpx=%s", out.mcpx.c_str());
   LogInfoFmt("Resolved flash=%s", out.flash.c_str());
@@ -599,17 +565,15 @@ extern "C" int xemu_android_main(int argc, char** argv) {
   qemu_init(argc, argv);
 
   /* Load translation block cache hints for pre-warming */
-  if (g_config.perf.cache_code) {
-    const char *storage_load = SDL_AndroidGetInternalStoragePath();
-    if (storage_load) {
-      char cache_path[PATH_MAX];
-      snprintf(cache_path, sizeof(cache_path), "%s/x1box/tb_cache.bin", storage_load);
-      uint32_t game_hash = tb_cache_compute_game_hash(
-          g_config.sys.files.bootrom_path, g_config.sys.files.flashrom_path);
-      int nhints = tb_cache_load(cache_path, game_hash);
-      __android_log_print(ANDROID_LOG_INFO, "xemu-android",
-                          "TB cache: loaded %d hints from %s", nhints, cache_path);
-    }
+  const char *storage_load = SDL_AndroidGetInternalStoragePath();
+  if (storage_load) {
+    char cache_path[PATH_MAX];
+    snprintf(cache_path, sizeof(cache_path), "%s/x1box/tb_cache.bin", storage_load);
+    uint32_t game_hash = tb_cache_compute_game_hash(
+        g_config.sys.files.bootrom_path, g_config.sys.files.flashrom_path);
+    int nhints = tb_cache_load(cache_path, game_hash);
+    __android_log_print(ANDROID_LOG_INFO, "xemu-android",
+                        "TB cache: loaded %d hints from %s", nhints, cache_path);
   }
 
   LogInfo("xemu_android_main: qemu_main");
@@ -617,18 +581,16 @@ extern "C" int xemu_android_main(int argc, char** argv) {
   LogErrorInt("xemu_android_main: qemu_main returned %d", rc);
 
   /* Save translation block cache hints for next launch */
-  if (g_config.perf.cache_code) {
-    const char *storage = SDL_AndroidGetInternalStoragePath();
-    if (storage) {
-      char dir_path[PATH_MAX];
-      snprintf(dir_path, sizeof(dir_path), "%s/x1box", storage);
-      mkdir(dir_path, 0755);
-      char cache_path[PATH_MAX];
-      snprintf(cache_path, sizeof(cache_path), "%s/tb_cache.bin", dir_path);
-      uint32_t game_hash = tb_cache_compute_game_hash(
-          g_config.sys.files.bootrom_path, g_config.sys.files.flashrom_path);
-      tb_cache_save(cache_path, game_hash);
-    }
+  const char *storage = SDL_AndroidGetInternalStoragePath();
+  if (storage) {
+    char dir_path[PATH_MAX];
+    snprintf(dir_path, sizeof(dir_path), "%s/x1box", storage);
+    mkdir(dir_path, 0755);
+    char cache_path[PATH_MAX];
+    snprintf(cache_path, sizeof(cache_path), "%s/tb_cache.bin", dir_path);
+    uint32_t game_hash = tb_cache_compute_game_hash(
+        g_config.sys.files.bootrom_path, g_config.sys.files.flashrom_path);
+    tb_cache_save(cache_path, game_hash);
   }
   tb_cache_cleanup();
 
