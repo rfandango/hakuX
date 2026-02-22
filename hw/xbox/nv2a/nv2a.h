@@ -30,6 +30,7 @@ bool nv2a_android_copy_readback(uint8_t **buffer, size_t *buffer_size,
 #endif
 int nv2a_get_framebuffer_surface(void);
 void nv2a_release_framebuffer_surface(void);
+bool nv2a_should_skip_frame(void);
 void nv2a_set_surface_scale_factor(unsigned int scale);
 unsigned int nv2a_get_surface_scale_factor(void);
 const uint8_t *nv2a_get_dac_palette(void);

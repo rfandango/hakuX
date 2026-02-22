@@ -79,6 +79,11 @@ class SettingsActivity : AppCompatActivity() {
       confirmClearCache()
     }
 
+    setupTbCacheSize()
+    findViewById<MaterialButton>(R.id.btn_clear_tb_hints).setOnClickListener {
+      clearTbCacheHints()
+    }
+
     refreshDriverStatus()
   }
 
@@ -88,6 +93,58 @@ class SettingsActivity : AppCompatActivity() {
       driverStatusText.text = getString(R.string.settings_gpu_driver_active, name)
     } else {
       driverStatusText.text = getString(R.string.settings_gpu_driver_system)
+    }
+  }
+
+  private fun setupTbCacheSize() {
+    val btn = findViewById<MaterialButton>(R.id.btn_tb_cache_size)
+    val labels = arrayOf("64 MB", "128 MB", "256 MB", "512 MB")
+    val values = intArrayOf(64, 128, 256, 512)
+    val current = prefs.getInt("tcg_tb_size", 128)
+    val idx = values.indexOf(current).coerceAtLeast(1)
+    btn.text = labels[idx]
+    btn.setOnClickListener {
+      val sel = values.indexOf(prefs.getInt("tcg_tb_size", 128)).coerceAtLeast(1)
+      MaterialAlertDialogBuilder(this)
+        .setTitle(R.string.settings_tb_cache_size)
+        .setSingleChoiceItems(labels, sel) { dialog, which ->
+          prefs.edit().putInt("tcg_tb_size", values[which]).apply()
+          btn.text = labels[which]
+          dialog.dismiss()
+        }
+        .setNegativeButton(android.R.string.cancel, null)
+        .show()
+    }
+  }
+
+  private fun clearTbCacheHints() {
+    val tag = "XemuTbCache"
+    val candidates = mutableListOf<File>()
+
+    val internal = File(filesDir.absolutePath + "/x1box/tb_cache.bin")
+    Log.i(tag, "internal: ${internal.absolutePath} exists=${internal.exists()}")
+    candidates.add(internal)
+
+    val extDir = getExternalFilesDir(null)
+    if (extDir != null) {
+      val external = File(extDir.absolutePath + "/x1box/tb_cache.bin")
+      Log.i(tag, "external: ${external.absolutePath} exists=${external.exists()}")
+      candidates.add(external)
+    }
+
+    var deleted = 0
+    for (f in candidates) {
+      if (f.exists()) {
+        f.delete()
+        deleted++
+        Log.i(tag, "deleted: ${f.absolutePath}")
+      }
+    }
+
+    if (deleted > 0) {
+      Toast.makeText(this, getString(R.string.settings_clear_tb_hints_success), Toast.LENGTH_SHORT).show()
+    } else {
+      Toast.makeText(this, getString(R.string.settings_clear_tb_hints_none), Toast.LENGTH_SHORT).show()
     }
   }
 

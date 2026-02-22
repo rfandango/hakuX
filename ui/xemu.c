@@ -1568,11 +1568,11 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
     /* Frame limiter: skip the expensive render/swap path when called faster
      * than ~60 Hz.  We still poll SDL events so input stays responsive. */
     {
-        static int64_t last_render_ns;
+        static int64_t next_render_ns;
         const int64_t min_frame_ns = 16000000; /* ~62.5 Hz ceiling */
         int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
 
-        if (last_render_ns && (now - last_render_ns) < min_frame_ns) {
+        if (next_render_ns && now < next_render_ns) {
             qemu_mutex_lock_main_loop();
             bql_lock();
             sdl2_poll_events(scon);
@@ -1581,7 +1581,11 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
             SDL_Delay(1);
             return;
         }
-        last_render_ns = now;
+        if (!next_render_ns || now > next_render_ns + min_frame_ns) {
+            next_render_ns = now + min_frame_ns;
+        } else {
+            next_render_ns += min_frame_ns;
+        }
     }
 
     if (SDL_GL_MakeCurrent(scon->real_window, scon->winctx) != 0 ||
@@ -1785,7 +1789,9 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
     bql_unlock();
     qemu_mutex_unlock_main_loop();
 
+#ifndef __ANDROID__
     glFinish();
+#endif
     nv2a_release_framebuffer_surface();
 #ifdef __ANDROID__
     android_log_gl_error("refresh-finish");

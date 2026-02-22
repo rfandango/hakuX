@@ -209,21 +209,42 @@ static int64_t nv2a_calc_vblank_period_ns(NV2AState *d)
 static void nv2a_vblank_timer_cb(void *opaque)
 {
     NV2AState *d = opaque;
+    int64_t period = nv2a_calc_vblank_period_ns(d);
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+
+    /*
+     * Adaptive VBLANK: if the game uses the flip mechanism and hasn't
+     * finished the current frame yet (waiting_for_flip is false while
+     * flip_active is true), defer the VBLANK interrupt. This prevents the
+     * game from seeing a "missed" deadline and dropping to 30fps. Cap the
+     * deferral at 3 attempts (~6ms) to avoid starving non-flip scenarios.
+     */
+    if (d->flip_active &&
+        !qatomic_read(&d->pgraph.waiting_for_flip) &&
+        d->vblank_defer_count < 3) {
+        d->vblank_defer_count++;
+        d->frame_skip = true;
+        timer_mod(d->vblank_timer, now + period / 8);
+        return;
+    }
+
+    d->vblank_defer_count = 0;
+    d->frame_skip = false;
+
     d->pcrtc.pending_interrupts |= NV_PCRTC_INTR_0_VBLANK;
     d->pcrtc.raster = 0;
     nv2a_update_irq(d);
 
-    int64_t period = nv2a_calc_vblank_period_ns(d);
-    timer_mod(d->vblank_timer,
-              qemu_clock_get_ns(QEMU_CLOCK_REALTIME) + period);
+    d->vblank_next_target_ns = now + period;
+    timer_mod(d->vblank_timer, d->vblank_next_target_ns);
 }
 
 void nv2a_vblank_recalc(NV2AState *d)
 {
     if (d->vblank_timer) {
         int64_t period = nv2a_calc_vblank_period_ns(d);
-        timer_mod(d->vblank_timer,
-                  qemu_clock_get_ns(QEMU_CLOCK_REALTIME) + period);
+        d->vblank_next_target_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME) + period;
+        timer_mod(d->vblank_timer, d->vblank_next_target_ns);
     }
 }
 
@@ -291,9 +312,11 @@ static void nv2a_init_vga(NV2AState *d)
 
     d->vblank_timer = timer_new_ns(QEMU_CLOCK_REALTIME,
                                    nv2a_vblank_timer_cb, d);
-    timer_mod(d->vblank_timer,
-              qemu_clock_get_ns(QEMU_CLOCK_REALTIME) +
-              NANOSECONDS_PER_SECOND / 60);
+    d->vblank_next_target_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME) +
+                               NANOSECONDS_PER_SECOND / 60;
+    d->flip_active = false;
+    d->vblank_defer_count = 0;
+    timer_mod(d->vblank_timer, d->vblank_next_target_ns);
 }
 
 static void nv2a_lock_fifo(NV2AState *d)
@@ -349,6 +372,9 @@ static void nv2a_reset(NV2AState *d)
 
     d->pgraph.waiting_for_nop = false;
     d->pgraph.waiting_for_flip = false;
+    d->flip_active = false;
+    d->vblank_defer_count = 0;
+    d->frame_skip = false;
     d->pgraph.waiting_for_context_switch = false;
 
     d->pmc.pending_interrupts = 0;

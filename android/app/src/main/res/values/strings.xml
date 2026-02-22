@@ -102,6 +102,15 @@
   <string name="settings_clear_cache_failed">Failed to clear cache partitions: %1$s</string>
   <string name="settings_clear_cache_no_hdd">No HDD image found. Run the setup wizard first.</string>
 
+  <string name="settings_code_cache_title">Code Cache</string>
+  <string name="settings_code_cache_desc">TCG translation block cache settings (requires restart)</string>
+  <string name="settings_tb_cache_size">Cache size</string>
+  <string name="settings_tb_cache_size_desc">Memory allocated for translated code blocks. Larger reduces stutter but uses more RAM.</string>
+  <string name="settings_clear_tb_hints">Clear cache hints</string>
+  <string name="settings_clear_tb_hints_desc">Delete pre-translated code block hints. Useful if experiencing crashes or stutter after game updates.</string>
+  <string name="settings_clear_tb_hints_success">Cache hints cleared.</string>
+  <string name="settings_clear_tb_hints_none">No cache hint files found.</string>
+
   <string name="settings_display_title">Display</string>
   <string name="settings_show_fps">Show FPS counter</string>
 </resources>

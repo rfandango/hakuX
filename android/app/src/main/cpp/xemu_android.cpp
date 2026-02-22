@@ -273,6 +273,28 @@ static std::string GetPrefString(JNIEnv* env, jobject activity, const char* key)
   return out;
 }
 
+static int GetPrefInt(JNIEnv* env, jobject activity, const char* key, int defaultValue) {
+  jclass activityClass = env->GetObjectClass(activity);
+  jmethodID getPrefs = env->GetMethodID(activityClass, "getSharedPreferences",
+                                        "(Ljava/lang/String;I)Landroid/content/SharedPreferences;");
+  if (!getPrefs) return defaultValue;
+  jstring prefsName = env->NewStringUTF(kPrefsName);
+  jobject prefs = env->CallObjectMethod(activity, getPrefs, prefsName, 0);
+  env->DeleteLocalRef(prefsName);
+  if (HasException(env, "getSharedPreferences") || !prefs) return defaultValue;
+
+  jclass prefsClass = env->GetObjectClass(prefs);
+  jmethodID getInt = env->GetMethodID(prefsClass, "getInt", "(Ljava/lang/String;I)I");
+  if (!getInt) return defaultValue;
+
+  jstring jkey = env->NewStringUTF(key);
+  jint result = env->CallIntMethod(prefs, getInt, jkey, (jint)defaultValue);
+  env->DeleteLocalRef(jkey);
+  if (HasException(env, "SharedPreferences.getInt")) return defaultValue;
+
+  return result;
+}
+
 static bool CopyUriToPath(JNIEnv* env, jobject activity, const std::string& uriString, const std::string& path) {
   if (uriString.empty() || path.empty()) return false;
 
@@ -342,7 +364,8 @@ static bool WriteConfigToml(const std::string& config_path,
                             const std::string& flash,
                             const std::string& hdd,
                             const std::string& dvd,
-                            const std::string& eeprom) {
+                            const std::string& eeprom,
+                            int tcg_tb_size = 128) {
   if (config_path.empty()) return false;
   toml::table tbl;
 
@@ -404,9 +427,7 @@ static bool WriteConfigToml(const std::string& config_path,
   if (!android->contains("tcg_thread")) {
     android->insert_or_assign("tcg_thread", "multi");
   }
-  if (!android->contains("tcg_tb_size")) {
-    android->insert_or_assign("tcg_tb_size", 128);
-  }
+  android->insert_or_assign("tcg_tb_size", tcg_tb_size);
 
   files->insert_or_assign("bootrom_path", mcpx);
   files->insert_or_assign("flashrom_path", flash);
@@ -518,7 +539,8 @@ static SetupFiles SyncSetupFiles() {
   }
 
   out.config_path = base + "/xemu.toml";
-  WriteConfigToml(out.config_path, out.mcpx, out.flash, out.hdd, out.dvd, out.eeprom);
+  int tbSize = GetPrefInt(env, activity, "tcg_tb_size", 128);
+  WriteConfigToml(out.config_path, out.mcpx, out.flash, out.hdd, out.dvd, out.eeprom, tbSize);
   LogInfoFmt("SyncSetupFiles: config %s", out.config_path.c_str());
   LogInfoFmt("Resolved mcpx=%s", out.mcpx.c_str());
   LogInfoFmt("Resolved flash=%s", out.flash.c_str());

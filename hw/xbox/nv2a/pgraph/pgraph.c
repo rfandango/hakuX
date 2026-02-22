@@ -457,6 +457,12 @@ void pgraph_destroy(PGRAPHState *pg)
     qemu_mutex_destroy(&pg->lock);
 }
 
+bool nv2a_should_skip_frame(void)
+{
+    NV2AState *d = g_nv2a;
+    return d && d->frame_skip;
+}
+
 int nv2a_get_framebuffer_surface(void)
 {
     NV2AState *d = g_nv2a;
@@ -1008,6 +1014,7 @@ DEF_METHOD(NV097, FLIP_STALL)
     d->pgraph.renderer->ops.flip_stall(d);
     nv2a_profile_flip_stall();
     pg->waiting_for_flip = true;
+    d->flip_active = true;
 }
 
 // TODO: these should be loading the dma objects from ramin here?
