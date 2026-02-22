@@ -82,7 +82,10 @@
  * implementations.  Helper function names are NOT renamed -- they keep
  * their normal undecorated symbols.
  */
-#if defined(XBOX) && defined(__aarch64__)
+#ifndef XEMU_OPT_NATIVE_FLOAT
+#define XEMU_OPT_NATIVE_FLOAT 1
+#endif
+#if defined(XBOX) && defined(__aarch64__) && XEMU_OPT_NATIVE_FLOAT
 
 #include <string.h>
 

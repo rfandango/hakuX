@@ -30,6 +30,10 @@
 #include "tcg-internal.h"
 #include "tcg-has.h"
 
+#ifndef XEMU_OPT_TCG_PEEPHOLE
+#define XEMU_OPT_TCG_PEEPHOLE 1
+#endif
+
 
 typedef struct MemCopyInfo {
     IntervalTreeNode itree;
@@ -1580,6 +1584,7 @@ static bool fold_bitsel_vec(OptContext *ctx, TCGOp *op)
 
 static bool fold_brcond(OptContext *ctx, TCGOp *op)
 {
+#if XEMU_OPT_TCG_PEEPHOLE
     /*
      * Peephole: fuse setcond + brcond.
      *
@@ -1614,6 +1619,7 @@ static bool fold_brcond(OptContext *ctx, TCGOp *op)
             tcg_op_remove(ctx->tcg, prev);
         }
     }
+#endif /* XEMU_OPT_TCG_PEEPHOLE */
 
     int i = do_constant_folding_cond1(ctx, op, NO_DEST, &op->args[0],
                                       &op->args[1], &op->args[2]);

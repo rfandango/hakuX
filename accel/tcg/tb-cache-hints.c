@@ -6,7 +6,11 @@
 
 #include "qemu/osdep.h"
 
-#ifdef XBOX
+#ifndef XEMU_OPT_TB_CACHE_HINTS
+#define XEMU_OPT_TB_CACHE_HINTS 1
+#endif
+
+#if defined(XBOX) && XEMU_OPT_TB_CACHE_HINTS
 
 #include "tb-cache-hints.h"
 #include "exec/translation-block.h"
@@ -561,4 +565,4 @@ void tb_cache_cleanup(void)
     loaded_count = 0;
 }
 
-#endif /* XBOX */
+#endif /* XBOX && XEMU_OPT_TB_CACHE_HINTS */

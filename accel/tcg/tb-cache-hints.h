@@ -17,7 +17,11 @@
 #include "exec/translation-block.h"
 #include "exec/cpu-common.h"
 
-#ifdef XBOX
+#ifndef XEMU_OPT_TB_CACHE_HINTS
+#define XEMU_OPT_TB_CACHE_HINTS 1
+#endif
+
+#if defined(XBOX) && XEMU_OPT_TB_CACHE_HINTS
 
 /*
  * A single translation-block hint (v2) -- the lookup key that
@@ -125,7 +129,7 @@ void tb_cache_rewarm_after_flush(CPUState *cpu);
  */
 void tb_cache_cleanup(void);
 
-#else /* !XBOX */
+#else /* !(XBOX && XEMU_OPT_TB_CACHE_HINTS) */
 
 static inline void tb_cache_record_hint(const TranslationBlock *tb) {}
 static inline void tb_cache_save(const char *path, uint32_t game_hash) {}
@@ -138,6 +142,6 @@ static inline void tb_cache_maybe_log_stats(void) {}
 static inline void tb_cache_rewarm_after_flush(CPUState *cpu) {}
 static inline void tb_cache_cleanup(void) {}
 
-#endif /* XBOX */
+#endif /* XBOX && XEMU_OPT_TB_CACHE_HINTS */
 
 #endif /* TB_CACHE_HINTS_H */

@@ -29,7 +29,10 @@
  * This trades exact IEEE exception tracking for significant performance gains.
  * Xbox games do not check MXCSR exception flags so this is safe for xemu.
  */
-#if defined(XBOX) && defined(__aarch64__) && !defined(OPS_SSE_NATIVE_FP_DEFINED)
+#ifndef XEMU_OPT_NATIVE_FLOAT
+#define XEMU_OPT_NATIVE_FLOAT 1
+#endif
+#if defined(XBOX) && defined(__aarch64__) && XEMU_OPT_NATIVE_FLOAT && !defined(OPS_SSE_NATIVE_FP_DEFINED)
 #define OPS_SSE_NATIVE_FP_DEFINED
 
 #include <string.h>
@@ -634,7 +637,7 @@ void glue(helper_pshufhw, SUFFIX)(Reg *d, Reg *s, int order)
 
 #endif
 
-#if defined(XBOX) && defined(__aarch64__)
+#if defined(XBOX) && defined(__aarch64__) && XEMU_OPT_NATIVE_FLOAT
 #define FPU_ADD(size, a, b) float ## size ## _add_native(a, b)
 #define FPU_SUB(size, a, b) float ## size ## _sub_native(a, b)
 #define FPU_MUL(size, a, b) float ## size ## _mul_native(a, b)
@@ -660,7 +663,7 @@ void glue(helper_pshufhw, SUFFIX)(Reg *d, Reg *s, int order)
  * float ops to process all 4 (PS) or 2 (PD) elements in a single
  * vector instruction instead of looping per-element.
  */
-#if defined(XBOX) && defined(__aarch64__) && SHIFT == 1
+#if defined(XBOX) && defined(__aarch64__) && XEMU_OPT_NATIVE_FLOAT && SHIFT == 1
 #include <arm_neon.h>
 
 void glue(helper_addps, SUFFIX)(CPUX86State *env, Reg *d, Reg *v, Reg *s)
@@ -840,7 +843,7 @@ SSE_HELPER_S(min, FPU_MIN)
 SSE_HELPER_S(max, FPU_MAX)
 #endif
 
-#if defined(XBOX) && defined(__aarch64__) && SHIFT == 1
+#if defined(XBOX) && defined(__aarch64__) && XEMU_OPT_NATIVE_FLOAT && SHIFT == 1
 void glue(helper_sqrtps, SUFFIX)(CPUX86State *env, Reg *d, Reg *s)
 {
     float32x4_t vs = vld1q_f32((const float *)&s->ZMM_S(0));
@@ -857,7 +860,7 @@ void glue(helper_sqrtps, SUFFIX)(CPUX86State *env, Reg *d, Reg *s)
 {
     int i;
     for (i = 0; i < 2 << SHIFT; i++) {
-#if defined(XBOX) && defined(__aarch64__)
+#if defined(XBOX) && defined(__aarch64__) && XEMU_OPT_NATIVE_FLOAT
         d->ZMM_S(i) = float32_sqrt_native(s->ZMM_S(i));
 #else
         d->ZMM_S(i) = float32_sqrt(s->ZMM_S(i), &env->sse_status);
@@ -869,7 +872,7 @@ void glue(helper_sqrtpd, SUFFIX)(CPUX86State *env, Reg *d, Reg *s)
 {
     int i;
     for (i = 0; i < 1 << SHIFT; i++) {
-#if defined(XBOX) && defined(__aarch64__)
+#if defined(XBOX) && defined(__aarch64__) && XEMU_OPT_NATIVE_FLOAT
         d->ZMM_D(i) = float64_sqrt_native(s->ZMM_D(i));
 #else
         d->ZMM_D(i) = float64_sqrt(s->ZMM_D(i), &env->sse_status);
@@ -882,7 +885,7 @@ void glue(helper_sqrtpd, SUFFIX)(CPUX86State *env, Reg *d, Reg *s)
 void helper_sqrtss(CPUX86State *env, Reg *d, Reg *v, Reg *s)
 {
     int i;
-#if defined(XBOX) && defined(__aarch64__)
+#if defined(XBOX) && defined(__aarch64__) && XEMU_OPT_NATIVE_FLOAT
     d->ZMM_S(0) = float32_sqrt_native(s->ZMM_S(0));
 #else
     d->ZMM_S(0) = float32_sqrt(s->ZMM_S(0), &env->sse_status);
@@ -895,7 +898,7 @@ void helper_sqrtss(CPUX86State *env, Reg *d, Reg *v, Reg *s)
 void helper_sqrtsd(CPUX86State *env, Reg *d, Reg *v, Reg *s)
 {
     int i;
-#if defined(XBOX) && defined(__aarch64__)
+#if defined(XBOX) && defined(__aarch64__) && XEMU_OPT_NATIVE_FLOAT
     d->ZMM_D(0) = float64_sqrt_native(s->ZMM_D(0));
 #else
     d->ZMM_D(0) = float64_sqrt(s->ZMM_D(0), &env->sse_status);
