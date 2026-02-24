@@ -235,19 +235,26 @@ static void nv2a_vblank_timer_cb(void *opaque)
      * timer_mod, so actual deferral latency is minimal.
      */
     /*
+     * Use the smoothed frame time to determine unlock mode. The EMA
+     * prevents thrashing between unlocked and normal mode when frame
+     * times jitter around the threshold boundary.
+     *
      * Only engage unlock mode when the game's frame time indicates
      * it is targeting ~60fps (within 1.5 VBLANK periods). Games
      * already running at 30fps (frame time ~2 periods) use normal
-     * deferral — unlock mode would eat their intermediate VBLANKs
-     * and disrupt frame-count-based timing.
+     * deferral so their intermediate VBLANKs are preserved for
+     * frame-count-based timing.
      */
+    int64_t effective_frame_ns = d->avg_frame_ns ? d->avg_frame_ns
+                                                 : d->last_frame_ns;
     bool unlocked = g_config.perf.unlock_framerate &&
-                    d->last_frame_ns > 0 &&
-                    d->last_frame_ns < period + period / 2;
+                    effective_frame_ns > 0 &&
+                    effective_frame_ns < period + period / 2;
     int64_t time_in_frame = d->last_flip_ns ? (now - d->last_flip_ns) : 0;
     int64_t defer_window = unlocked ? period * 3 : period + period / 4;
     int defer_cap = unlocked ? 16 : 4;
-    bool in_deferral_window = d->last_frame_ns > 0 &&
+    int64_t poll_interval = unlocked ? period / 16 : period / 8;
+    bool in_deferral_window = effective_frame_ns > 0 &&
                               time_in_frame < defer_window;
 
     if (in_deferral_window &&
@@ -256,7 +263,7 @@ static void nv2a_vblank_timer_cb(void *opaque)
         d->vblank_defer_count < defer_cap) {
         d->vblank_defer_count++;
         qatomic_set(&d->vblank_deferred, true);
-        timer_mod(d->vblank_timer, now + period / 8);
+        timer_mod(d->vblank_timer, now + poll_interval);
         return;
     }
 
@@ -289,10 +296,11 @@ static void nv2a_vblank_timer_cb(void *opaque)
      * for timing see a consistent rate.
      *
      * In unlocked mode, always reset from now so the next VBLANK fires
-     * one period after this one, preventing the game from seeing a
-     * backlog of missed VBLANKs that would cause a 30fps lock.
+     * one period after this one. Combined with FLIP_STALL rescheduling,
+     * this ensures the game drives the pacing: frames faster than 60fps
+     * get VBLANKs sooner, and slower frames aren't locked to 30fps.
      */
-    if (unlocked && was_deferred) {
+    if (unlocked) {
         d->vblank_next_target_ns = now + period;
     } else {
         d->vblank_next_target_ns += period;
@@ -382,6 +390,7 @@ static void nv2a_init_vga(NV2AState *d)
     d->vblank_defer_count = 0;
     d->last_flip_ns = 0;
     d->last_frame_ns = 0;
+    d->avg_frame_ns = 0;
     timer_mod(d->vblank_timer, d->vblank_next_target_ns);
 }
 
@@ -442,6 +451,7 @@ static void nv2a_reset(NV2AState *d)
     d->vblank_defer_count = 0;
     d->last_flip_ns = 0;
     d->last_frame_ns = 0;
+    d->avg_frame_ns = 0;
     d->vblank_deferred = false;
     d->pgraph.waiting_for_context_switch = false;
 

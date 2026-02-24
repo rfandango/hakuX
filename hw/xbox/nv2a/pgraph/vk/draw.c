@@ -835,7 +835,7 @@ static void create_pipeline(PGRAPHState *pg)
                       NV_PGRAPH_SETUPRASTER_FRONTFACE) ?
                           VK_FRONT_FACE_COUNTER_CLOCKWISE :
                           VK_FRONT_FACE_CLOCKWISE,
-        .depthBiasEnable = OPT_DYNAMIC_STATES ? VK_TRUE : VK_FALSE,
+        .depthBiasEnable = VK_FALSE,
         .pNext = rasterizer_next_struct,
     };
 
@@ -949,13 +949,12 @@ static void create_pipeline(PGRAPHState *pg)
         VK_DYNAMIC_STATE_SCISSOR,
 #if OPT_DYNAMIC_STATES
         VK_DYNAMIC_STATE_BLEND_CONSTANTS,
-        VK_DYNAMIC_STATE_DEPTH_BIAS,
         VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK,
         VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
         VK_DYNAMIC_STATE_STENCIL_REFERENCE,
 #endif
     };
-    int num_dynamic_states = OPT_DYNAMIC_STATES ? 7 : 2;
+    int num_dynamic_states = OPT_DYNAMIC_STATES ? 6 : 2;
 
     snode->has_dynamic_line_width =
         (r->enabled_physical_device_features.wideLines == VK_TRUE) &&
@@ -1607,19 +1606,11 @@ static void begin_draw(PGRAPHState *pg)
 
     if (!pg->clearing) {
 #if OPT_DYNAMIC_STATES
-        VK_LOG("begin_draw: setting dynamic state (blend/depth_bias/stencil)");
+        VK_LOG("begin_draw: setting dynamic state (blend/stencil)");
         float blend_constant[4] = { 0, 0, 0, 0 };
         uint32_t blend_color = pgraph_reg_r(pg, NV_PGRAPH_BLENDCOLOR);
         pgraph_argb_pack32_to_rgba_float(blend_color, blend_constant);
         vkCmdSetBlendConstants(r->command_buffer, blend_constant);
-
-        uint32_t zoffset_bias_raw = pgraph_reg_r(pg, NV_PGRAPH_ZOFFSETBIAS);
-        uint32_t zoffset_factor_raw = pgraph_reg_r(pg, NV_PGRAPH_ZOFFSETFACTOR);
-        float depth_bias_constant, depth_bias_slope;
-        memcpy(&depth_bias_constant, &zoffset_bias_raw, sizeof(float));
-        memcpy(&depth_bias_slope, &zoffset_factor_raw, sizeof(float));
-        vkCmdSetDepthBias(r->command_buffer, depth_bias_constant, 0.0f,
-                          depth_bias_slope);
 
         uint32_t control_1 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1);
         uint32_t stencil_ref = GET_MASK(control_1,

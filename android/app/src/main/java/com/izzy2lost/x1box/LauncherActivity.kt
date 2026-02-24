@@ -31,8 +31,9 @@ class LauncherActivity : Activity() {
     val hasMcpx = hasLocalFile(mcpxPath) || (mcpxUri != null && hasPersistedReadPermission(mcpxUri))
     val hasFlash = hasLocalFile(flashPath) || (flashUri != null && hasPersistedReadPermission(flashUri))
     val hasHdd = hasLocalFile(hddPath) || (hddUri != null && hasPersistedReadPermission(hddUri))
-    val hasDvd = hasLocalFile(dvdPath) || (dvdUri != null && hasPersistedReadPermission(dvdUri))
     val hasGamesFolder = gamesFolderUri != null && hasPersistedReadPermission(gamesFolderUri)
+    val hasDvd = hasLocalFile(dvdPath) || (dvdUri != null &&
+      (hasPersistedReadPermission(dvdUri) || hasGamesFolder))
 
     val editor = prefs.edit()
     var clearedCore = false

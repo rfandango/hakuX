@@ -17,7 +17,9 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <errno.h>
 #include <unistd.h>
 
@@ -633,14 +635,13 @@ static SetupFiles SyncSetupFiles() {
     int fd = OpenUriAsNativeFd(env, activity, dvdUri);
     if (fd >= 0) {
       g_dvd_fd = fd;
-      char fd_path[64];
-      snprintf(fd_path, sizeof(fd_path), "/proc/self/fd/%d", fd);
-      out.dvd = fd_path;
-      LogInfoFmt("DVD image opened via fd %s (zero-copy)", fd_path);
+      out.dvd = "/dev/fdset/0";
+      LogInfoInt("DVD image opened via fd %d (zero-copy, fdset)", fd);
     } else {
       LogError("Failed to open DVD URI as fd, falling back to copy");
-      out.dvd = base + "/dvd.iso";
-      if (CopyUriToPath(env, activity, dvdUri, out.dvd)) {
+      std::string copy_dst = base + "/dvd.iso";
+      if (CopyUriToPath(env, activity, dvdUri, copy_dst)) {
+        out.dvd = copy_dst;
         LogInfo("DVD image synced to app storage (fallback copy)");
       } else {
         LogError("Failed to sync DVD image");
@@ -712,6 +713,9 @@ extern "C" int xemu_android_main(int argc, char** argv) {
   auto t_init_end = SDL_GetTicks();
   __android_log_print(ANDROID_LOG_INFO, "xemu-android",
                       "qemu_init took %u ms", t_init_end - t_init_start);
+
+  /* qemu_init's cleanup_add_fd already closed the original fd */
+  g_dvd_fd = -1;
 
   /* Load translation block cache hints for pre-warming */
   const char *storage_load = SDL_AndroidGetInternalStoragePath();
@@ -828,7 +832,7 @@ extern "C" int SDL_main(int argc, char* argv[]) {
     }
     if (!setup.dvd.empty()) {
       xemu_settings_set_string(&g_config.sys.files.dvd_path, setup.dvd.c_str());
-    } else if (!g_config.sys.files.dvd_path) {
+    } else {
       xemu_settings_set_string(&g_config.sys.files.dvd_path, "");
     }
     if (!setup.eeprom.empty()) {
@@ -861,6 +865,18 @@ extern "C" int SDL_main(int argc, char* argv[]) {
       LogInfoFmt("SDL_main: using accel %s", accel_opts);
     } else {
       LogInfo("SDL_main: TCG tuning disabled");
+    }
+
+    if (g_dvd_fd >= 0) {
+      int flags = fcntl(g_dvd_fd, F_GETFD);
+      if (flags != -1 && (flags & FD_CLOEXEC)) {
+        fcntl(g_dvd_fd, F_SETFD, flags & ~FD_CLOEXEC);
+      }
+      char add_fd_arg[64];
+      snprintf(add_fd_arg, sizeof(add_fd_arg), "fd=%d,set=0", g_dvd_fd);
+      arg_storage.emplace_back("-add-fd");
+      arg_storage.emplace_back(add_fd_arg);
+      LogInfoInt("SDL_main: passing DVD fd %d via -add-fd", g_dvd_fd);
     }
 
     std::vector<char*> xemu_argv;

@@ -1013,17 +1013,32 @@ DEF_METHOD(NV097, FLIP_STALL)
     int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     if (d->last_flip_ns) {
         d->last_frame_ns = now - d->last_flip_ns;
+        if (d->avg_frame_ns == 0) {
+            d->avg_frame_ns = d->last_frame_ns;
+        } else {
+            d->avg_frame_ns = (d->avg_frame_ns * 7 + d->last_frame_ns) / 8;
+        }
     }
     d->last_flip_ns = now;
 
-    /*
-     * If the VBLANK timer is currently deferred (waiting for the game to
-     * finish), fire it immediately instead of waiting for the next retry
-     * tick. The timer callback will see waiting_for_flip=true and fire the
-     * VBLANK interrupt right away, eliminating up to 2ms of deferral jitter.
-     */
     if (qatomic_read(&d->vblank_deferred)) {
+        /*
+         * VBLANK is currently deferred (waiting for the game to finish).
+         * Fire it immediately instead of waiting for the next retry tick.
+         */
         timer_mod(d->vblank_timer, now);
+    } else if (g_config.perf.unlock_framerate) {
+        /*
+         * In unlocked mode, bring the next VBLANK forward so the game
+         * doesn't have to wait for the remainder of the current period.
+         * Use a short delay (1ms) to allow the interrupt to be processed
+         * cleanly.
+         */
+        int64_t soon = now + NANOSECONDS_PER_SECOND / 1000;
+        if (soon < d->vblank_next_target_ns) {
+            d->vblank_next_target_ns = soon;
+            timer_mod(d->vblank_timer, soon);
+        }
     }
 }
 

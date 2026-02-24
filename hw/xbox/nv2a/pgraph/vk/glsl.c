@@ -26,6 +26,11 @@
 #include <stdio.h>
 #include <sys/stat.h>
 
+static glslang_target_client_version_t g_glslang_client_version =
+    GLSLANG_TARGET_VULKAN_1_1;
+static glslang_target_language_version_t g_glslang_spv_version =
+    GLSLANG_TARGET_SPV_1_3;
+
 static const glslang_resource_t
     resource_limits = { .max_lights = 32,
                         .max_clip_planes = 6,
@@ -142,6 +147,20 @@ void pgraph_vk_finalize_glsl_compiler(void)
     glslang_finalize_process();
 }
 
+void pgraph_vk_set_glslang_target(uint32_t device_api_version)
+{
+    if (device_api_version >= VK_MAKE_API_VERSION(0, 1, 3, 0)) {
+        g_glslang_client_version = GLSLANG_TARGET_VULKAN_1_3;
+        g_glslang_spv_version = GLSLANG_TARGET_SPV_1_6;
+    } else if (device_api_version >= VK_MAKE_API_VERSION(0, 1, 2, 0)) {
+        g_glslang_client_version = GLSLANG_TARGET_VULKAN_1_2;
+        g_glslang_spv_version = GLSLANG_TARGET_SPV_1_5;
+    } else {
+        g_glslang_client_version = GLSLANG_TARGET_VULKAN_1_1;
+        g_glslang_spv_version = GLSLANG_TARGET_SPV_1_3;
+    }
+}
+
 GByteArray *pgraph_vk_compile_glsl_to_spv(glslang_stage_t stage,
                                           const char *glsl_source)
 {
@@ -149,9 +168,9 @@ GByteArray *pgraph_vk_compile_glsl_to_spv(glslang_stage_t stage,
         .language = GLSLANG_SOURCE_GLSL,
         .stage = stage,
         .client = GLSLANG_CLIENT_VULKAN,
-        .client_version = GLSLANG_TARGET_VULKAN_1_3,
+        .client_version = g_glslang_client_version,
         .target_language = GLSLANG_TARGET_SPV,
-        .target_language_version = GLSLANG_TARGET_SPV_1_6,
+        .target_language_version = g_glslang_spv_version,
         .code = glsl_source,
         .default_version = 460,
         .default_profile = GLSLANG_NO_PROFILE,

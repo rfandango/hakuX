@@ -194,7 +194,7 @@ static bool create_instance(PGRAPHState *pg, Error **errp)
             xemu_version_major, xemu_version_minor, xemu_version_patch),
         .pEngineName = "No Engine",
         .engineVersion = VK_MAKE_VERSION(1, 0, 0),
-        .apiVersion = VK_API_VERSION_1_1,
+        .apiVersion = VK_API_VERSION_1_3,
     };
 
     g_autoptr(VkExtensionPropertiesArray) available_extensions =
@@ -684,6 +684,16 @@ static bool create_logical_device(PGRAPHState *pg, Error **errp)
 
     void *next_struct = NULL;
 
+    VkPhysicalDeviceVulkan13Features vk13_features;
+    if (r->device_props.apiVersion >= VK_API_VERSION_1_3) {
+        memset(&vk13_features, 0, sizeof(vk13_features));
+        vk13_features.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+        vk13_features.shaderDemoteToHelperInvocation = VK_TRUE;
+        vk13_features.pNext = next_struct;
+        next_struct = &vk13_features;
+    }
+
     VkPhysicalDeviceCustomBorderColorFeaturesEXT custom_border_features;
     if (r->custom_border_color_extension_enabled) {
         custom_border_features = (VkPhysicalDeviceCustomBorderColorFeaturesEXT){
@@ -841,6 +851,10 @@ void pgraph_vk_init_instance(PGRAPHState *pg, Error **errp)
     if (!select_physical_device(pg, errp)) {
         goto done;
     }
+
+    pgraph_vk_set_glslang_target(
+        pg->vk_renderer_state->device_props.apiVersion);
+
 #ifdef __ANDROID__
     __android_log_print(ANDROID_LOG_INFO, "xemu-android",
                         "vk init stage: create_logical_device");

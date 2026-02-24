@@ -84,6 +84,7 @@ typedef struct NV2AState {
     int vblank_defer_count;
     int64_t last_flip_ns;
     int64_t last_frame_ns;
+    int64_t avg_frame_ns;
 
     MemoryRegion *vram;
     MemoryRegion vram_pci;
