@@ -102,6 +102,13 @@
   <string name="settings_clear_cache_failed">Failed to clear cache partitions: %1$s</string>
   <string name="settings_clear_cache_no_hdd">No HDD image found. Run the setup wizard first.</string>
 
+  <string name="settings_clear_shader_cache">Clear Shader Cache</string>
+  <string name="settings_clear_shader_cache_desc">Delete compiled SPIR-V shaders and the Vulkan pipeline cache. They will be rebuilt automatically. Useful after driver updates or if experiencing rendering glitches.</string>
+  <string name="settings_clear_shader_cache_confirm_title">Clear shader cache?</string>
+  <string name="settings_clear_shader_cache_confirm_message">This will delete all cached SPIR-V shaders and the Vulkan pipeline cache. The emulator will recompile them as needed, which may cause brief stutter on the next launch.</string>
+  <string name="settings_clear_shader_cache_success">Shader cache cleared.</string>
+  <string name="settings_clear_shader_cache_failed">Failed to clear shader cache: %1$s</string>
+
   <string name="settings_code_cache_title">Code Cache</string>
   <string name="settings_code_cache_desc">TCG translation block cache settings (requires restart)</string>
   <string name="settings_tb_cache_size">Cache size</string>

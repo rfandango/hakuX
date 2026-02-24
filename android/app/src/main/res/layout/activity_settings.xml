@@ -312,6 +312,23 @@
             android:text="@string/settings_validation_layers_desc"
             android:textAppearance="@style/TextAppearance.Material3.BodySmall"
             android:textColor="@color/xemu_text_muted" />
+
+          <!-- Clear Shader Cache -->
+          <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_clear_shader_cache"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/settings_clear_shader_cache" />
+          <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="4dp"
+            android:text="@string/settings_clear_shader_cache_desc"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            android:textColor="@color/xemu_text_muted" />
         </LinearLayout>
       </com.google.android.material.card.MaterialCardView>
 

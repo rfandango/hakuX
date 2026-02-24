@@ -432,10 +432,12 @@ ShaderModuleInfo *pgraph_vk_create_shader_module_from_glsl(
         GByteArray *cached = spv_cache_load(hash);
         if (cached) {
             info->spirv = cached;
+            g_nv2a_stats.shader_stats.spv_cache_hits++;
         } else {
             info->spirv = pgraph_vk_compile_glsl_to_spv(
                 vk_shader_stage_to_glslang_stage(stage), glsl);
             spv_cache_store(hash, info->spirv);
+            g_nv2a_stats.shader_stats.spv_cache_misses++;
         }
     } else {
         info->spirv = pgraph_vk_compile_glsl_to_spv(

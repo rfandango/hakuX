@@ -91,6 +91,10 @@ class SettingsActivity : AppCompatActivity() {
       confirmClearCache()
     }
 
+    findViewById<MaterialButton>(R.id.btn_clear_shader_cache).setOnClickListener {
+      confirmClearShaderCache()
+    }
+
     setupResolutionScale()
     setupFilteringPicker()
     setupAspectRatioPicker()
@@ -262,6 +266,30 @@ class SettingsActivity : AppCompatActivity() {
     if (inf.exists()) return internalPath
     Log.w(tag, "  no HDD image found at any candidate path")
     return null
+  }
+
+  private fun confirmClearShaderCache() {
+    MaterialAlertDialogBuilder(this)
+      .setTitle(R.string.settings_clear_shader_cache_confirm_title)
+      .setMessage(R.string.settings_clear_shader_cache_confirm_message)
+      .setPositiveButton(R.string.settings_clear_shader_cache) { _, _ ->
+        try {
+          val baseDir = File(filesDir, "xemu/xemu")
+          val spvDir = File(baseDir, "spv_cache")
+          if (spvDir.isDirectory) {
+            spvDir.listFiles()?.forEach { it.delete() }
+            spvDir.delete()
+          }
+          File(baseDir, "vk_pipeline_cache.bin").delete()
+          File(baseDir, "gpu_driver_id.bin").delete()
+          Toast.makeText(this, getString(R.string.settings_clear_shader_cache_success), Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+          Log.e("XemuShaderCache", "clearShaderCache failed", e)
+          Toast.makeText(this, getString(R.string.settings_clear_shader_cache_failed, e.message), Toast.LENGTH_LONG).show()
+        }
+      }
+      .setNegativeButton(android.R.string.cancel, null)
+      .show()
   }
 
   private fun confirmClearCache() {

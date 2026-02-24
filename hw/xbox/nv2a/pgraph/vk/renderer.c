@@ -19,12 +19,96 @@
 
 #include "hw/xbox/nv2a/nv2a_int.h"
 #include "renderer.h"
+#include "ui/xemu-settings.h"
 
 #include "gloffscreen.h"
+
+#include <sys/stat.h>
+#include <unistd.h>
 
 #ifdef __ANDROID__
 #include <android/log.h>
 #endif
+
+typedef struct {
+    uint32_t vendor_id;
+    uint32_t device_id;
+    uint32_t driver_version;
+    uint8_t  pipeline_cache_uuid[VK_UUID_SIZE];
+} GpuDriverIdentity;
+
+static void remove_directory_recursive(const char *path)
+{
+    GDir *dir = g_dir_open(path, 0, NULL);
+    if (!dir) {
+        return;
+    }
+    const gchar *name;
+    while ((name = g_dir_read_name(dir)) != NULL) {
+        gchar *child = g_build_filename(path, name, NULL);
+        if (g_file_test(child, G_FILE_TEST_IS_DIR)) {
+            remove_directory_recursive(child);
+        } else {
+            unlink(child);
+        }
+        g_free(child);
+    }
+    g_dir_close(dir);
+    rmdir(path);
+}
+
+static void check_driver_identity_and_wipe_caches(PGRAPHVkState *r)
+{
+    if (!g_config.perf.cache_shaders) {
+        return;
+    }
+
+    const char *base = xemu_settings_get_base_path();
+    char *id_path = g_strdup_printf("%sgpu_driver_id.bin", base);
+
+    GpuDriverIdentity current;
+    current.vendor_id = r->device_props.vendorID;
+    current.device_id = r->device_props.deviceID;
+    current.driver_version = r->device_props.driverVersion;
+    memcpy(current.pipeline_cache_uuid, r->device_props.pipelineCacheUUID,
+           VK_UUID_SIZE);
+
+    bool match = false;
+    gchar *data = NULL;
+    gsize len = 0;
+    if (g_file_get_contents(id_path, &data, &len, NULL) &&
+        len == sizeof(GpuDriverIdentity)) {
+        match = memcmp(data, &current, sizeof(GpuDriverIdentity)) == 0;
+    }
+    g_free(data);
+
+    if (!match) {
+        char *spv_dir = g_strdup_printf("%sspv_cache", base);
+        char *plc_path = g_strdup_printf("%svk_pipeline_cache.bin", base);
+
+        VK_LOG("Driver changed -- wiping shader and pipeline caches");
+#ifdef __ANDROID__
+        __android_log_print(ANDROID_LOG_INFO, "xemu-vk",
+            "Driver identity mismatch: wiping spv_cache and pipeline cache "
+            "(vendor=%04x device=%04x driverVer=%08x)",
+            current.vendor_id, current.device_id, current.driver_version);
+#else
+        fprintf(stderr, "xemu-vk: Driver identity mismatch: wiping caches "
+                "(vendor=%04x device=%04x driverVer=%08x)\n",
+                current.vendor_id, current.device_id, current.driver_version);
+#endif
+
+        remove_directory_recursive(spv_dir);
+        unlink(plc_path);
+        g_free(spv_dir);
+        g_free(plc_path);
+
+        g_file_set_contents(id_path, (const gchar *)&current,
+                            sizeof(GpuDriverIdentity), NULL);
+    }
+
+    g_free(id_path);
+}
 
 #if HAVE_EXTERNAL_MEMORY
 static GloContext *g_gl_context;
@@ -90,6 +174,8 @@ static void pgraph_vk_init(NV2AState *d, Error **errp)
     if (*errp) {
         return;
     }
+
+    check_driver_identity_and_wipe_caches(pg->vk_renderer_state);
 
     VK_LOG("init: command_buffers");
     pgraph_vk_init_command_buffers(pg);

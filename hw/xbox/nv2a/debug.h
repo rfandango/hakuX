@@ -138,6 +138,17 @@ typedef struct FramePacingStats {
     float vblank_jitter_ms;
 } FramePacingStats;
 
+typedef struct ShaderPipelineStats {
+    unsigned int pipeline_cache_hits;
+    unsigned int pipeline_cache_misses;
+    unsigned int shader_cache_hits;
+    unsigned int shader_cache_misses;
+    unsigned int spv_cache_hits;
+    unsigned int spv_cache_misses;
+    unsigned int pipeline_cache_disk_loaded;
+    unsigned int pipeline_cache_disk_saved;
+} ShaderPipelineStats;
+
 typedef struct NV2AStats {
     int64_t last_flip_time;
     unsigned int frame_count;
@@ -148,6 +159,7 @@ typedef struct NV2AStats {
     } frame_working, frame_history[NV2A_PROF_NUM_FRAMES];
     unsigned int frame_ptr;
     FramePacingStats pacing;
+    ShaderPipelineStats shader_stats;
 } NV2AStats;
 
 #ifdef __cplusplus
@@ -161,6 +173,7 @@ int nv2a_profile_get_counter_value(unsigned int cnt);
 void nv2a_profile_increment(void);
 void nv2a_profile_flip_stall(void);
 void nv2a_profile_get_pacing_str(char *buf, int bufsize);
+void nv2a_profile_get_shader_stats_str(char *buf, int bufsize);
 
 static inline void nv2a_profile_inc_counter(enum NV2A_PROF_COUNTERS_ENUM cnt)
 {

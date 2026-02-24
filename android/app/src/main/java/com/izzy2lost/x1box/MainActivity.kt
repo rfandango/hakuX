@@ -43,9 +43,11 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
         } catch (_: Exception) {}
       }
       val pacing = try { nativeGetFramePacing() } catch (_: Exception) { "" }
+      val shaderStats = try { nativeGetShaderStats() } catch (_: Exception) { "" }
       val sb = StringBuilder("FPS: $currentFps")
       if (driverInfoStr.isNotEmpty()) sb.append(" | $driverInfoStr")
       if (pacing.isNotEmpty()) sb.append("\n$pacing")
+      if (shaderStats.isNotEmpty()) sb.append("\n$shaderStats")
       fpsTextView?.text = sb.toString()
       fpsHandler.postDelayed(this, fpsUpdateInterval)
     }
@@ -54,6 +56,7 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
   private external fun nativeGetFps(): Int
   private external fun nativeGetDriverInfo(): String
   private external fun nativeGetFramePacing(): String
+  private external fun nativeGetShaderStats(): String
 
   override fun loadLibraries() {
     super.loadLibraries()
@@ -121,7 +124,7 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
       setShadowLayer(2f, 1f, 1f, Color.BLACK)
       setPadding(16, 8, 16, 8)
       setBackgroundColor(Color.argb(100, 0, 0, 0))
-      maxLines = 3
+      maxLines = 4
     }
     val params = RelativeLayout.LayoutParams(
       RelativeLayout.LayoutParams.WRAP_CONTENT,

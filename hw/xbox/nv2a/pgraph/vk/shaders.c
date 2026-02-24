@@ -265,6 +265,7 @@ static void shader_cache_entry_init(Lru *lru, LruNode *node, const void *state)
 
     NV2A_VK_DPRINTF("cache miss");
     nv2a_profile_inc_counter(NV2A_PROF_SHADER_GEN);
+    g_nv2a_stats.shader_stats.shader_cache_misses++;
 
     ShaderModuleCacheKey key;
 
@@ -422,8 +423,12 @@ static void shader_cache_finalize(PGRAPHState *pg)
 static ShaderBinding *get_shader_binding_for_state(PGRAPHVkState *r,
                                                    const ShaderState *state)
 {
+    unsigned int misses_before = g_nv2a_stats.shader_stats.shader_cache_misses;
     uint64_t hash = fast_hash((void *)state, sizeof(*state));
     LruNode *node = lru_lookup(&r->shader_cache, hash, state);
+    if (g_nv2a_stats.shader_stats.shader_cache_misses == misses_before) {
+        g_nv2a_stats.shader_stats.shader_cache_hits++;
+    }
     ShaderBinding *binding = container_of(node, ShaderBinding, node);
     NV2A_VK_DPRINTF("shader state hash: %016" PRIx64 " %p", hash, binding);
     return binding;

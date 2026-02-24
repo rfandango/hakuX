@@ -88,6 +88,21 @@ void nv2a_profile_get_pacing_str(char *buf, int bufsize)
     p->defers_total = 0;
 }
 
+void nv2a_profile_get_shader_stats_str(char *buf, int bufsize)
+{
+    ShaderPipelineStats *s = &g_nv2a_stats.shader_stats;
+    snprintf(buf, bufsize,
+             "P:%u/%u S:%u/%u SPV:%u/%u L:%s W:%u",
+             s->pipeline_cache_hits,
+             s->pipeline_cache_hits + s->pipeline_cache_misses,
+             s->shader_cache_hits,
+             s->shader_cache_hits + s->shader_cache_misses,
+             s->spv_cache_hits,
+             s->spv_cache_hits + s->spv_cache_misses,
+             s->pipeline_cache_disk_loaded ? "Y" : "N",
+             s->pipeline_cache_disk_saved);
+}
+
 const char *nv2a_profile_get_counter_name(unsigned int cnt)
 {
     const char *default_names[NV2A_PROF__COUNT] = {

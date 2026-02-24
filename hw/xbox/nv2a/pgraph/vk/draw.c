@@ -20,6 +20,7 @@
 #include "qemu/osdep.h"
 #include "qemu/fast-hash.h"
 #include "renderer.h"
+#include "ui/xemu-settings.h"
 #include "hw/xbox/nv2a/pgraph/prim_rewrite.h"
 #include <math.h>
 
@@ -104,15 +105,30 @@ static void init_pipeline_cache(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
 
+    void *initial_data = NULL;
+    gsize initial_size = 0;
+
+    if (g_config.perf.cache_shaders) {
+        const char *base = xemu_settings_get_base_path();
+        char *plc_path = g_strdup_printf("%svk_pipeline_cache.bin", base);
+        if (g_file_get_contents(plc_path, (gchar **)&initial_data,
+                                &initial_size, NULL)) {
+            VK_LOG("Loaded pipeline cache from disk (%zu bytes)", initial_size);
+            g_nv2a_stats.shader_stats.pipeline_cache_disk_loaded = 1;
+        }
+        g_free(plc_path);
+    }
+
     VkPipelineCacheCreateInfo cache_info = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
         .flags = 0,
-        .initialDataSize = 0,
-        .pInitialData = NULL,
+        .initialDataSize = initial_size,
+        .pInitialData = initial_data,
         .pNext = NULL,
     };
     VK_CHECK(vkCreatePipelineCache(r->device, &cache_info, NULL,
                                    &r->vk_pipeline_cache));
+    g_free(initial_data);
 
     const size_t pipeline_cache_size = 2048;
     lru_init(&r->pipeline_cache);
@@ -128,9 +144,50 @@ static void init_pipeline_cache(PGRAPHState *pg)
     r->pipeline_cache.post_node_evict = pipeline_cache_entry_post_evict;
 }
 
+static void save_pipeline_cache_to_disk(PGRAPHVkState *r)
+{
+    size_t size = 0;
+    VkResult res = vkGetPipelineCacheData(r->device, r->vk_pipeline_cache,
+                                          &size, NULL);
+    if (res == VK_SUCCESS && size > 0) {
+        void *data = g_malloc(size);
+        res = vkGetPipelineCacheData(r->device, r->vk_pipeline_cache,
+                                     &size, data);
+        if (res == VK_SUCCESS) {
+            const char *base = xemu_settings_get_base_path();
+            char *plc_path = g_strdup_printf("%svk_pipeline_cache.bin", base);
+            g_file_set_contents(plc_path, (const gchar *)data, size, NULL);
+            VK_LOG("Saved pipeline cache to disk (%zu bytes)", size);
+            g_nv2a_stats.shader_stats.pipeline_cache_disk_saved++;
+            g_free(plc_path);
+        }
+        g_free(data);
+    }
+}
+
+#define PIPELINE_CACHE_SAVE_INTERVAL_US (30 * 1000000LL)
+
+static void maybe_save_pipeline_cache(PGRAPHVkState *r)
+{
+    if (!g_config.perf.cache_shaders) {
+        return;
+    }
+    static int64_t last_save_us;
+    int64_t now = qemu_clock_get_us(QEMU_CLOCK_REALTIME);
+    if (last_save_us && (now - last_save_us) < PIPELINE_CACHE_SAVE_INTERVAL_US) {
+        return;
+    }
+    last_save_us = now;
+    save_pipeline_cache_to_disk(r);
+}
+
 static void finalize_pipeline_cache(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
+
+    if (g_config.perf.cache_shaders) {
+        save_pipeline_cache_to_disk(r);
+    }
 
     lru_flush(&r->pipeline_cache);
     g_free(r->pipeline_cache_entries);
@@ -447,6 +504,7 @@ static void create_clear_pipeline(PGRAPHState *pg)
 
     if (snode->pipeline != VK_NULL_HANDLE) {
         NV2A_VK_DPRINTF("Cache hit");
+        g_nv2a_stats.shader_stats.pipeline_cache_hits++;
         r->pipeline_binding_changed = r->pipeline_binding != snode;
         r->pipeline_binding = snode;
         NV2A_VK_DGROUP_END();
@@ -455,6 +513,7 @@ static void create_clear_pipeline(PGRAPHState *pg)
 
     NV2A_VK_DPRINTF("Cache miss");
     nv2a_profile_inc_counter(NV2A_PROF_PIPELINE_GEN);
+    g_nv2a_stats.shader_stats.pipeline_cache_misses++;
     memcpy(&snode->key, &key, sizeof(key));
 
     bool clear_any_color_channels =
@@ -615,6 +674,7 @@ static void create_clear_pipeline(PGRAPHState *pg)
     r->pipeline_binding = snode;
     r->pipeline_binding_changed = true;
 
+    maybe_save_pipeline_cache(r);
     NV2A_VK_DGROUP_END();
 }
 
@@ -748,6 +808,7 @@ static void create_pipeline(PGRAPHState *pg)
     PipelineBinding *snode = container_of(node, PipelineBinding, node);
     if (snode->pipeline != VK_NULL_HANDLE) {
         NV2A_VK_DPRINTF("Cache hit");
+        g_nv2a_stats.shader_stats.pipeline_cache_hits++;
         r->pipeline_binding_changed = r->pipeline_binding != snode;
         r->pipeline_binding = snode;
         NV2A_VK_DGROUP_END();
@@ -756,6 +817,7 @@ static void create_pipeline(PGRAPHState *pg)
 
     NV2A_VK_DPRINTF("Cache miss");
     nv2a_profile_inc_counter(NV2A_PROF_PIPELINE_GEN);
+    g_nv2a_stats.shader_stats.pipeline_cache_misses++;
 
     memcpy(&snode->key, &key, sizeof(key));
 
@@ -1045,6 +1107,7 @@ static void create_pipeline(PGRAPHState *pg)
     r->pipeline_binding = snode;
     r->pipeline_binding_changed = true;
 
+    maybe_save_pipeline_cache(r);
     NV2A_VK_DGROUP_END();
 }
 

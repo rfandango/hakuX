@@ -984,6 +984,14 @@ Java_com_izzy2lost_x1box_MainActivity_nativeGetFramePacing(JNIEnv *env, jobject)
     return env->NewStringUTF(buf);
 }
 
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_izzy2lost_x1box_MainActivity_nativeGetShaderStats(JNIEnv *env, jobject)
+{
+    char buf[256];
+    nv2a_profile_get_shader_stats_str(buf, sizeof(buf));
+    return env->NewStringUTF(buf);
+}
+
 extern "C" char g_vulkan_driver_info[256];
 
 extern "C" JNIEXPORT jstring JNICALL
