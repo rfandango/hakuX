@@ -128,6 +128,7 @@ static QemuSemaphore display_init_sem;
 static void toggle_full_screen(struct sdl2_console *scon);
 
 #ifdef __ANDROID__
+int bdrv_flush_all(void);
 static bool g_android_gl_bgra_supported = true;
 static bool g_android_use_hud = false;
 static bool g_android_paused = false;
@@ -819,14 +820,17 @@ void sdl2_poll_events(struct sdl2_console *scon)
 #ifdef __ANDROID__
         case SDL_APP_TERMINATING:
             g_android_should_quit = true;
+            bdrv_flush_all();
             __android_log_print(ANDROID_LOG_INFO, "xemu-android",
-                                "android: app terminating");
+                                "android: app terminating, flushed block devices");
             break;
         case SDL_APP_WILLENTERBACKGROUND:
-        case SDL_APP_DIDENTERBACKGROUND:
             g_android_paused = true;
+            bdrv_flush_all();
             __android_log_print(ANDROID_LOG_INFO, "xemu-android",
-                                "android: app background");
+                                "android: app entering background, flushed block devices");
+            break;
+        case SDL_APP_DIDENTERBACKGROUND:
             break;
         case SDL_APP_WILLENTERFOREGROUND:
         case SDL_APP_DIDENTERFOREGROUND:

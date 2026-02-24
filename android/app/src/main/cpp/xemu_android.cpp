@@ -533,7 +533,9 @@ static SetupFiles SyncSetupFiles() {
   }
   if (out.mcpx.empty() && !mcpxUri.empty()) {
     out.mcpx = base + "/mcpx.bin";
-    if (CopyUriToPath(env, activity, mcpxUri, out.mcpx)) {
+    if (FileExists(out.mcpx)) {
+      LogInfo("MCPX ROM already in app storage, skipping copy");
+    } else if (CopyUriToPath(env, activity, mcpxUri, out.mcpx)) {
       LogInfo("MCPX ROM synced to app storage");
     } else {
       LogError("Failed to sync MCPX ROM");
@@ -544,7 +546,9 @@ static SetupFiles SyncSetupFiles() {
   }
   if (out.flash.empty() && !flashUri.empty()) {
     out.flash = base + "/flash.bin";
-    if (CopyUriToPath(env, activity, flashUri, out.flash)) {
+    if (FileExists(out.flash)) {
+      LogInfo("Flash ROM already in app storage, skipping copy");
+    } else if (CopyUriToPath(env, activity, flashUri, out.flash)) {
       LogInfo("Flash ROM synced to app storage");
     } else {
       LogError("Failed to sync flash ROM");
@@ -555,7 +559,9 @@ static SetupFiles SyncSetupFiles() {
   }
   if (out.hdd.empty() && !hddUri.empty()) {
     out.hdd = base + "/hdd.img";
-    if (CopyUriToPath(env, activity, hddUri, out.hdd)) {
+    if (FileExists(out.hdd)) {
+      LogInfo("HDD image already in app storage, skipping copy");
+    } else if (CopyUriToPath(env, activity, hddUri, out.hdd)) {
       LogInfo("HDD image synced to app storage");
     } else {
       LogError("Failed to sync HDD image");
@@ -567,7 +573,9 @@ static SetupFiles SyncSetupFiles() {
   }
   if (out.dvd.empty() && !dvdUri.empty()) {
     out.dvd = base + "/dvd.iso";
-    if (CopyUriToPath(env, activity, dvdUri, out.dvd)) {
+    if (FileExists(out.dvd)) {
+      LogInfo("DVD image already in app storage, skipping copy");
+    } else if (CopyUriToPath(env, activity, dvdUri, out.dvd)) {
       LogInfo("DVD image synced to app storage");
     } else {
       LogError("Failed to sync DVD image");
@@ -631,7 +639,11 @@ extern "C" int xemu_android_main(int argc, char** argv) {
     return 1;
   }
   LogInfo("xemu_android_main: qemu_init");
+  auto t_init_start = SDL_GetTicks();
   qemu_init(argc, argv);
+  auto t_init_end = SDL_GetTicks();
+  __android_log_print(ANDROID_LOG_INFO, "xemu-android",
+                      "qemu_init took %u ms", t_init_end - t_init_start);
 
   /* Load translation block cache hints for pre-warming */
   const char *storage_load = SDL_AndroidGetInternalStoragePath();
@@ -684,7 +696,11 @@ extern "C" int SDL_main(int argc, char* argv[]) {
   SDL_GameControllerEventState(SDL_ENABLE);
   LoadGameControllerMappingsFromAssets();
 
+  auto t_sync_start = SDL_GetTicks();
   SetupFiles setup = SyncSetupFiles();
+  auto t_sync_end = SDL_GetTicks();
+  __android_log_print(ANDROID_LOG_INFO, "xemu-android",
+                      "SyncSetupFiles took %u ms", t_sync_end - t_sync_start);
 
   xemu_android_set_inline_aio_crash_flag_path(setup.inline_aio_flag_path.empty()
                                                    ? nullptr
