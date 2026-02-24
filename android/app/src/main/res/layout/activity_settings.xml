@@ -289,22 +289,12 @@
             android:text="Auto"
             android:textColor="@color/xemu_text_muted" />
 
-          <!-- Unlock Frame Rate -->
+          <!-- Unlock Frame Rate (hidden: always on) -->
           <com.google.android.material.materialswitch.MaterialSwitch
             android:id="@+id/switch_unlock_framerate"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="@string/settings_unlock_framerate"
-            android:textColor="@color/xemu_text_muted" />
-          <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="4dp"
-            android:layout_marginTop="2dp"
-            android:text="@string/settings_unlock_framerate_desc"
-            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-            android:textColor="@color/xemu_text_muted" />
+            android:visibility="gone" />
 
           <!-- Vulkan Validation Layers -->
           <com.google.android.material.materialswitch.MaterialSwitch

@@ -291,16 +291,20 @@ static void nv2a_vblank_timer_cb(void *opaque)
     nv2a_update_irq(d);
 
     /*
-     * Advance the VBLANK target. In normal mode, advance by exactly one
-     * period to maintain a fixed 60Hz grid so games that count VBLANKs
-     * for timing see a consistent rate.
+     * Advance the VBLANK target.
      *
-     * In unlocked mode, always reset from now so the next VBLANK fires
-     * one period after this one. Combined with FLIP_STALL rescheduling,
-     * this ensures the game drives the pacing: frames faster than 60fps
-     * get VBLANKs sooner, and slower frames aren't locked to 30fps.
+     * When the VBLANK was deferred (game missed the deadline), reset
+     * the grid from now so the game gets a full period for the next
+     * frame.  Without this, the grid advances from the *scheduled*
+     * position, leaving less than a full period and causing a cascade
+     * where every subsequent frame also misses -- locking the game to
+     * 30fps.
+     *
+     * When the game is on time (no deferral), advance the grid by
+     * exactly one period to maintain a strict 60Hz cadence for games
+     * that count VBLANKs for timing.
      */
-    if (unlocked) {
+    if (was_deferred || unlocked) {
         d->vblank_next_target_ns = now + period;
     } else {
         d->vblank_next_target_ns += period;

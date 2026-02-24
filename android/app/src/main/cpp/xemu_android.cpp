@@ -429,7 +429,7 @@ struct SetupFiles {
 struct DisplaySettings {
   int surface_scale = 1;
   bool vsync = false;
-  bool unlock_framerate = false;
+  bool unlock_framerate = true;
   bool validation_layers = false;
   std::string filtering = "nearest";
   std::string aspect_ratio = "auto";
@@ -657,7 +657,7 @@ static SetupFiles SyncSetupFiles() {
   if (ds.surface_scale < 1) ds.surface_scale = 1;
   if (ds.surface_scale > 4) ds.surface_scale = 4;
   ds.vsync = GetPrefBool(env, activity, "vsync", false);
-  ds.unlock_framerate = GetPrefBool(env, activity, "unlock_framerate", false);
+  ds.unlock_framerate = GetPrefBool(env, activity, "unlock_framerate", true);
   ds.validation_layers = GetPrefBool(env, activity, "validation_layers", false);
   std::string filterPref = GetPrefString(env, activity, "filtering");
   if (!filterPref.empty()) ds.filtering = filterPref;

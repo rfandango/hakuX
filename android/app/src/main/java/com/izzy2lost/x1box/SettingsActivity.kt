@@ -76,7 +76,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     val switchUnlockFps = findViewById<MaterialSwitch>(R.id.switch_unlock_framerate)
-    switchUnlockFps.isChecked = prefs.getBoolean("unlock_framerate", false)
+    switchUnlockFps.isChecked = prefs.getBoolean("unlock_framerate", true)
     switchUnlockFps.setOnCheckedChangeListener { _, checked ->
       prefs.edit().putBoolean("unlock_framerate", checked).apply()
     }

@@ -101,7 +101,7 @@ static void xemu_settings_apply_defaults(void)
 
     g_config.perf.hard_fpu = true;
     g_config.perf.cache_shaders = true;
-    g_config.perf.unlock_framerate = false;
+    g_config.perf.unlock_framerate = true;
 }
 
 // Optimized parsers - avoid string allocations

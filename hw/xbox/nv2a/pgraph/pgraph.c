@@ -1027,18 +1027,6 @@ DEF_METHOD(NV097, FLIP_STALL)
          * Fire it immediately instead of waiting for the next retry tick.
          */
         timer_mod(d->vblank_timer, now);
-    } else if (g_config.perf.unlock_framerate) {
-        /*
-         * In unlocked mode, bring the next VBLANK forward so the game
-         * doesn't have to wait for the remainder of the current period.
-         * Use a short delay (1ms) to allow the interrupt to be processed
-         * cleanly.
-         */
-        int64_t soon = now + NANOSECONDS_PER_SECOND / 1000;
-        if (soon < d->vblank_next_target_ns) {
-            d->vblank_next_target_ns = soon;
-            timer_mod(d->vblank_timer, soon);
-        }
     }
 }
 
