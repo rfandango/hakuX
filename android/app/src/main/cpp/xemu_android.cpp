@@ -428,6 +428,7 @@ struct DisplaySettings {
   int surface_scale = 1;
   bool vsync = false;
   bool unlock_framerate = false;
+  bool validation_layers = false;
   std::string filtering = "nearest";
   std::string aspect_ratio = "auto";
 };
@@ -488,6 +489,10 @@ static bool WriteConfigToml(const std::string& config_path,
   toml::table* display_ui = EnsureTable(*display, "ui");
   if (display_ui) {
     display_ui->insert_or_assign("aspect_ratio", ds.aspect_ratio);
+  }
+  toml::table* display_vulkan = EnsureTable(*display, "vulkan");
+  if (display_vulkan) {
+    display_vulkan->insert_or_assign("validation_layers", ds.validation_layers);
   }
   if (!audio_vp->contains("num_workers")) {
     audio_vp->insert_or_assign("num_workers", 0);
@@ -652,6 +657,7 @@ static SetupFiles SyncSetupFiles() {
   if (ds.surface_scale > 4) ds.surface_scale = 4;
   ds.vsync = GetPrefBool(env, activity, "vsync", false);
   ds.unlock_framerate = GetPrefBool(env, activity, "unlock_framerate", false);
+  ds.validation_layers = GetPrefBool(env, activity, "validation_layers", false);
   std::string filterPref = GetPrefString(env, activity, "filtering");
   if (!filterPref.empty()) ds.filtering = filterPref;
   std::string arPref = GetPrefString(env, activity, "aspect_ratio");

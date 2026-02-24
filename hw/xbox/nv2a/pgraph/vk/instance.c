@@ -54,7 +54,19 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
     VkDebugUtilsMessageTypeFlagsEXT messageType,
     const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData, void *pUserData)
 {
+#ifdef __ANDROID__
+    int prio = ANDROID_LOG_VERBOSE;
+    if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
+        prio = ANDROID_LOG_ERROR;
+    else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+        prio = ANDROID_LOG_WARN;
+    else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)
+        prio = ANDROID_LOG_INFO;
+    __android_log_print(prio, "xemu-vk-validation", "%s",
+                        pCallbackData->pMessage);
+#else
     fprintf(stderr, "[vk] %s\n", pCallbackData->pMessage);
+#endif
 
     if ((messageType & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT) &&
         (messageSeverity & (VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
@@ -215,6 +227,32 @@ static bool create_instance(PGRAPHState *pg, Error **errp)
 
     enable_validation = g_config.display.vulkan.validation_layers;
 
+#ifdef __ANDROID__
+    __android_log_print(ANDROID_LOG_INFO, "xemu-vk-validation",
+                        "validation_layers config = %d", enable_validation ? 1 : 0);
+    {
+        uint32_t n = 0;
+        vkEnumerateInstanceLayerProperties(&n, NULL);
+        __android_log_print(ANDROID_LOG_INFO, "xemu-vk-validation",
+                            "Available instance layers: %u", n);
+        if (n > 0) {
+            VkLayerProperties *lp = g_malloc_n(n, sizeof(VkLayerProperties));
+            vkEnumerateInstanceLayerProperties(&n, lp);
+            for (uint32_t i = 0; i < n; i++) {
+                __android_log_print(ANDROID_LOG_INFO, "xemu-vk-validation",
+                                    "  layer[%u]: %s", i, lp[i].layerName);
+            }
+            g_free(lp);
+        }
+    }
+    {
+        uint32_t n = 0;
+        vkEnumerateInstanceExtensionProperties(NULL, &n, NULL);
+        __android_log_print(ANDROID_LOG_INFO, "xemu-vk-validation",
+                            "Available instance extensions: %u", n);
+    }
+#endif
+
     VkValidationFeatureEnableEXT enables[] = {
         VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT,
         // VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT,
@@ -230,11 +268,20 @@ static bool create_instance(PGRAPHState *pg, Error **errp)
         if (check_validation_layer_support()) {
             fprintf(stderr, "Warning: Validation layers enabled. Expect "
                             "performance impact.\n");
+#ifdef __ANDROID__
+            __android_log_print(ANDROID_LOG_WARN, "xemu-vk-validation",
+                                "Validation layers ENABLED — expect performance impact");
+#endif
             create_info.enabledLayerCount = ARRAY_SIZE(validation_layers);
             create_info.ppEnabledLayerNames = validation_layers;
             create_info.pNext = &validationFeatures;
         } else {
             fprintf(stderr, "Warning: validation layers not available\n");
+#ifdef __ANDROID__
+            __android_log_print(ANDROID_LOG_ERROR, "xemu-vk-validation",
+                                "Validation layers requested but NOT AVAILABLE — "
+                                "push the layer .so via adb");
+#endif
             enable_validation = false;
         }
     }

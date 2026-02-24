@@ -264,6 +264,11 @@ bool xemu_settings_load(void)
             }
         }
 
+        auto display_vulkan = display["vulkan"];
+        if (auto vl = display_vulkan["validation_layers"].value<bool>()) {
+            g_config.display.vulkan.validation_layers = *vl;
+        }
+
         auto display_ui = display["ui"];
         if (auto ar = display_ui["aspect_ratio"].value<std::string>()) {
             if (*ar == "native" || *ar == "4:3") {

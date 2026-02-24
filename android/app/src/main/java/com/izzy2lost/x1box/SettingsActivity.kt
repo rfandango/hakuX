@@ -81,6 +81,12 @@ class SettingsActivity : AppCompatActivity() {
       prefs.edit().putBoolean("unlock_framerate", checked).apply()
     }
 
+    val switchValidation = findViewById<MaterialSwitch>(R.id.switch_validation_layers)
+    switchValidation.isChecked = prefs.getBoolean("validation_layers", false)
+    switchValidation.setOnCheckedChangeListener { _, checked ->
+      prefs.edit().putBoolean("validation_layers", checked).apply()
+    }
+
     findViewById<MaterialButton>(R.id.btn_clear_cache).setOnClickListener {
       confirmClearCache()
     }
