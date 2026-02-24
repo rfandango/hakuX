@@ -124,6 +124,20 @@ enum NV2A_PROF_COUNTERS_ENUM {
 
 #define NV2A_PROF_NUM_FRAMES 300
 
+typedef struct FramePacingStats {
+    float game_frame_ms;
+    float game_frame_min_ms;
+    float game_frame_max_ms;
+    float display_frame_ms;
+    float display_frame_min_ms;
+    float display_frame_max_ms;
+    float swap_ms;
+    unsigned int defers_total;
+    unsigned int defers_window;
+    unsigned int vblank_fired;
+    float vblank_jitter_ms;
+} FramePacingStats;
+
 typedef struct NV2AStats {
     int64_t last_flip_time;
     unsigned int frame_count;
@@ -133,6 +147,7 @@ typedef struct NV2AStats {
         int counters[NV2A_PROF__COUNT];
     } frame_working, frame_history[NV2A_PROF_NUM_FRAMES];
     unsigned int frame_ptr;
+    FramePacingStats pacing;
 } NV2AStats;
 
 #ifdef __cplusplus
@@ -145,6 +160,7 @@ const char *nv2a_profile_get_counter_name(unsigned int cnt);
 int nv2a_profile_get_counter_value(unsigned int cnt);
 void nv2a_profile_increment(void);
 void nv2a_profile_flip_stall(void);
+void nv2a_profile_get_pacing_str(char *buf, int bufsize);
 
 static inline void nv2a_profile_inc_counter(enum NV2A_PROF_COUNTERS_ENUM cnt)
 {

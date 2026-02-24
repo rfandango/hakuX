@@ -28,7 +28,7 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
   private val prefs by lazy { getSharedPreferences("x1box_prefs", MODE_PRIVATE) }
   private var fpsTextView: TextView? = null
   private val fpsHandler = Handler(Looper.getMainLooper())
-  private val fpsUpdateInterval = 500L
+  private val fpsUpdateInterval = 1000L
   private var driverInfoStr = ""
 
   private val fpsRunnable = object : Runnable {
@@ -42,17 +42,18 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
           }
         } catch (_: Exception) {}
       }
-      if (driverInfoStr.isNotEmpty()) {
-        fpsTextView?.text = "FPS: $currentFps | $driverInfoStr"
-      } else {
-        fpsTextView?.text = "FPS: $currentFps"
-      }
+      val pacing = try { nativeGetFramePacing() } catch (_: Exception) { "" }
+      val sb = StringBuilder("FPS: $currentFps")
+      if (driverInfoStr.isNotEmpty()) sb.append(" | $driverInfoStr")
+      if (pacing.isNotEmpty()) sb.append("\n$pacing")
+      fpsTextView?.text = sb.toString()
       fpsHandler.postDelayed(this, fpsUpdateInterval)
     }
   }
 
   private external fun nativeGetFps(): Int
   private external fun nativeGetDriverInfo(): String
+  private external fun nativeGetFramePacing(): String
 
   override fun loadLibraries() {
     super.loadLibraries()
@@ -115,10 +116,12 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
     fpsTextView = TextView(this).apply {
       text = "FPS: --"
       setTextColor(Color.WHITE)
-      setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+      setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
       typeface = Typeface.MONOSPACE
       setShadowLayer(2f, 1f, 1f, Color.BLACK)
       setPadding(16, 8, 16, 8)
+      setBackgroundColor(Color.argb(100, 0, 0, 0))
+      maxLines = 3
     }
     val params = RelativeLayout.LayoutParams(
       RelativeLayout.LayoutParams.WRAP_CONTENT,

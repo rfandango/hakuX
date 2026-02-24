@@ -206,6 +206,8 @@ static int64_t nv2a_calc_vblank_period_ns(NV2AState *d)
     return 16683750;
 }
 
+static int64_t s_last_vblank_fire_ns;
+
 static void nv2a_vblank_timer_cb(void *opaque)
 {
     NV2AState *d = opaque;
@@ -213,37 +215,79 @@ static void nv2a_vblank_timer_cb(void *opaque)
     int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
 
     /*
-     * Adaptive VBLANK: if the game uses the flip mechanism and hasn't
-     * finished the current frame yet (waiting_for_flip is false while
-     * flip_active is true), defer the VBLANK interrupt. This prevents the
-     * game from seeing a "missed" deadline and dropping to 30fps. Cap the
-     * deferral at 3 attempts (~6ms) to avoid starving non-flip scenarios.
+     * Adaptive VBLANK: defer only for games targeting ~60fps that barely
+     * miss the VBLANK deadline.
+     *
+     * Key insight: for games running at 30fps or slower, at least one
+     * VBLANK has already fired since the last FLIP, so READ_3D was
+     * already incremented. FLIP_STALL returns immediately (READ != WRITE).
+     * Deferring subsequent VBLANKs only delays the next READ increment
+     * with no benefit -- it adds jitter and wastes cycles.
+     *
+     * Deferral is only useful within the first VBLANK period after the
+     * last FLIP (time_in_frame < ~1.25 periods), where the game is about
+     * to call FLIP and the VBLANK hasn't incremented READ yet. Deferring
+     * gives the game a few extra ms to call FLIP_INCREMENT_WRITE before
+     * the VBLANK fires, preventing a "missed deadline" detection.
      */
-    if (d->flip_active &&
+    int64_t time_in_frame = d->last_flip_ns ? (now - d->last_flip_ns) : 0;
+    bool first_vblank_window = d->last_frame_ns > 0 &&
+                               time_in_frame < period + period / 4;
+
+    if (first_vblank_window &&
+        d->flip_active &&
         !qatomic_read(&d->pgraph.waiting_for_flip) &&
-        d->vblank_defer_count < 3) {
+        d->vblank_defer_count < 4) {
         d->vblank_defer_count++;
-        d->frame_skip = true;
+        qatomic_set(&d->vblank_deferred, true);
         timer_mod(d->vblank_timer, now + period / 8);
         return;
     }
 
+    bool was_deferred = d->vblank_defer_count > 0;
     d->vblank_defer_count = 0;
-    d->frame_skip = false;
+    qatomic_set(&d->vblank_deferred, false);
+
+    /* Track VBLANK firing stats */
+    g_nv2a_stats.pacing.vblank_fired++;
+    if (was_deferred) {
+        g_nv2a_stats.pacing.defers_total++;
+    }
+    if (s_last_vblank_fire_ns) {
+        float delta_ms = (float)(now - s_last_vblank_fire_ns) / 1e6f;
+        float expected_ms = (float)period / 1e6f;
+        float jitter = delta_ms - expected_ms;
+        if (jitter < 0) jitter = -jitter;
+        g_nv2a_stats.pacing.vblank_jitter_ms =
+            g_nv2a_stats.pacing.vblank_jitter_ms * 0.9f + jitter * 0.1f;
+    }
+    s_last_vblank_fire_ns = now;
 
     d->pcrtc.pending_interrupts |= NV_PCRTC_INTR_0_VBLANK;
     d->pcrtc.raster = 0;
     nv2a_update_irq(d);
 
-    /*
-     * Maintain fixed-rate schedule: advance the target by one period rather
-     * than resetting from 'now'. This prevents deferrals from shifting the
-     * entire VBLANK timeline (which would turn 30fps games into ~25fps).
-     * Only reset from 'now' if we've fallen more than a full period behind.
-     */
-    d->vblank_next_target_ns += period;
-    if (d->vblank_next_target_ns < now - period) {
+    if (was_deferred) {
+        /*
+         * After a deferral, realign the VBLANK grid to when this VBLANK
+         * actually fired. This gives the game a full frame budget from
+         * its real start time, preventing cascading deferrals where each
+         * slightly-late frame steals time from the next.
+         *
+         * This is safe because near_frame_end prevents intermediate
+         * VBLANKs from being deferred, so cumulative drift cannot occur.
+         */
         d->vblank_next_target_ns = now + period;
+    } else {
+        /*
+         * No deferral: advance the target by one period to maintain the
+         * fixed-rate grid. Reset from 'now' only if more than a full
+         * period behind (e.g. after emulator pause/lag spike).
+         */
+        d->vblank_next_target_ns += period;
+        if (d->vblank_next_target_ns < now - period) {
+            d->vblank_next_target_ns = now + period;
+        }
     }
     timer_mod(d->vblank_timer, d->vblank_next_target_ns);
 }
@@ -325,6 +369,8 @@ static void nv2a_init_vga(NV2AState *d)
                                NANOSECONDS_PER_SECOND / 60;
     d->flip_active = false;
     d->vblank_defer_count = 0;
+    d->last_flip_ns = 0;
+    d->last_frame_ns = 0;
     timer_mod(d->vblank_timer, d->vblank_next_target_ns);
 }
 
@@ -383,7 +429,9 @@ static void nv2a_reset(NV2AState *d)
     d->pgraph.waiting_for_flip = false;
     d->flip_active = false;
     d->vblank_defer_count = 0;
-    d->frame_skip = false;
+    d->last_flip_ns = 0;
+    d->last_frame_ns = 0;
+    d->vblank_deferred = false;
     d->pgraph.waiting_for_context_switch = false;
 
     d->pmc.pending_interrupts = 0;

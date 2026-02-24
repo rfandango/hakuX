@@ -79,9 +79,11 @@ typedef struct NV2AState {
     GraphicHwOps hw_ops;
     QEMUTimer *vblank_timer;
     int64_t vblank_next_target_ns;
-    bool frame_skip;
+    bool vblank_deferred;
     bool flip_active;
     int vblank_defer_count;
+    int64_t last_flip_ns;
+    int64_t last_frame_ns;
 
     MemoryRegion *vram;
     MemoryRegion vram_pci;

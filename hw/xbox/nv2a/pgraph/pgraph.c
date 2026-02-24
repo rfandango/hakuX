@@ -457,12 +457,6 @@ void pgraph_destroy(PGRAPHState *pg)
     qemu_mutex_destroy(&pg->lock);
 }
 
-bool nv2a_should_skip_frame(void)
-{
-    NV2AState *d = g_nv2a;
-    return d && d->frame_skip;
-}
-
 int nv2a_get_framebuffer_surface(void)
 {
     NV2AState *d = g_nv2a;
@@ -1015,6 +1009,22 @@ DEF_METHOD(NV097, FLIP_STALL)
     nv2a_profile_flip_stall();
     pg->waiting_for_flip = true;
     d->flip_active = true;
+
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+    if (d->last_flip_ns) {
+        d->last_frame_ns = now - d->last_flip_ns;
+    }
+    d->last_flip_ns = now;
+
+    /*
+     * If the VBLANK timer is currently deferred (waiting for the game to
+     * finish), fire it immediately instead of waiting for the next retry
+     * tick. The timer callback will see waiting_for_flip=true and fire the
+     * VBLANK interrupt right away, eliminating up to 2ms of deferral jitter.
+     */
+    if (qatomic_read(&d->vblank_deferred)) {
+        timer_mod(d->vblank_timer, now);
+    }
 }
 
 // TODO: these should be loading the dma objects from ramin here?

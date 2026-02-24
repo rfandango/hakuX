@@ -55,6 +55,7 @@
 
 #include "hw/xbox/smbus.h" // For eject, drive tray
 #include "hw/xbox/nv2a/nv2a.h"
+#include "hw/xbox/nv2a/debug.h"
 #include "ui/xemu-notifications.h"
 
 #include <stb_image.h>
@@ -1565,11 +1566,10 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
     }
 #endif
 
-    /* Frame limiter: skip the expensive render/swap path when called faster
-     * than ~60 Hz.  We still poll SDL events so input stays responsive. */
+    /* Frame limiter: cap the render/swap path at ~60 Hz. */
     {
         static int64_t next_render_ns;
-        const int64_t min_frame_ns = 16000000; /* ~62.5 Hz ceiling */
+        const int64_t min_frame_ns = 16666667; /* 60 Hz */
         int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
 
         if (next_render_ns && now < next_render_ns) {
@@ -1581,6 +1581,7 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
             SDL_Delay(1);
             return;
         }
+        now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
         if (!next_render_ns || now > next_render_ns + min_frame_ns) {
             next_render_ns = now + min_frame_ns;
         } else {

@@ -51,6 +51,41 @@ void nv2a_profile_flip_stall(void)
         (g_nv2a_stats.frame_ptr + 1) % NV2A_PROF_NUM_FRAMES;
     g_nv2a_stats.frame_count++;
     memset(&g_nv2a_stats.frame_working, 0, sizeof(g_nv2a_stats.frame_working));
+
+    /* Track game frame time (flip-to-flip interval) */
+    static int64_t prev_flip_us;
+    if (prev_flip_us) {
+        float frame_ms = (float)(now - prev_flip_us) / 1000.0f;
+        FramePacingStats *p = &g_nv2a_stats.pacing;
+        p->game_frame_ms = p->game_frame_ms * 0.8f + frame_ms * 0.2f;
+        if (frame_ms < p->game_frame_min_ms || p->game_frame_min_ms == 0)
+            p->game_frame_min_ms = frame_ms;
+        if (frame_ms > p->game_frame_max_ms)
+            p->game_frame_max_ms = frame_ms;
+    }
+    prev_flip_us = now;
+}
+
+void nv2a_profile_get_pacing_str(char *buf, int bufsize)
+{
+    FramePacingStats *p = &g_nv2a_stats.pacing;
+    snprintf(buf, bufsize,
+             "G:%.1f(%.1f-%.1f) D:%.1f(%.1f-%.1f) S:%.1f J:%.1f Df:%u",
+             p->game_frame_ms,
+             p->game_frame_min_ms,
+             p->game_frame_max_ms,
+             p->display_frame_ms,
+             p->display_frame_min_ms,
+             p->display_frame_max_ms,
+             p->swap_ms,
+             p->vblank_jitter_ms,
+             p->defers_total);
+    /* Reset min/max every call so the window reflects recent behavior */
+    p->game_frame_min_ms = 0;
+    p->game_frame_max_ms = 0;
+    p->display_frame_min_ms = 0;
+    p->display_frame_max_ms = 0;
+    p->defers_total = 0;
 }
 
 const char *nv2a_profile_get_counter_name(unsigned int cnt)
