@@ -235,7 +235,16 @@ static void nv2a_vblank_timer_cb(void *opaque)
     d->pcrtc.raster = 0;
     nv2a_update_irq(d);
 
-    d->vblank_next_target_ns = now + period;
+    /*
+     * Maintain fixed-rate schedule: advance the target by one period rather
+     * than resetting from 'now'. This prevents deferrals from shifting the
+     * entire VBLANK timeline (which would turn 30fps games into ~25fps).
+     * Only reset from 'now' if we've fallen more than a full period behind.
+     */
+    d->vblank_next_target_ns += period;
+    if (d->vblank_next_target_ns < now - period) {
+        d->vblank_next_target_ns = now + period;
+    }
     timer_mod(d->vblank_timer, d->vblank_next_target_ns);
 }
 
