@@ -117,4 +117,6 @@
   <string name="settings_resolution_scale_desc">Internal rendering resolution multiplier (requires restart)</string>
   <string name="settings_filtering">Texture Filtering</string>
   <string name="settings_aspect_ratio">Aspect Ratio</string>
+  <string name="settings_unlock_framerate">Unlock frame rate</string>
+  <string name="settings_unlock_framerate_desc">Prevents frame rate from locking to 30 FPS when the device can\'t sustain 60 FPS. May affect game speed.</string>
 </resources>

@@ -41,6 +41,8 @@ extern "C" PFN_vkGetInstanceProcAddr xemu_android_get_vk_proc_addr(void)
 }
 #endif
 
+static int g_dvd_fd = -1;
+
 namespace {
 constexpr const char* kLogTag = "xemu-android";
 constexpr const char* kPrefsName = "x1box_prefs";
@@ -317,6 +319,47 @@ static bool GetPrefBool(JNIEnv* env, jobject activity, const char* key, bool def
   return result;
 }
 
+static int OpenUriAsNativeFd(JNIEnv* env, jobject activity, const std::string& uriString) {
+  if (uriString.empty()) return -1;
+
+  jclass activityClass = env->GetObjectClass(activity);
+  jmethodID getContentResolver = env->GetMethodID(activityClass, "getContentResolver",
+                                                   "()Landroid/content/ContentResolver;");
+  if (!getContentResolver) return -1;
+  jobject resolver = env->CallObjectMethod(activity, getContentResolver);
+  if (HasException(env, "getContentResolver") || !resolver) return -1;
+
+  jclass uriClass = env->FindClass("android/net/Uri");
+  jmethodID parse = env->GetStaticMethodID(uriClass, "parse", "(Ljava/lang/String;)Landroid/net/Uri;");
+  jstring juri = env->NewStringUTF(uriString.c_str());
+  jobject uri = env->CallStaticObjectMethod(uriClass, parse, juri);
+  env->DeleteLocalRef(juri);
+  if (HasException(env, "Uri.parse") || !uri) return -1;
+
+  jclass resolverClass = env->GetObjectClass(resolver);
+  jmethodID openFd = env->GetMethodID(resolverClass, "openFileDescriptor",
+      "(Landroid/net/Uri;Ljava/lang/String;)Landroid/os/ParcelFileDescriptor;");
+  if (!openFd) return -1;
+
+  jstring mode = env->NewStringUTF("r");
+  jobject pfd = env->CallObjectMethod(resolver, openFd, uri, mode);
+  env->DeleteLocalRef(mode);
+  if (HasException(env, "openFileDescriptor") || !pfd) return -1;
+
+  jclass pfdClass = env->GetObjectClass(pfd);
+  jmethodID detach = env->GetMethodID(pfdClass, "detachFd", "()I");
+  if (!detach) {
+    jmethodID closePfd = env->GetMethodID(pfdClass, "close", "()V");
+    if (closePfd) env->CallVoidMethod(pfd, closePfd);
+    return -1;
+  }
+
+  jint fd = env->CallIntMethod(pfd, detach);
+  if (HasException(env, "ParcelFileDescriptor.detachFd")) return -1;
+
+  return static_cast<int>(fd);
+}
+
 static bool CopyUriToPath(JNIEnv* env, jobject activity, const std::string& uriString, const std::string& path) {
   if (uriString.empty() || path.empty()) return false;
 
@@ -384,6 +427,7 @@ struct SetupFiles {
 struct DisplaySettings {
   int surface_scale = 1;
   bool vsync = false;
+  bool unlock_framerate = false;
   std::string filtering = "nearest";
   std::string aspect_ratio = "auto";
 };
@@ -464,6 +508,11 @@ static bool WriteConfigToml(const std::string& config_path,
     android->insert_or_assign("tcg_thread", "multi");
   }
   android->insert_or_assign("tcg_tb_size", tcg_tb_size);
+
+  toml::table* perf = EnsureTable(tbl, "perf");
+  if (perf) {
+    perf->insert_or_assign("unlock_framerate", ds.unlock_framerate);
+  }
 
   files->insert_or_assign("bootrom_path", mcpx);
   files->insert_or_assign("flashrom_path", flash);
@@ -572,13 +621,25 @@ static SetupFiles SyncSetupFiles() {
     out.dvd = dvdPath;
   }
   if (out.dvd.empty() && !dvdUri.empty()) {
-    out.dvd = base + "/dvd.iso";
-    if (FileExists(out.dvd)) {
-      LogInfo("DVD image already in app storage, skipping copy");
-    } else if (CopyUriToPath(env, activity, dvdUri, out.dvd)) {
-      LogInfo("DVD image synced to app storage");
+    if (g_dvd_fd >= 0) {
+      close(g_dvd_fd);
+      g_dvd_fd = -1;
+    }
+    int fd = OpenUriAsNativeFd(env, activity, dvdUri);
+    if (fd >= 0) {
+      g_dvd_fd = fd;
+      char fd_path[64];
+      snprintf(fd_path, sizeof(fd_path), "/proc/self/fd/%d", fd);
+      out.dvd = fd_path;
+      LogInfoFmt("DVD image opened via fd %s (zero-copy)", fd_path);
     } else {
-      LogError("Failed to sync DVD image");
+      LogError("Failed to open DVD URI as fd, falling back to copy");
+      out.dvd = base + "/dvd.iso";
+      if (CopyUriToPath(env, activity, dvdUri, out.dvd)) {
+        LogInfo("DVD image synced to app storage (fallback copy)");
+      } else {
+        LogError("Failed to sync DVD image");
+      }
     }
   }
 
@@ -590,6 +651,7 @@ static SetupFiles SyncSetupFiles() {
   if (ds.surface_scale < 1) ds.surface_scale = 1;
   if (ds.surface_scale > 4) ds.surface_scale = 4;
   ds.vsync = GetPrefBool(env, activity, "vsync", false);
+  ds.unlock_framerate = GetPrefBool(env, activity, "unlock_framerate", false);
   std::string filterPref = GetPrefString(env, activity, "filtering");
   if (!filterPref.empty()) ds.filtering = filterPref;
   std::string arPref = GetPrefString(env, activity, "aspect_ratio");
@@ -674,6 +736,11 @@ extern "C" int xemu_android_main(int argc, char** argv) {
     tb_cache_save(cache_path, game_hash);
   }
   tb_cache_cleanup();
+
+  if (g_dvd_fd >= 0) {
+    close(g_dvd_fd);
+    g_dvd_fd = -1;
+  }
 
   return rc;
 }

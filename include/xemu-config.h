@@ -288,6 +288,7 @@ struct config {
     struct perf {
         bool hard_fpu;
         bool cache_shaders;
+        bool unlock_framerate;
     } perf;
 };
 

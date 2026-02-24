@@ -21,6 +21,7 @@
 
 #include "hw/xbox/nv2a/nv2a_int.h"
 #include "qemu/main-loop.h"
+#include "ui/xemu-settings.h"
 
 void nv2a_update_irq(NV2AState *d)
 {
@@ -216,23 +217,43 @@ static void nv2a_vblank_timer_cb(void *opaque)
 
     /*
      * Adaptive VBLANK: defer this VBLANK when the game is actively
-     * rendering and barely missed the deadline. The window covers
-     * ~1.25 VBLANK periods after the last FLIP call, targeting games
-     * that take slightly longer than one period to render.
+     * rendering and barely missed the deadline.
+     *
+     * In normal mode, the deferral window covers ~1.25 VBLANK periods
+     * after the last FLIP call, targeting games that take slightly
+     * longer than one period to render.
+     *
+     * "Unlock framerate" mode widens the window and cap, but only
+     * engages when the game's frame time is near one VBLANK period
+     * (i.e. targeting ~60fps). 30fps games (frame time ~2 periods)
+     * always use normal deferral so their intermediate VBLANKs are
+     * preserved for frame-count-based timing.
      *
      * The !waiting_for_flip check ensures we never defer a VBLANK
      * that the game is actively waiting for. When the game calls
      * FLIP_STALL, it fires the deferred VBLANK immediately via
      * timer_mod, so actual deferral latency is minimal.
      */
+    /*
+     * Only engage unlock mode when the game's frame time indicates
+     * it is targeting ~60fps (within 1.5 VBLANK periods). Games
+     * already running at 30fps (frame time ~2 periods) use normal
+     * deferral — unlock mode would eat their intermediate VBLANKs
+     * and disrupt frame-count-based timing.
+     */
+    bool unlocked = g_config.perf.unlock_framerate &&
+                    d->last_frame_ns > 0 &&
+                    d->last_frame_ns < period + period / 2;
     int64_t time_in_frame = d->last_flip_ns ? (now - d->last_flip_ns) : 0;
+    int64_t defer_window = unlocked ? period * 3 : period + period / 4;
+    int defer_cap = unlocked ? 16 : 4;
     bool in_deferral_window = d->last_frame_ns > 0 &&
-                              time_in_frame < period + period / 4;
+                              time_in_frame < defer_window;
 
     if (in_deferral_window &&
         d->flip_active &&
         !qatomic_read(&d->pgraph.waiting_for_flip) &&
-        d->vblank_defer_count < 4) {
+        d->vblank_defer_count < defer_cap) {
         d->vblank_defer_count++;
         qatomic_set(&d->vblank_deferred, true);
         timer_mod(d->vblank_timer, now + period / 8);
@@ -263,17 +284,21 @@ static void nv2a_vblank_timer_cb(void *opaque)
     nv2a_update_irq(d);
 
     /*
-     * Advance the VBLANK target by exactly one period to maintain a fixed
-     * 60Hz grid. This ensures games that count VBLANKs for timing see a
-     * consistent rate regardless of deferrals.
+     * Advance the VBLANK target. In normal mode, advance by exactly one
+     * period to maintain a fixed 60Hz grid so games that count VBLANKs
+     * for timing see a consistent rate.
      *
-     * If the next target has already passed (deferral pushed us past it,
-     * or emulator pause/lag spike), reset to now + period to avoid
-     * firing multiple VBLANKs in rapid succession.
+     * In unlocked mode, always reset from now so the next VBLANK fires
+     * one period after this one, preventing the game from seeing a
+     * backlog of missed VBLANKs that would cause a 30fps lock.
      */
-    d->vblank_next_target_ns += period;
-    if (d->vblank_next_target_ns <= now) {
+    if (unlocked && was_deferred) {
         d->vblank_next_target_ns = now + period;
+    } else {
+        d->vblank_next_target_ns += period;
+        if (d->vblank_next_target_ns <= now) {
+            d->vblank_next_target_ns = now + period;
+        }
     }
     timer_mod(d->vblank_timer, d->vblank_next_target_ns);
 }
