@@ -1016,7 +1016,7 @@ DEF_METHOD(NV097, FLIP_STALL)
         if (d->avg_frame_ns == 0) {
             d->avg_frame_ns = d->last_frame_ns;
         } else {
-            d->avg_frame_ns = (d->avg_frame_ns * 7 + d->last_frame_ns) / 8;
+            d->avg_frame_ns = (d->avg_frame_ns * 15 + d->last_frame_ns) / 16;
         }
     }
     d->last_flip_ns = now;

@@ -235,23 +235,46 @@ static void nv2a_vblank_timer_cb(void *opaque)
      * timer_mod, so actual deferral latency is minimal.
      */
     /*
-     * Use the smoothed frame time to determine unlock mode. The EMA
-     * prevents thrashing between unlocked and normal mode when frame
-     * times jitter around the threshold boundary.
+     * Use the smoothed frame time to determine unlock mode with
+     * hysteresis to prevent thrashing at the boundary.
      *
-     * Only engage unlock mode when the game's frame time indicates
-     * it is targeting ~60fps (within 1.5 VBLANK periods). Games
-     * already running at 30fps (frame time ~2 periods) use normal
-     * deferral so their intermediate VBLANKs are preserved for
-     * frame-count-based timing.
+     * Enter unlock mode when frame time < 1.5 periods (~60fps zone).
+     * Exit only when frame time > 2.5 periods (well into 30fps).
+     *
+     * Without hysteresis, a game dipping from 60fps to ~40fps would
+     * cross the threshold, lose the generous deferral window, fall to
+     * 30fps, and get permanently trapped because the 30fps frame time
+     * keeps the threshold exceeded.
      */
     int64_t effective_frame_ns = d->avg_frame_ns ? d->avg_frame_ns
                                                  : d->last_frame_ns;
-    bool unlocked = g_config.perf.unlock_framerate &&
-                    effective_frame_ns > 0 &&
-                    effective_frame_ns < period + period / 2;
+    if (g_config.perf.unlock_framerate && effective_frame_ns > 0) {
+        int64_t enter_thresh = period + period / 2;
+        int64_t exit_thresh  = period * 2 + period / 2;
+        if (!d->unlock_mode_active && effective_frame_ns < enter_thresh) {
+            d->unlock_mode_active = true;
+        } else if (d->unlock_mode_active && effective_frame_ns > exit_thresh) {
+            d->unlock_mode_active = false;
+        }
+    } else {
+        d->unlock_mode_active = false;
+    }
+    bool unlocked = d->unlock_mode_active;
     int64_t time_in_frame = d->last_flip_ns ? (now - d->last_flip_ns) : 0;
-    int64_t defer_window = unlocked ? period * 3 : period + period / 4;
+    int64_t defer_window;
+    if (unlocked) {
+        defer_window = period * 3;
+    } else {
+        /*
+         * Graduated deferral: scale the window to the actual frame time
+         * with 20% headroom so the game can finish, but cap below
+         * 2 periods so genuine 30fps games' intermediate VBLANKs fire.
+         */
+        int64_t adaptive = effective_frame_ns + effective_frame_ns / 5;
+        int64_t floor    = period + period / 4;
+        int64_t cap      = period * 2 - period / 4;
+        defer_window = MIN(MAX(adaptive, floor), cap);
+    }
     int defer_cap = unlocked ? 16 : 4;
     int64_t poll_interval = unlocked ? period / 16 : period / 8;
     bool in_deferral_window = effective_frame_ns > 0 &&
@@ -395,6 +418,7 @@ static void nv2a_init_vga(NV2AState *d)
     d->last_flip_ns = 0;
     d->last_frame_ns = 0;
     d->avg_frame_ns = 0;
+    d->unlock_mode_active = false;
     timer_mod(d->vblank_timer, d->vblank_next_target_ns);
 }
 
@@ -456,6 +480,7 @@ static void nv2a_reset(NV2AState *d)
     d->last_flip_ns = 0;
     d->last_frame_ns = 0;
     d->avg_frame_ns = 0;
+    d->unlock_mode_active = false;
     d->vblank_deferred = false;
     d->pgraph.waiting_for_context_switch = false;
 
