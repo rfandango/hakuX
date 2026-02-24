@@ -215,26 +215,21 @@ static void nv2a_vblank_timer_cb(void *opaque)
     int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
 
     /*
-     * Adaptive VBLANK: defer only for games targeting ~60fps that barely
-     * miss the VBLANK deadline.
+     * Adaptive VBLANK: defer this VBLANK when the game is actively
+     * rendering and barely missed the deadline. The window covers
+     * ~1.25 VBLANK periods after the last FLIP call, targeting games
+     * that take slightly longer than one period to render.
      *
-     * Key insight: for games running at 30fps or slower, at least one
-     * VBLANK has already fired since the last FLIP, so READ_3D was
-     * already incremented. FLIP_STALL returns immediately (READ != WRITE).
-     * Deferring subsequent VBLANKs only delays the next READ increment
-     * with no benefit -- it adds jitter and wastes cycles.
-     *
-     * Deferral is only useful within the first VBLANK period after the
-     * last FLIP (time_in_frame < ~1.25 periods), where the game is about
-     * to call FLIP and the VBLANK hasn't incremented READ yet. Deferring
-     * gives the game a few extra ms to call FLIP_INCREMENT_WRITE before
-     * the VBLANK fires, preventing a "missed deadline" detection.
+     * The !waiting_for_flip check ensures we never defer a VBLANK
+     * that the game is actively waiting for. When the game calls
+     * FLIP_STALL, it fires the deferred VBLANK immediately via
+     * timer_mod, so actual deferral latency is minimal.
      */
     int64_t time_in_frame = d->last_flip_ns ? (now - d->last_flip_ns) : 0;
-    bool first_vblank_window = d->last_frame_ns > 0 &&
-                               time_in_frame < period + period / 4;
+    bool in_deferral_window = d->last_frame_ns > 0 &&
+                              time_in_frame < period + period / 4;
 
-    if (first_vblank_window &&
+    if (in_deferral_window &&
         d->flip_active &&
         !qatomic_read(&d->pgraph.waiting_for_flip) &&
         d->vblank_defer_count < 4) {
@@ -267,27 +262,18 @@ static void nv2a_vblank_timer_cb(void *opaque)
     d->pcrtc.raster = 0;
     nv2a_update_irq(d);
 
-    if (was_deferred) {
-        /*
-         * After a deferral, realign the VBLANK grid to when this VBLANK
-         * actually fired. This gives the game a full frame budget from
-         * its real start time, preventing cascading deferrals where each
-         * slightly-late frame steals time from the next.
-         *
-         * This is safe because near_frame_end prevents intermediate
-         * VBLANKs from being deferred, so cumulative drift cannot occur.
-         */
+    /*
+     * Advance the VBLANK target by exactly one period to maintain a fixed
+     * 60Hz grid. This ensures games that count VBLANKs for timing see a
+     * consistent rate regardless of deferrals.
+     *
+     * If the next target has already passed (deferral pushed us past it,
+     * or emulator pause/lag spike), reset to now + period to avoid
+     * firing multiple VBLANKs in rapid succession.
+     */
+    d->vblank_next_target_ns += period;
+    if (d->vblank_next_target_ns <= now) {
         d->vblank_next_target_ns = now + period;
-    } else {
-        /*
-         * No deferral: advance the target by one period to maintain the
-         * fixed-rate grid. Reset from 'now' only if more than a full
-         * period behind (e.g. after emulator pause/lag spike).
-         */
-        d->vblank_next_target_ns += period;
-        if (d->vblank_next_target_ns < now - period) {
-            d->vblank_next_target_ns = now + period;
-        }
     }
     timer_mod(d->vblank_timer, d->vblank_next_target_ns);
 }
