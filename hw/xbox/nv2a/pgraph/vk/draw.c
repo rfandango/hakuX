@@ -1509,10 +1509,10 @@ void pgraph_vk_ensure_not_in_render_pass(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
 
-    end_render_pass(r);
     if (r->query_in_flight) {
         end_query(r);
     }
+    end_render_pass(r);
 }
 
 VkCommandBuffer pgraph_vk_begin_nondraw_commands(PGRAPHState *pg)
@@ -1752,6 +1752,8 @@ void pgraph_vk_draw_end(NV2AState *d)
     }
 
     pgraph_vk_set_surface_dirty(pg, color_write, depth_test || stencil_test);
+
+    nv2a_diag_log_draw_call(d, pg, "draw", 0);
 }
 
 static int compare_memory_sync_requirement_by_addr(const void *p1,
@@ -1998,6 +2000,8 @@ void pgraph_vk_clear_surface(NV2AState *d, uint32_t parameter)
 
     if (needs_partial_clear_pipeline) {
         end_draw(pg);
+    } else {
+        pgraph_vk_ensure_not_in_render_pass(pg);
     }
 #else
     begin_pre_draw(pg);
@@ -2079,6 +2083,8 @@ void pgraph_vk_clear_surface(NV2AState *d, uint32_t parameter)
     }
 
     pgraph_vk_set_surface_dirty(pg, write_color, write_zeta);
+
+    nv2a_diag_log_draw_call(d, pg, "clear", 0);
 
     NV2A_VK_DGROUP_END();
 }

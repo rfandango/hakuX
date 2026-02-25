@@ -25,7 +25,6 @@
       android:screenOrientation="sensorLandscape"
       android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
       android:hardwareAccelerated="true"
-      android:process=":xemu"
       android:exported="false">
 
       <meta-data

@@ -31,6 +31,8 @@
 #define StringArray GArray
 
 static bool enable_validation = false;
+static bool renderdoc_layer_active = false;
+static bool external_capture_layer_active = false;
 
 /* Filled during select_physical_device for display in the Android overlay. */
 char g_vulkan_driver_info[256] = "Vulkan: initializing...";
@@ -170,12 +172,29 @@ static bool create_instance(PGRAPHState *pg, Error **errp)
     VkResult result;
 
 #ifdef __ANDROID__
-    /* Try to use a custom Vulkan driver loaded via adrenotools */
-    extern PFN_vkGetInstanceProcAddr xemu_android_get_vk_proc_addr(void);
-    PFN_vkGetInstanceProcAddr custom_proc = xemu_android_get_vk_proc_addr();
-    if (custom_proc) {
-        volkInitializeCustom(custom_proc);
-        result = VK_SUCCESS;
+    /*
+     * When RenderDoc is injected, use the standard Vulkan loader so
+     * RenderDoc's layer can intercept all API calls.  Custom drivers
+     * loaded via adrenotools bypass the loader layer chain, making
+     * RenderDoc report "Vulkan (Unsupported)".
+     */
+    bool use_standard_loader = false;
+#ifdef CONFIG_RENDERDOC
+    if (nv2a_dbg_renderdoc_available()) {
+        fprintf(stderr, "RenderDoc detected — using standard Vulkan loader "
+                        "(custom driver bypassed for capture)\n");
+        use_standard_loader = true;
+    }
+#endif
+    if (!use_standard_loader) {
+        extern PFN_vkGetInstanceProcAddr xemu_android_get_vk_proc_addr(void);
+        PFN_vkGetInstanceProcAddr custom_proc = xemu_android_get_vk_proc_addr();
+        if (custom_proc) {
+            volkInitializeCustom(custom_proc);
+            result = VK_SUCCESS;
+        } else {
+            result = volkInitialize();
+        }
     } else {
         result = volkInitialize();
     }
@@ -264,6 +283,44 @@ static bool create_instance(PGRAPHState *pg, Error **errp)
         .pEnabledValidationFeatures = enables,
     };
 
+    const char *all_layers[8];
+    uint32_t all_layer_count = 0;
+
+    {
+        static const char *capture_layers[] = {
+            "VK_LAYER_RENDERDOC_Capture",
+            "VkLayerGPA",
+            "GFXReconstruct",
+            NULL,
+        };
+        uint32_t n = 0;
+        vkEnumerateInstanceLayerProperties(&n, NULL);
+        if (n > 0) {
+            VkLayerProperties *lp = g_malloc_n(n, sizeof(VkLayerProperties));
+            vkEnumerateInstanceLayerProperties(&n, lp);
+            for (uint32_t i = 0; i < n; i++) {
+                for (int j = 0; capture_layers[j]; j++) {
+                    if (!strcmp(lp[i].layerName, capture_layers[j])) {
+                        fprintf(stderr, "Capture layer found: %s — enabling\n",
+                                lp[i].layerName);
+#ifdef __ANDROID__
+                        __android_log_print(ANDROID_LOG_INFO, "xemu-vk-debug",
+                                            "Capture layer found: %s, enabling",
+                                            lp[i].layerName);
+#endif
+                        all_layers[all_layer_count++] = capture_layers[j];
+                        if (!strcmp(capture_layers[j],
+                                   "VK_LAYER_RENDERDOC_Capture")) {
+                            renderdoc_layer_active = true;
+                        }
+                        external_capture_layer_active = true;
+                    }
+                }
+            }
+            g_free(lp);
+        }
+    }
+
     if (enable_validation) {
         if (check_validation_layer_support()) {
             fprintf(stderr, "Warning: Validation layers enabled. Expect "
@@ -272,8 +329,9 @@ static bool create_instance(PGRAPHState *pg, Error **errp)
             __android_log_print(ANDROID_LOG_WARN, "xemu-vk-validation",
                                 "Validation layers ENABLED — expect performance impact");
 #endif
-            create_info.enabledLayerCount = ARRAY_SIZE(validation_layers);
-            create_info.ppEnabledLayerNames = validation_layers;
+            for (int i = 0; i < ARRAY_SIZE(validation_layers); i++) {
+                all_layers[all_layer_count++] = validation_layers[i];
+            }
             create_info.pNext = &validationFeatures;
         } else {
             fprintf(stderr, "Warning: validation layers not available\n");
@@ -286,6 +344,11 @@ static bool create_instance(PGRAPHState *pg, Error **errp)
         }
     }
 
+    if (all_layer_count > 0) {
+        create_info.enabledLayerCount = all_layer_count;
+        create_info.ppEnabledLayerNames = all_layers;
+    }
+
     result = vkCreateInstance(&create_info, NULL, &r->instance);
     if (result != VK_SUCCESS) {
         error_setg(errp, "Failed to create instance (%d)", result);
@@ -293,6 +356,19 @@ static bool create_instance(PGRAPHState *pg, Error **errp)
     }
 
     volkLoadInstance(r->instance);
+
+#ifdef CONFIG_RENDERDOC
+    if (!nv2a_dbg_renderdoc_available()) {
+        nv2a_dbg_renderdoc_init();
+        if (nv2a_dbg_renderdoc_available()) {
+            fprintf(stderr, "RenderDoc API found after instance creation\n");
+#ifdef __ANDROID__
+            __android_log_print(ANDROID_LOG_INFO, "xemu-vk-debug",
+                                "RenderDoc API found after instance creation");
+#endif
+        }
+    }
+#endif
 
     if (r->debug_utils_extension_enabled) {
         VkDebugUtilsMessengerCreateInfoEXT messenger_info = {
@@ -730,6 +806,14 @@ static bool create_logical_device(PGRAPHState *pg, Error **errp)
         error_setg(errp, "Failed to create logical device (%d)", result);
         return false;
     }
+
+    if (external_capture_layer_active) {
+        fprintf(stderr, "External capture layer active — skipping "
+                        "volkLoadDevice to preserve layer dispatch chain\n");
+    } else {
+        volkLoadDevice(r->device);
+    }
+
 #ifdef __ANDROID__
     __android_log_print(ANDROID_LOG_INFO, "xemu-android",
                         "vk init stage: vkCreateDevice done");

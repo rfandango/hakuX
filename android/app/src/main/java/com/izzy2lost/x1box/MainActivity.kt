@@ -14,8 +14,10 @@ import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.widget.FrameLayout
+import android.widget.Button
 import android.widget.RelativeLayout
 import android.widget.TextView
+import android.widget.Toast
 import org.libsdl.app.SDLActivity
 
 class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
@@ -57,6 +59,9 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
   private external fun nativeGetDriverInfo(): String
   private external fun nativeGetFramePacing(): String
   private external fun nativeGetShaderStats(): String
+  private external fun nativeCaptureFrame(): Boolean
+  private external fun nativeDumpRenderTarget(): Unit
+  private external fun nativeDumpDiagFrame(): Unit
 
   override fun loadLibraries() {
     super.loadLibraries()
@@ -134,6 +139,36 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
       addRule(RelativeLayout.ALIGN_PARENT_START)
     }
     mLayout?.addView(fpsTextView, params)
+
+    val captureBtn = Button(this).apply {
+      text = "RDoc"
+      setTextColor(Color.WHITE)
+      setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
+      setBackgroundColor(Color.argb(160, 180, 0, 0))
+      setPadding(16, 4, 16, 4)
+      minHeight = 0
+      minimumHeight = 0
+      setOnClickListener {
+        val ok = try { nativeCaptureFrame() } catch (_: Exception) { false }
+        val msg = if (ok) "RenderDoc: capturing next frame" else "RenderDoc not connected"
+        Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
+      }
+      setOnLongClickListener {
+        try { nativeDumpDiagFrame() } catch (_: Exception) {}
+        Toast.makeText(this@MainActivity, "Diag capture: next frame", Toast.LENGTH_SHORT).show()
+        true
+      }
+    }
+    val captureParams = RelativeLayout.LayoutParams(
+      RelativeLayout.LayoutParams.WRAP_CONTENT,
+      RelativeLayout.LayoutParams.WRAP_CONTENT
+    ).apply {
+      addRule(RelativeLayout.ALIGN_PARENT_TOP)
+      addRule(RelativeLayout.ALIGN_PARENT_END)
+      topMargin = 8
+      marginEnd = 8
+    }
+    mLayout?.addView(captureBtn, captureParams)
   }
 
   private fun setupOnScreenController() {

@@ -726,6 +726,21 @@ extern "C" int xemu_android_main(int argc, char** argv) {
 #if XEMU_OPT_TB_CACHE_HINTS
   /* Load translation block cache hints for pre-warming */
   const char *storage_load = SDL_AndroidGetInternalStoragePath();
+
+  const char *dump_storage = NULL;
+  if (SDL_AndroidGetExternalStorageState() & SDL_ANDROID_EXTERNAL_STORAGE_WRITE) {
+    dump_storage = SDL_AndroidGetExternalStoragePath();
+  }
+  if (!dump_storage || !dump_storage[0]) {
+    dump_storage = storage_load;
+  }
+  if (dump_storage) {
+    char dump_dir[PATH_MAX];
+    snprintf(dump_dir, sizeof(dump_dir), "%s/rt_dumps", dump_storage);
+    nv2a_dbg_set_rt_dump_path(dump_dir);
+  }
+
+  /* Load translation block cache hints for pre-warming */
   if (storage_load) {
     char cache_path[PATH_MAX];
     snprintf(cache_path, sizeof(cache_path), "%s/x1box/tb_cache.bin", storage_load);
@@ -1000,6 +1015,30 @@ Java_com_izzy2lost_x1box_MainActivity_nativeGetShaderStats(JNIEnv *env, jobject)
     char buf[256];
     nv2a_profile_get_shader_stats_str(buf, sizeof(buf));
     return env->NewStringUTF(buf);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_izzy2lost_x1box_MainActivity_nativeCaptureFrame(JNIEnv *, jobject)
+{
+#ifdef CONFIG_RENDERDOC
+    if (nv2a_dbg_renderdoc_available()) {
+        nv2a_dbg_renderdoc_capture_frames(1, false);
+        return JNI_TRUE;
+    }
+#endif
+    return JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_izzy2lost_x1box_MainActivity_nativeDumpRenderTarget(JNIEnv *env, jobject)
+{
+    nv2a_dbg_trigger_rt_dump();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_izzy2lost_x1box_MainActivity_nativeDumpDiagFrame(JNIEnv *, jobject)
+{
+    nv2a_dbg_trigger_diag_frame();
 }
 
 extern "C" char g_vulkan_driver_info[256];

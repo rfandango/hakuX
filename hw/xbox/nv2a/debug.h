@@ -180,14 +180,24 @@ static inline void nv2a_profile_inc_counter(enum NV2A_PROF_COUNTERS_ENUM cnt)
     g_nv2a_stats.frame_working.counters[cnt] += 1;
 }
 
-#ifdef CONFIG_RENDERDOC
 void nv2a_dbg_renderdoc_init(void);
 void *nv2a_dbg_renderdoc_get_api(void);
 bool nv2a_dbg_renderdoc_available(void);
 void nv2a_dbg_renderdoc_capture_frames(int num_frames, bool trace);
 extern int renderdoc_capture_frames;
 extern bool renderdoc_trace_frames;
-#endif
+
+void nv2a_dbg_set_rt_dump_path(const char *dir);
+void nv2a_dbg_trigger_rt_dump(void);
+
+void nv2a_dbg_trigger_diag_frame(void);
+bool nv2a_dbg_diag_frame_active(void);
+
+typedef struct NV2AState NV2AState;
+typedef struct PGRAPHState PGRAPHState;
+
+void nv2a_diag_log_draw_call(NV2AState *d, PGRAPHState *pg,
+                             const char *type, int count);
 
 #ifdef __cplusplus
 }

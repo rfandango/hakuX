@@ -47,7 +47,7 @@
 #define OPT_N_BUFFERED_SUBMIT   1
 #define OPT_DYNAMIC_STATES      1
 #define OPT_LOAD_OPS            1
-#define OPT_CLEAR_REFACTOR      0
+#define OPT_CLEAR_REFACTOR      1
 #define OPT_COMPUTE_SWIZZLE     1
 #define OPT_TEX_NONDRAW_CMD     0
 #define OPT_PRECISE_BARRIERS    1

@@ -294,9 +294,476 @@ static void pgraph_vk_process_pending(NV2AState *d)
     }
 }
 
+static char rt_dump_dir[512] = "";
+static volatile int rt_dump_pending = 0;
+
+void nv2a_dbg_set_rt_dump_path(const char *dir)
+{
+    snprintf(rt_dump_dir, sizeof(rt_dump_dir), "%s", dir);
+}
+
+void nv2a_dbg_trigger_rt_dump(void)
+{
+    qatomic_set(&rt_dump_pending, 1);
+}
+
+static void dump_surface_ppm(NV2AState *d, SurfaceBinding *surface,
+                             const char *path)
+{
+    unsigned int w = surface->width;
+    unsigned int h = surface->height;
+    unsigned int bpp = surface->fmt.bytes_per_pixel;
+    unsigned int pitch = surface->pitch;
+
+    if (!w || !h || !bpp) {
+        return;
+    }
+
+    const uint8_t *vram = d->vram_ptr + surface->vram_addr;
+
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        return;
+    }
+
+    fprintf(f, "P6\n%u %u\n255\n", w, h);
+
+    for (unsigned int y = 0; y < h; y++) {
+        const uint8_t *row = vram + y * pitch;
+        for (unsigned int x = 0; x < w; x++) {
+            uint8_t rgb[3];
+            if (bpp == 4) {
+                rgb[0] = row[x * 4 + 2];
+                rgb[1] = row[x * 4 + 1];
+                rgb[2] = row[x * 4 + 0];
+            } else if (bpp == 2) {
+                uint16_t px = *(const uint16_t *)(row + x * 2);
+                rgb[0] = (px >> 8) & 0xF8;
+                rgb[1] = (px >> 3) & 0xFC;
+                rgb[2] = (px << 3) & 0xF8;
+            } else {
+                rgb[0] = rgb[1] = rgb[2] = row[x * bpp];
+            }
+            fwrite(rgb, 1, 3, f);
+        }
+    }
+
+    fclose(f);
+}
+
+static void maybe_dump_render_target(NV2AState *d)
+{
+    if (!qatomic_read(&rt_dump_pending)) {
+        return;
+    }
+    qatomic_set(&rt_dump_pending, 0);
+
+    PGRAPHState *pg = &d->pgraph;
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    SurfaceBinding *surface = r->color_binding;
+
+    if (!surface || !surface->color) {
+        fprintf(stderr, "rt_dump: no color surface bound\n");
+        return;
+    }
+
+    if (!surface->width || !surface->height || !surface->fmt.bytes_per_pixel) {
+        fprintf(stderr, "rt_dump: invalid surface dimensions\n");
+        return;
+    }
+
+    char path[600];
+    if (rt_dump_dir[0]) {
+        mkdir(rt_dump_dir, 0755);
+        snprintf(path, sizeof(path), "%s/rt_dump_%u.ppm", rt_dump_dir,
+                 g_nv2a_stats.frame_count);
+    } else {
+        snprintf(path, sizeof(path), "/tmp/rt_dump_%u.ppm",
+                 g_nv2a_stats.frame_count);
+    }
+
+    dump_surface_ppm(d, surface, path);
+    fprintf(stderr, "rt_dump: saved %ux%u to %s\n",
+            surface->width, surface->height, path);
+}
+
+/*
+ * Per-draw-call diagnostic frame capture
+ */
+
+#define DIAG_MAX_DRAWS 4096
+#define DIAG_JSON_INITIAL_CAP (256 * 1024)
+
+static volatile int diag_frame_pending = 0;
+static volatile int diag_frame_active = 0;
+static int diag_draw_index = 0;
+static unsigned int diag_frame_num = 0;
+
+static char *diag_json_buf = NULL;
+static size_t diag_json_len = 0;
+static size_t diag_json_cap = 0;
+
+void nv2a_dbg_trigger_diag_frame(void)
+{
+    qatomic_set(&diag_frame_pending, 1);
+}
+
+bool nv2a_dbg_diag_frame_active(void)
+{
+    return qatomic_read(&diag_frame_active) != 0;
+}
+
+static void diag_json_ensure(size_t needed)
+{
+    if (diag_json_len + needed <= diag_json_cap) {
+        return;
+    }
+    size_t new_cap = diag_json_cap ? diag_json_cap * 2 : DIAG_JSON_INITIAL_CAP;
+    while (new_cap < diag_json_len + needed) {
+        new_cap *= 2;
+    }
+    diag_json_buf = g_realloc(diag_json_buf, new_cap);
+    diag_json_cap = new_cap;
+}
+
+static void diag_json_append(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    va_list ap2;
+    va_copy(ap2, ap);
+    int n = vsnprintf(NULL, 0, fmt, ap);
+    va_end(ap);
+    if (n > 0) {
+        diag_json_ensure((size_t)n + 1);
+        vsnprintf(diag_json_buf + diag_json_len, (size_t)n + 1, fmt, ap2);
+        diag_json_len += (size_t)n;
+    }
+    va_end(ap2);
+}
+
+static void diag_write_json(void)
+{
+    char dir[600];
+    if (rt_dump_dir[0]) {
+        snprintf(dir, sizeof(dir), "%s", rt_dump_dir);
+    } else {
+        snprintf(dir, sizeof(dir), "/tmp");
+    }
+    mkdir(dir, 0755);
+
+    char path[700];
+    snprintf(path, sizeof(path), "%s/diag_frame_%u.json", dir, diag_frame_num);
+
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        fprintf(stderr, "diag: cannot write %s\n", path);
+        return;
+    }
+    if (diag_json_buf && diag_json_len > 0) {
+        fwrite(diag_json_buf, 1, diag_json_len, f);
+    }
+    fclose(f);
+    fprintf(stderr, "diag: wrote %zu bytes to %s\n", diag_json_len, path);
+}
+
+static const char *diag_stencil_op_name(uint32_t op)
+{
+    switch (op) {
+    case 0x1: return "KEEP";
+    case 0x2: return "ZERO";
+    case 0x3: return "REPLACE";
+    case 0x4: return "INCRSAT";
+    case 0x5: return "DECRSAT";
+    case 0x6: return "INVERT";
+    case 0x7: return "INCR";
+    case 0x8: return "DECR";
+    default:  return "?";
+    }
+}
+
+static const char *diag_compare_func_name(uint32_t f)
+{
+    switch (f) {
+    case 0: return "NEVER";
+    case 1: return "LESS";
+    case 2: return "EQUAL";
+    case 3: return "LEQUAL";
+    case 4: return "GREATER";
+    case 5: return "NOTEQUAL";
+    case 6: return "GEQUAL";
+    case 7: return "ALWAYS";
+    default: return "?";
+    }
+}
+
+static const char *diag_blend_factor_name(uint32_t f)
+{
+    switch (f) {
+    case 0:  return "ZERO";
+    case 1:  return "ONE";
+    case 2:  return "SRC_COLOR";
+    case 3:  return "INV_SRC_COLOR";
+    case 4:  return "SRC_ALPHA";
+    case 5:  return "INV_SRC_ALPHA";
+    case 6:  return "DST_ALPHA";
+    case 7:  return "INV_DST_ALPHA";
+    case 8:  return "DST_COLOR";
+    case 9:  return "INV_DST_COLOR";
+    case 10: return "SRC_ALPHA_SAT";
+    case 12: return "CONST_COLOR";
+    case 13: return "INV_CONST_COLOR";
+    case 14: return "CONST_ALPHA";
+    case 15: return "INV_CONST_ALPHA";
+    default: return "?";
+    }
+}
+
+static const char *diag_blend_eq_name(uint32_t eq)
+{
+    switch (eq) {
+    case 0: return "SUB";
+    case 1: return "REV_SUB";
+    case 2: return "ADD";
+    case 3: return "MIN";
+    case 4: return "MAX";
+    case 5: return "REV_SUB";
+    case 6: return "ADD";
+    default: return "?";
+    }
+}
+
+static const char *diag_prim_name(int mode)
+{
+    switch (mode) {
+    case 1: return "POINTS";
+    case 2: return "LINES";
+    case 3: return "LINE_LOOP";
+    case 4: return "LINE_STRIP";
+    case 5: return "TRIANGLES";
+    case 6: return "TRIANGLE_STRIP";
+    case 7: return "TRIANGLE_FAN";
+    case 8: return "QUADS";
+    case 9: return "QUAD_STRIP";
+    case 10: return "POLYGON";
+    default: return "?";
+    }
+}
+
+void nv2a_diag_log_draw_call(NV2AState *d, PGRAPHState *pg,
+                             const char *type, int count)
+{
+    if (!qatomic_read(&diag_frame_active)) {
+        return;
+    }
+
+    if (diag_draw_index >= DIAG_MAX_DRAWS) {
+        return;
+    }
+
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    int idx = diag_draw_index++;
+
+    uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
+    uint32_t control_1 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1);
+    uint32_t control_2 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_2);
+    uint32_t blend_reg = pgraph_reg_r(pg, NV_PGRAPH_BLEND);
+    uint32_t setupraster = pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER);
+
+    bool blend_en    = blend_reg & NV_PGRAPH_BLEND_EN;
+    uint32_t sfactor = GET_MASK(blend_reg, NV_PGRAPH_BLEND_SFACTOR);
+    uint32_t dfactor = GET_MASK(blend_reg, NV_PGRAPH_BLEND_DFACTOR);
+    uint32_t blend_eq = GET_MASK(blend_reg, NV_PGRAPH_BLEND_EQN);
+
+    bool depth_test  = control_0 & NV_PGRAPH_CONTROL_0_ZENABLE;
+    bool depth_write = !!(control_0 & NV_PGRAPH_CONTROL_0_ZWRITEENABLE);
+    uint32_t zfunc   = GET_MASK(control_0, NV_PGRAPH_CONTROL_0_ZFUNC);
+
+    bool stencil_test = control_1 & NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE;
+    uint32_t stencil_func = GET_MASK(control_1, NV_PGRAPH_CONTROL_1_STENCIL_FUNC);
+    uint32_t stencil_ref  = GET_MASK(control_1, NV_PGRAPH_CONTROL_1_STENCIL_REF);
+    uint32_t stencil_mask_read  = GET_MASK(control_1,
+                                           NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ);
+    uint32_t stencil_mask_write = GET_MASK(control_1,
+                                           NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE);
+    uint32_t op_fail  = GET_MASK(control_2, NV_PGRAPH_CONTROL_2_STENCIL_OP_FAIL);
+    uint32_t op_zfail = GET_MASK(control_2, NV_PGRAPH_CONTROL_2_STENCIL_OP_ZFAIL);
+    uint32_t op_zpass = GET_MASK(control_2, NV_PGRAPH_CONTROL_2_STENCIL_OP_ZPASS);
+
+    bool mask_r = !!(control_0 & NV_PGRAPH_CONTROL_0_RED_WRITE_ENABLE);
+    bool mask_g = !!(control_0 & NV_PGRAPH_CONTROL_0_GREEN_WRITE_ENABLE);
+    bool mask_b = !!(control_0 & NV_PGRAPH_CONTROL_0_BLUE_WRITE_ENABLE);
+    bool mask_a = !!(control_0 & NV_PGRAPH_CONTROL_0_ALPHA_WRITE_ENABLE);
+
+    bool cull_en = !!(setupraster & NV_PGRAPH_SETUPRASTER_CULLENABLE);
+    uint32_t cull_face = GET_MASK(setupraster, NV_PGRAPH_SETUPRASTER_CULLCTRL);
+    bool front_ccw = !!(setupraster & NV_PGRAPH_SETUPRASTER_FRONTFACE);
+
+    const char *cull_str = "NONE";
+    if (cull_en) {
+        switch (cull_face) {
+        case 1: cull_str = "FRONT"; break;
+        case 2: cull_str = "BACK";  break;
+        case 3: cull_str = "BOTH";  break;
+        }
+    }
+
+    diag_json_append(
+        "%s  {\n"
+        "    \"draw_index\": %d,\n"
+        "    \"type\": \"%s\",\n"
+        "    \"count\": %d,\n"
+        "    \"primitive_mode\": \"%s\",\n"
+        "    \"blend\": {"
+            "\"enabled\": %s, \"src\": \"%s\", \"dst\": \"%s\", "
+            "\"eq\": \"%s\"},\n"
+        "    \"depth\": {"
+            "\"test\": %s, \"write\": %s, \"func\": \"%s\"},\n"
+        "    \"stencil\": {"
+            "\"test\": %s, \"func\": \"%s\", \"ref\": %u, "
+            "\"mask_read\": %u, \"mask_write\": %u, "
+            "\"op_fail\": \"%s\", \"op_zfail\": \"%s\", "
+            "\"op_zpass\": \"%s\"},\n"
+        "    \"color_write_mask\": {"
+            "\"r\": %s, \"g\": %s, \"b\": %s, \"a\": %s},\n"
+        "    \"cull\": {"
+            "\"enabled\": %s, \"face\": \"%s\", \"front_ccw\": %s},\n",
+        idx > 0 ? ",\n" : "",
+        idx,
+        type,
+        count,
+        diag_prim_name(pg->primitive_mode),
+        blend_en ? "true" : "false",
+        diag_blend_factor_name(sfactor),
+        diag_blend_factor_name(dfactor),
+        diag_blend_eq_name(blend_eq),
+        depth_test ? "true" : "false",
+        depth_write ? "true" : "false",
+        diag_compare_func_name(zfunc),
+        stencil_test ? "true" : "false",
+        diag_compare_func_name(stencil_func),
+        stencil_ref, stencil_mask_read, stencil_mask_write,
+        diag_stencil_op_name(op_fail),
+        diag_stencil_op_name(op_zfail),
+        diag_stencil_op_name(op_zpass),
+        mask_r ? "true" : "false",
+        mask_g ? "true" : "false",
+        mask_b ? "true" : "false",
+        mask_a ? "true" : "false",
+        cull_en ? "true" : "false",
+        cull_str,
+        front_ccw ? "true" : "false"
+    );
+
+    if (r->color_binding) {
+        diag_json_append(
+            "    \"color_surface\": {"
+                "\"format\": %u, \"width\": %u, \"height\": %u, "
+                "\"pitch\": %u, \"bpp\": %u},\n",
+            r->color_binding->shape.color_format,
+            r->color_binding->width, r->color_binding->height,
+            r->color_binding->pitch, r->color_binding->fmt.bytes_per_pixel
+        );
+    } else {
+        diag_json_append("    \"color_surface\": null,\n");
+    }
+
+    if (r->zeta_binding) {
+        diag_json_append(
+            "    \"zeta_surface\": {"
+                "\"format\": %u, \"width\": %u, \"height\": %u, "
+                "\"pitch\": %u, \"bpp\": %u},\n",
+            r->zeta_binding->shape.zeta_format,
+            r->zeta_binding->width, r->zeta_binding->height,
+            r->zeta_binding->pitch, r->zeta_binding->fmt.bytes_per_pixel
+        );
+    } else {
+        diag_json_append("    \"zeta_surface\": null,\n");
+    }
+
+    diag_json_append("    \"textures\": [");
+    for (int i = 0; i < NV2A_MAX_TEXTURES; i++) {
+        bool tex_en = pgraph_is_texture_enabled(pg, i);
+        uint32_t tex_fmt = pgraph_reg_r(pg, NV_PGRAPH_TEXFMT0 + i * 4);
+        unsigned int color_format = GET_MASK(tex_fmt, NV_PGRAPH_TEXFMT0_COLOR);
+        unsigned int dimensionality = GET_MASK(tex_fmt,
+                                               NV_PGRAPH_TEXFMT0_DIMENSIONALITY);
+        unsigned int log_w = GET_MASK(tex_fmt, NV_PGRAPH_TEXFMT0_BASE_SIZE_U);
+        unsigned int log_h = GET_MASK(tex_fmt, NV_PGRAPH_TEXFMT0_BASE_SIZE_V);
+
+        diag_json_append(
+            "%s{\"stage\": %d, \"enabled\": %s, \"color_format\": %u, "
+            "\"dim\": %u, \"width\": %u, \"height\": %u}",
+            i > 0 ? ", " : "",
+            i,
+            tex_en ? "true" : "false",
+            color_format,
+            dimensionality,
+            1u << log_w, 1u << log_h
+        );
+    }
+    diag_json_append("]\n  }");
+
+    char dir[600];
+    if (rt_dump_dir[0]) {
+        snprintf(dir, sizeof(dir), "%s", rt_dump_dir);
+    } else {
+        snprintf(dir, sizeof(dir), "/tmp");
+    }
+    mkdir(dir, 0755);
+
+    pgraph_vk_finish(pg, VK_FINISH_REASON_SURFACE_DOWN);
+
+    if (r->color_binding && r->color_binding->draw_dirty) {
+        pgraph_vk_surface_download_if_dirty(d, r->color_binding);
+        char path[700];
+        snprintf(path, sizeof(path), "%s/diag_%u_draw%d_color.ppm",
+                 dir, diag_frame_num, idx);
+        dump_surface_ppm(d, r->color_binding, path);
+    }
+
+    if (r->zeta_binding && r->zeta_binding->draw_dirty) {
+        pgraph_vk_surface_download_if_dirty(d, r->zeta_binding);
+        char path[700];
+        snprintf(path, sizeof(path), "%s/diag_%u_draw%d_depth.ppm",
+                 dir, diag_frame_num, idx);
+        dump_surface_ppm(d, r->zeta_binding, path);
+    }
+}
+
 static void pgraph_vk_flip_stall(NV2AState *d)
 {
     pgraph_vk_finish(&d->pgraph, VK_FINISH_REASON_FLIP_STALL);
+
+    if (qatomic_read(&diag_frame_active)) {
+        diag_json_append("\n]\n");
+        diag_write_json();
+        qatomic_set(&diag_frame_active, 0);
+        fprintf(stderr, "diag: frame %u capture complete (%d draw calls)\n",
+                diag_frame_num, diag_draw_index);
+#ifdef __ANDROID__
+        __android_log_print(ANDROID_LOG_INFO, "xemu-diag",
+                            "frame %u capture complete (%d draw calls)",
+                            diag_frame_num, diag_draw_index);
+#endif
+    }
+
+    if (qatomic_read(&diag_frame_pending)) {
+        qatomic_set(&diag_frame_pending, 0);
+        diag_frame_num = g_nv2a_stats.frame_count;
+        diag_draw_index = 0;
+        diag_json_len = 0;
+        diag_json_append("[\n");
+        qatomic_set(&diag_frame_active, 1);
+        fprintf(stderr, "diag: starting capture for frame %u\n",
+                diag_frame_num);
+#ifdef __ANDROID__
+        __android_log_print(ANDROID_LOG_INFO, "xemu-diag",
+                            "starting capture for frame %u", diag_frame_num);
+#endif
+    }
+
+    maybe_dump_render_target(d);
     pgraph_vk_debug_frame_terminator();
 }
 
