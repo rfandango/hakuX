@@ -21,6 +21,63 @@
 
 #include "nv2a_int.h"
 
+#ifndef XEMU_OPT_THREAD_AFFINITY
+#define XEMU_OPT_THREAD_AFFINITY 0
+#endif
+
+#ifndef XEMU_OPT_PFIFO_LOCK_BATCH
+#define XEMU_OPT_PFIFO_LOCK_BATCH 0
+#endif
+
+#if defined(__ANDROID__) && XEMU_OPT_THREAD_AFFINITY
+#include <sys/syscall.h>
+#include <sys/resource.h>
+
+static void xemu_pin_to_big_cores(const char *label)
+{
+    int ncpus = sysconf(_SC_NPROCESSORS_CONF);
+    if (ncpus <= 0 || ncpus > 64) return;
+
+    unsigned long max_freq = 0;
+    unsigned long freqs[64];
+    for (int i = 0; i < ncpus; i++) {
+        char path[128];
+        snprintf(path, sizeof(path),
+                 "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", i);
+        FILE *f = fopen(path, "r");
+        if (f) {
+            if (fscanf(f, "%lu", &freqs[i]) != 1) freqs[i] = 0;
+            fclose(f);
+        } else {
+            freqs[i] = 0;
+        }
+        if (freqs[i] > max_freq) max_freq = freqs[i];
+    }
+
+    if (max_freq == 0) return;
+
+    unsigned long threshold = max_freq * 9 / 10;
+    /* Build affinity mask manually (avoid cpu_set_t header issues on bionic) */
+    unsigned long mask = 0;
+    int big_count = 0;
+    for (int i = 0; i < ncpus && i < (int)(sizeof(mask) * 8); i++) {
+        if (freqs[i] >= threshold) {
+            mask |= (1UL << i);
+            big_count++;
+        }
+    }
+
+    if (big_count > 0 && big_count < ncpus) {
+        if (syscall(__NR_sched_setaffinity, 0, sizeof(mask), &mask) == 0) {
+            fprintf(stderr, "[xemu] %s: pinned to %d big cores (max_freq=%lu)\n",
+                    label, big_count, max_freq);
+        }
+    }
+
+    setpriority(PRIO_PROCESS, 0, -10);
+}
+#endif
+
 typedef struct RAMHTEntry {
     uint32_t handle;
     hwaddr instance;
@@ -184,11 +241,24 @@ static ssize_t pfifo_run_puller(NV2AState *d, uint32_t method_entry,
         SET_MASK(*engine_reg, 3 << (4*subchannel), entry.engine);
         SET_MASK(*pull1, NV_PFIFO_CACHE1_PULL1_ENGINE, entry.engine);
 
-        // TODO: this is fucked
+#if XEMU_OPT_PFIFO_LOCK_BATCH
+        /* Hold pfifo.lock throughout; matches lock order pfifo->pgraph */
+        qemu_mutex_lock(&d->pgraph.lock);
+
+        if (can_fifo_access(d)) {
+            pgraph_context_switch(d, entry.channel_id);
+            if (!d->pgraph.waiting_for_context_switch) {
+                num_proc =
+                    pgraph_method(d, subchannel, 0, entry.instance, parameters,
+                                  num_words_available, max_lookahead_words, inc);
+            }
+        }
+
+        qemu_mutex_unlock(&d->pgraph.lock);
+#else
         qemu_mutex_unlock(&d->pfifo.lock);
         qemu_mutex_lock(&d->pgraph.lock);
 
-        // Switch contexts if necessary
         if (can_fifo_access(d)) {
             pgraph_context_switch(d, entry.channel_id);
             if (!d->pgraph.waiting_for_context_switch) {
@@ -200,6 +270,7 @@ static ssize_t pfifo_run_puller(NV2AState *d, uint32_t method_entry,
 
         qemu_mutex_unlock(&d->pgraph.lock);
         qemu_mutex_lock(&d->pfifo.lock);
+#endif
 
     } else if (method >= 0x100) {
         // method passed to engine
@@ -219,7 +290,17 @@ static ssize_t pfifo_run_puller(NV2AState *d, uint32_t method_entry,
         assert(engine == ENGINE_GRAPHICS);
         SET_MASK(*pull1, NV_PFIFO_CACHE1_PULL1_ENGINE, engine);
 
-        // TODO: this is fucked
+#if XEMU_OPT_PFIFO_LOCK_BATCH
+        qemu_mutex_lock(&d->pgraph.lock);
+
+        if (can_fifo_access(d)) {
+            num_proc =
+                pgraph_method(d, subchannel, method, parameter, parameters,
+                              num_words_available, max_lookahead_words, inc);
+        }
+
+        qemu_mutex_unlock(&d->pgraph.lock);
+#else
         qemu_mutex_unlock(&d->pfifo.lock);
         qemu_mutex_lock(&d->pgraph.lock);
 
@@ -231,6 +312,7 @@ static ssize_t pfifo_run_puller(NV2AState *d, uint32_t method_entry,
 
         qemu_mutex_unlock(&d->pgraph.lock);
         qemu_mutex_lock(&d->pfifo.lock);
+#endif
     } else {
         assert(false);
     }
@@ -452,6 +534,10 @@ static void pfifo_run_pusher(NV2AState *d)
 void *pfifo_thread(void *arg)
 {
     NV2AState *d = (NV2AState *)arg;
+
+#if defined(__ANDROID__) && XEMU_OPT_THREAD_AFFINITY
+    xemu_pin_to_big_cores("pfifo_thread");
+#endif
 
     pgraph_init_thread(d);
 

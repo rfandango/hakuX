@@ -45,6 +45,7 @@
 #define HAVE_EXTERNAL_MEMORY 0
 
 #define OPT_N_BUFFERED_SUBMIT   1
+#define OPT_DEFERRED_FENCES     1
 #define OPT_DYNAMIC_STATES      1
 #define OPT_LOAD_OPS            1
 #define OPT_CLEAR_REFACTOR      1
@@ -377,6 +378,11 @@ typedef struct PGRAPHVkState {
     VkFramebuffer framebuffers[50];
     int framebuffer_index;
     bool framebuffer_dirty;
+
+#if OPT_DEFERRED_FENCES && OPT_N_BUFFERED_SUBMIT
+    VkFramebuffer deferred_framebuffers[NUM_SUBMIT_FRAMES][50];
+    int deferred_framebuffer_count[NUM_SUBMIT_FRAMES];
+#endif
 
     VkRenderPass render_pass;
     VkRenderPass begin_render_pass;

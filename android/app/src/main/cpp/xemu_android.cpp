@@ -691,12 +691,64 @@ extern "C" void xemu_android_display_wait_ready(void);
 extern "C" void xemu_android_display_loop(void);
 extern "C" void xemu_android_set_inline_aio_crash_flag_path(const char* path);
 
+#ifndef XEMU_OPT_THREAD_AFFINITY
+#define XEMU_OPT_THREAD_AFFINITY 0
+#endif
+
+#if XEMU_OPT_THREAD_AFFINITY
+#include <sys/syscall.h>
+#include <sys/resource.h>
+
+static void xemu_pin_to_big_cores_cpp(const char *label) {
+  int ncpus = sysconf(_SC_NPROCESSORS_CONF);
+  if (ncpus <= 0 || ncpus > 64) return;
+
+  unsigned long max_freq = 0;
+  unsigned long freqs[64];
+  for (int i = 0; i < ncpus; i++) {
+    char path[128];
+    snprintf(path, sizeof(path),
+             "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", i);
+    FILE *f = fopen(path, "r");
+    if (f) {
+      if (fscanf(f, "%lu", &freqs[i]) != 1) freqs[i] = 0;
+      fclose(f);
+    } else {
+      freqs[i] = 0;
+    }
+    if (freqs[i] > max_freq) max_freq = freqs[i];
+  }
+  if (max_freq == 0) return;
+
+  unsigned long threshold = max_freq * 9 / 10;
+  unsigned long mask = 0;
+  int big_count = 0;
+  for (int i = 0; i < ncpus && i < (int)(sizeof(mask) * 8); i++) {
+    if (freqs[i] >= threshold) {
+      mask |= (1UL << i);
+      big_count++;
+    }
+  }
+  if (big_count > 0 && big_count < ncpus) {
+    if (syscall(__NR_sched_setaffinity, 0, sizeof(mask), &mask) == 0) {
+      __android_log_print(ANDROID_LOG_INFO, "xemu-android",
+                          "%s: pinned to %d big cores (max_freq=%lu)",
+                          label, big_count, max_freq);
+    }
+  }
+  setpriority(PRIO_PROCESS, 0, -10);
+}
+#endif
+
 struct QemuLaunchContext {
   int argc;
   char** argv;
 };
 
 static int SDLCALL QemuThreadMain(void* data) {
+#if XEMU_OPT_THREAD_AFFINITY
+  xemu_pin_to_big_cores_cpp("qemu_cpu_thread");
+#endif
   auto* ctx = static_cast<QemuLaunchContext*>(data);
   LogInfoInt("QemuThreadMain: show_welcome=%d", g_config.general.show_welcome ? 1 : 0);
   LogInfoFmt("QemuThreadMain: bootrom=%s", g_config.sys.files.bootrom_path ? g_config.sys.files.bootrom_path : "(null)");

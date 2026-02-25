@@ -60,6 +60,9 @@ static void create_command_buffers(PGRAPHState *pg)
     r->aux_command_buffer = r->command_buffers[1];
     for (int i = 0; i < NUM_SUBMIT_FRAMES; i++) {
         r->frame_submitted[i] = false;
+#if OPT_DEFERRED_FENCES && OPT_N_BUFFERED_SUBMIT
+        r->deferred_framebuffer_count[i] = 0;
+#endif
     }
 }
 

@@ -58,6 +58,11 @@
 #include "hw/xbox/nv2a/debug.h"
 #include "ui/xemu-notifications.h"
 
+#ifdef __ANDROID__
+#define XEMU_OPT_REDUCE_BQL 1
+#define XEMU_OPT_FRAME_LIMITER_SPIN 1
+#endif
+
 #include <stb_image.h>
 #include <locale.h>
 
@@ -1578,12 +1583,27 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
         int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
 
         if (next_render_ns && now < next_render_ns) {
+#if defined(__ANDROID__) && XEMU_OPT_REDUCE_BQL
+            sdl2_poll_events(scon);
+#else
             qemu_mutex_lock_main_loop();
             bql_lock();
             sdl2_poll_events(scon);
             bql_unlock();
             qemu_mutex_unlock_main_loop();
-#ifdef __ANDROID__
+#endif
+#if defined(__ANDROID__) && XEMU_OPT_FRAME_LIMITER_SPIN
+            {
+                int64_t remaining_ns = next_render_ns - now;
+                if (remaining_ns > 2000000) {
+                    SDL_Delay((int)(remaining_ns / 1000000 - 1));
+                }
+                /* Busy-spin for the last ~1ms for sub-ms precision */
+                while (qemu_clock_get_ns(QEMU_CLOCK_REALTIME) < next_render_ns) {
+                    /* spin */
+                }
+            }
+#elif defined(__ANDROID__)
             int64_t remaining_ms = (next_render_ns - now) / 1000000;
             if (remaining_ms > 2) {
                 SDL_Delay((int)(remaining_ms - 1));
@@ -1786,9 +1806,13 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
      * lock and perform rendering, but release before swap to avoid
      * possible lengthy blocking (for vsync).
      */
+#if defined(__ANDROID__) && XEMU_OPT_REDUCE_BQL
+    sdl2_poll_events(scon);
+#else
     qemu_mutex_lock_main_loop();
     bql_lock();
     sdl2_poll_events(scon);
+#endif
 
     glClearColor(0, 0, 0, 0);
     glClear(GL_COLOR_BUFFER_BIT);
@@ -1804,9 +1828,12 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
     xemu_hud_render();
 #endif
 
-    // Release BQL before swapping (which may sleep if swap interval is not immediate)
+#if defined(__ANDROID__) && XEMU_OPT_REDUCE_BQL
+    /* BQL not held on Android -- skip unlock */
+#else
     bql_unlock();
     qemu_mutex_unlock_main_loop();
+#endif
 
 #ifdef __ANDROID__
     glFlush();

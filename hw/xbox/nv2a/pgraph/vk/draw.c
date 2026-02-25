@@ -287,6 +287,12 @@ void pgraph_vk_finalize_pipelines(PGRAPHState *pg)
                                      VK_TRUE, UINT64_MAX));
             r->frame_submitted[i] = false;
         }
+#if OPT_DEFERRED_FENCES && OPT_N_BUFFERED_SUBMIT
+        for (int j = 0; j < r->deferred_framebuffer_count[i]; j++) {
+            vkDestroyFramebuffer(r->device, r->deferred_framebuffers[i][j], NULL);
+        }
+        r->deferred_framebuffer_count[i] = 0;
+#endif
     }
 
     finalize_clear_shaders(pg);
@@ -1442,6 +1448,57 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
             check_budget = true;
         }
 
+#if OPT_DEFERRED_FENCES && OPT_N_BUFFERED_SUBMIT
+        /*
+         * Targeted deferred fences: only defer for FLIP_STALL (frame
+         * boundary). All other finish reasons involve resource reuse
+         * and must wait synchronously.
+         */
+        if (finish_reason == VK_FINISH_REASON_FLIP_STALL) {
+            memcpy(r->deferred_framebuffers[r->current_frame],
+                   r->framebuffers,
+                   r->framebuffer_index * sizeof(VkFramebuffer));
+            r->deferred_framebuffer_count[r->current_frame] = r->framebuffer_index;
+            r->framebuffer_index = 0;
+
+            int next_frame = (r->current_frame + 1) % NUM_SUBMIT_FRAMES;
+            VK_LOG("finish: advancing frame %d -> %d (deferred flip)",
+                   r->current_frame, next_frame);
+
+            if (r->frame_submitted[next_frame]) {
+                VK_LOG("finish: waiting for previous frame %d", next_frame);
+                VK_CHECK(vkWaitForFences(r->device, 1,
+                                         &r->frame_fences[next_frame],
+                                         VK_TRUE, UINT64_MAX));
+                r->frame_submitted[next_frame] = false;
+                for (int i = 0; i < r->deferred_framebuffer_count[next_frame]; i++) {
+                    vkDestroyFramebuffer(r->device,
+                                         r->deferred_framebuffers[next_frame][i],
+                                         NULL);
+                }
+                r->deferred_framebuffer_count[next_frame] = 0;
+            }
+
+            r->current_frame = next_frame;
+            r->command_buffer = r->command_buffers[next_frame * 2];
+            r->aux_command_buffer = r->command_buffers[next_frame * 2 + 1];
+            r->command_buffer_semaphore = r->frame_semaphores[next_frame];
+            r->command_buffer_fence = r->frame_fences[next_frame];
+        } else {
+            VK_LOG("finish: vkWaitForFences frame=%d (sync)", r->current_frame);
+            VK_CHECK(vkWaitForFences(r->device, 1, &r->command_buffer_fence,
+                                     VK_TRUE, UINT64_MAX));
+            r->frame_submitted[r->current_frame] = false;
+
+            int next_frame = (r->current_frame + 1) % NUM_SUBMIT_FRAMES;
+            r->current_frame = next_frame;
+            r->command_buffer = r->command_buffers[next_frame * 2];
+            r->aux_command_buffer = r->command_buffers[next_frame * 2 + 1];
+            r->command_buffer_semaphore = r->frame_semaphores[next_frame];
+            r->command_buffer_fence = r->frame_fences[next_frame];
+            destroy_framebuffers(pg);
+        }
+#else
         VK_LOG("finish: vkWaitForFences frame=%d", r->current_frame);
         VK_CHECK(vkWaitForFences(r->device, 1, &r->command_buffer_fence,
                                  VK_TRUE, UINT64_MAX));
@@ -1455,13 +1512,14 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
         r->aux_command_buffer = r->command_buffers[next_frame * 2 + 1];
         r->command_buffer_semaphore = r->frame_semaphores[next_frame];
         r->command_buffer_fence = r->frame_fences[next_frame];
+        destroy_framebuffers(pg);
+#endif
 
         r->descriptor_set_index = 0;
         r->in_command_buffer = false;
         r->color_drawn_in_cb = false;
         r->zeta_drawn_in_cb = false;
         r->queries_reset_in_cb = false;
-        destroy_framebuffers(pg);
 
         if (check_budget) {
             pgraph_vk_check_memory_budget(pg);
