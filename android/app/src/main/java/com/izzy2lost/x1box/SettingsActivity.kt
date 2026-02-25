@@ -84,12 +84,12 @@ class SettingsActivity : AppCompatActivity() {
     val switchNativeX87 = findViewById<MaterialSwitch>(R.id.switch_native_x87)
     try {
       switchNativeX87.isChecked = nativeGetNativeX87()
-    } catch (_: Exception) {
+    } catch (_: Throwable) {
       switchNativeX87.isChecked = prefs.getBoolean("native_x87", true)
     }
     switchNativeX87.setOnCheckedChangeListener { _, checked ->
       prefs.edit().putBoolean("native_x87", checked).apply()
-      try { nativeSetNativeX87(checked) } catch (_: Exception) {}
+      try { nativeSetNativeX87(checked) } catch (_: Throwable) {}
     }
 
     val switchValidation = findViewById<MaterialSwitch>(R.id.switch_validation_layers)
