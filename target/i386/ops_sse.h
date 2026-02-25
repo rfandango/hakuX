@@ -30,7 +30,7 @@
  * Xbox games do not check MXCSR exception flags so this is safe for xemu.
  */
 #ifndef XEMU_OPT_NATIVE_FLOAT
-#define XEMU_OPT_NATIVE_FLOAT 1
+#define XEMU_OPT_NATIVE_FLOAT 0
 #endif
 #if defined(XBOX) && defined(__aarch64__) && XEMU_OPT_NATIVE_FLOAT && !defined(OPS_SSE_NATIVE_FP_DEFINED)
 #define OPS_SSE_NATIVE_FP_DEFINED

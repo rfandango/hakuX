@@ -696,11 +696,17 @@ static int SDLCALL QemuThreadMain(void* data) {
   return xemu_android_main(ctx->argc, ctx->argv);
 }
 
+#ifndef XEMU_OPT_TB_CACHE_HINTS
+#define XEMU_OPT_TB_CACHE_HINTS 1
+#endif
+
+#if XEMU_OPT_TB_CACHE_HINTS
 extern "C" void tb_cache_save(const char *path, uint32_t game_hash);
 extern "C" int  tb_cache_load(const char *path, uint32_t game_hash);
 extern "C" uint32_t tb_cache_compute_game_hash(const char *bootrom_path,
                                                const char *flashrom_path);
 extern "C" void tb_cache_cleanup(void);
+#endif
 
 extern "C" int xemu_android_main(int argc, char** argv) {
   if (!qemu_main) {
@@ -717,6 +723,7 @@ extern "C" int xemu_android_main(int argc, char** argv) {
   /* qemu_init's cleanup_add_fd already closed the original fd */
   g_dvd_fd = -1;
 
+#if XEMU_OPT_TB_CACHE_HINTS
   /* Load translation block cache hints for pre-warming */
   const char *storage_load = SDL_AndroidGetInternalStoragePath();
   if (storage_load) {
@@ -728,11 +735,13 @@ extern "C" int xemu_android_main(int argc, char** argv) {
     __android_log_print(ANDROID_LOG_INFO, "xemu-android",
                         "TB cache: loaded %d hints from %s", nhints, cache_path);
   }
+#endif
 
   LogInfo("xemu_android_main: qemu_main");
   int rc = qemu_main();
   LogErrorInt("xemu_android_main: qemu_main returned %d", rc);
 
+#if XEMU_OPT_TB_CACHE_HINTS
   /* Save translation block cache hints for next launch */
   const char *storage = SDL_AndroidGetInternalStoragePath();
   if (storage) {
@@ -746,6 +755,7 @@ extern "C" int xemu_android_main(int argc, char** argv) {
     tb_cache_save(cache_path, game_hash);
   }
   tb_cache_cleanup();
+#endif
 
   if (g_dvd_fd >= 0) {
     close(g_dvd_fd);

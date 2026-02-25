@@ -83,7 +83,7 @@
  * their normal undecorated symbols.
  */
 #ifndef XEMU_OPT_NATIVE_FLOAT
-#define XEMU_OPT_NATIVE_FLOAT 1
+#define XEMU_OPT_NATIVE_FLOAT 0
 #endif
 #if defined(XBOX) && defined(__aarch64__) && XEMU_OPT_NATIVE_FLOAT
 
