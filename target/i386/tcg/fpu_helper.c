@@ -82,12 +82,19 @@
  * implementations.  Helper function names are NOT renamed -- they keep
  * their normal undecorated symbols.
  */
-#ifndef XEMU_OPT_NATIVE_FLOAT
-#define XEMU_OPT_NATIVE_FLOAT 0
-#endif
-#if defined(XBOX) && defined(__aarch64__) && XEMU_OPT_NATIVE_FLOAT
+/*
+ * Runtime toggle: when enabled, use native ARM64 double for x87 floatx80
+ * operations (fast but loses 16 bits of mantissa). When disabled, fall
+ * through to the full softfloat implementation (precise but slower).
+ *
+ * Default ON for performance; can be toggled at runtime via
+ * xemu_set_native_x87() which also flushes translation blocks.
+ */
+#if defined(XBOX) && defined(__aarch64__)
 
 #include <string.h>
+
+bool g_xemu_native_x87 = true;
 
 static inline double fx80_to_f64(floatx80 a)
 {
@@ -97,10 +104,9 @@ static inline double fx80_to_f64(floatx80 a)
     int exp = exp_sign & 0x7FFF;
 
     if (exp == 0x7FFF) {
-        /* Infinity or NaN */
         uint64_t d_bits = ((uint64_t)sign << 63) | (UINT64_C(0x7FF) << 52);
         if (mant & UINT64_C(0x7FFFFFFFFFFFFFFF)) {
-            d_bits |= UINT64_C(0x8000000000000); /* quiet NaN */
+            d_bits |= UINT64_C(0x8000000000000);
         }
         double d;
         memcpy(&d, &d_bits, sizeof(d));
@@ -108,11 +114,9 @@ static inline double fx80_to_f64(floatx80 a)
     }
 
     if (exp == 0 || !(mant & UINT64_C(0x8000000000000000))) {
-        /* Zero or denormal -- treat as zero (sufficient for Xbox games) */
         return sign ? -0.0 : 0.0;
     }
 
-    /* Normal: rebias exponent from 16383 to 1023 */
     int d_exp = exp - 16383 + 1023;
     if (d_exp >= 0x7FF) {
         return sign ? -INFINITY : INFINITY;
@@ -121,7 +125,6 @@ static inline double fx80_to_f64(floatx80 a)
         return sign ? -0.0 : 0.0;
     }
 
-    /* Drop explicit integer bit, take top 52 bits of remaining 63 */
     uint64_t d_mant = (mant & UINT64_C(0x7FFFFFFFFFFFFFFF)) >> 11;
     uint64_t d_bits = ((uint64_t)sign << 63) | ((uint64_t)d_exp << 52) | d_mant;
     double d;
@@ -138,7 +141,6 @@ static inline floatx80 f64_to_fx80(double d)
     uint64_t d_mant = d_bits & UINT64_C(0xFFFFFFFFFFFFF);
 
     if (d_exp == 0x7FF) {
-        /* Infinity or NaN */
         uint64_t low = UINT64_C(0x8000000000000000);
         if (d_mant) {
             low |= (d_mant << 11) | UINT64_C(0x4000000000000000);
@@ -147,14 +149,9 @@ static inline floatx80 f64_to_fx80(double d)
     }
 
     if (d_exp == 0) {
-        if (d_mant == 0) {
-            return make_floatx80((uint16_t)(sign << 15), 0);
-        }
-        /* Denormal double -- flush to zero for simplicity */
         return make_floatx80((uint16_t)(sign << 15), 0);
     }
 
-    /* Normal: rebias exponent from 1023 to 16383, add explicit integer bit */
     int x_exp = d_exp - 1023 + 16383;
     uint64_t low = UINT64_C(0x8000000000000000) | (d_mant << 11);
     return make_floatx80((sign << 15) | x_exp, low);
@@ -169,66 +166,149 @@ static inline floatx80 pack_arm64(floatx80 v, float_status *status)
     }
     case floatx80_precision_d:
     default:
-        return v; /* already at double precision */
+        return v;
     }
 }
 
-#define floatx80_add(a, b, s)          pack_arm64(f64_to_fx80(fx80_to_f64(a) + fx80_to_f64(b)), s)
-#define floatx80_sub(a, b, s)          pack_arm64(f64_to_fx80(fx80_to_f64(a) - fx80_to_f64(b)), s)
-#define floatx80_mul(a, b, s)          pack_arm64(f64_to_fx80(fx80_to_f64(a) * fx80_to_f64(b)), s)
-#define floatx80_div(a, b, s)          pack_arm64(f64_to_fx80(fx80_to_f64(a) / fx80_to_f64(b)), s)
+/*
+ * Save references to the real softfloat functions before we shadow them.
+ * The _soft pointers are used by the runtime dispatch wrappers below.
+ */
+static floatx80 (*const floatx80_add_soft)(floatx80, floatx80, float_status *)
+    = floatx80_add;
+static floatx80 (*const floatx80_sub_soft)(floatx80, floatx80, float_status *)
+    = floatx80_sub;
+static floatx80 (*const floatx80_mul_soft)(floatx80, floatx80, float_status *)
+    = floatx80_mul;
+static floatx80 (*const floatx80_div_soft)(floatx80, floatx80, float_status *)
+    = floatx80_div;
+static FloatRelation (*const floatx80_compare_soft)(floatx80, floatx80, float_status *)
+    = floatx80_compare;
+static floatx80 (*const float32_to_floatx80_soft)(float32, float_status *)
+    = float32_to_floatx80;
+static float32  (*const floatx80_to_float32_soft)(floatx80, float_status *)
+    = floatx80_to_float32;
+static floatx80 (*const float64_to_floatx80_soft)(float64, float_status *)
+    = float64_to_floatx80;
+static float64  (*const floatx80_to_float64_soft)(floatx80, float_status *)
+    = floatx80_to_float64;
+static floatx80 (*const int32_to_floatx80_soft)(int32_t, float_status *)
+    = int32_to_floatx80;
 
-static inline
-FloatRelation floatx80_compare_arm64(floatx80 a, floatx80 b, float_status *status)
+static inline floatx80 floatx80_add_rt(floatx80 a, floatx80 b, float_status *s)
 {
-    double da = fx80_to_f64(a);
-    double db = fx80_to_f64(b);
-    if (da < db) return float_relation_less;
-    if (da > db) return float_relation_greater;
-    if (da == db) return float_relation_equal;
-    return float_relation_unordered;
+    if (__builtin_expect(g_xemu_native_x87, 1))
+        return pack_arm64(f64_to_fx80(fx80_to_f64(a) + fx80_to_f64(b)), s);
+    return floatx80_add_soft(a, b, s);
 }
-#define floatx80_compare      floatx80_compare_arm64
+static inline floatx80 floatx80_sub_rt(floatx80 a, floatx80 b, float_status *s)
+{
+    if (__builtin_expect(g_xemu_native_x87, 1))
+        return pack_arm64(f64_to_fx80(fx80_to_f64(a) - fx80_to_f64(b)), s);
+    return floatx80_sub_soft(a, b, s);
+}
+static inline floatx80 floatx80_mul_rt(floatx80 a, floatx80 b, float_status *s)
+{
+    if (__builtin_expect(g_xemu_native_x87, 1))
+        return pack_arm64(f64_to_fx80(fx80_to_f64(a) * fx80_to_f64(b)), s);
+    return floatx80_mul_soft(a, b, s);
+}
+static inline floatx80 floatx80_div_rt(floatx80 a, floatx80 b, float_status *s)
+{
+    if (__builtin_expect(g_xemu_native_x87, 1))
+        return pack_arm64(f64_to_fx80(fx80_to_f64(a) / fx80_to_f64(b)), s);
+    return floatx80_div_soft(a, b, s);
+}
+static inline FloatRelation floatx80_compare_rt(floatx80 a, floatx80 b, float_status *s)
+{
+    if (__builtin_expect(g_xemu_native_x87, 1)) {
+        double da = fx80_to_f64(a), db = fx80_to_f64(b);
+        if (da < db) return float_relation_less;
+        if (da > db) return float_relation_greater;
+        if (da == db) return float_relation_equal;
+        return float_relation_unordered;
+    }
+    return floatx80_compare_soft(a, b, s);
+}
+static inline floatx80 float32_to_floatx80_rt(float32 val, float_status *s)
+{
+    if (__builtin_expect(g_xemu_native_x87, 1)) {
+        union { float32 i; float f; } u; u.i = val;
+        return f64_to_fx80((double)u.f);
+    }
+    return float32_to_floatx80_soft(val, s);
+}
+static inline float32 floatx80_to_float32_rt(floatx80 a, float_status *s)
+{
+    if (__builtin_expect(g_xemu_native_x87, 1)) {
+        union { float f; float32 i; } u; u.f = (float)fx80_to_f64(a);
+        return u.i;
+    }
+    return floatx80_to_float32_soft(a, s);
+}
+static inline floatx80 float64_to_floatx80_rt(float64 val, float_status *s)
+{
+    if (__builtin_expect(g_xemu_native_x87, 1)) {
+        union { float64 i; double d; } u; u.i = val;
+        return f64_to_fx80(u.d);
+    }
+    return float64_to_floatx80_soft(val, s);
+}
+static inline float64 floatx80_to_float64_rt(floatx80 a, float_status *s)
+{
+    if (__builtin_expect(g_xemu_native_x87, 1)) {
+        union { double d; float64 i; } u; u.d = fx80_to_f64(a);
+        return u.i;
+    }
+    return floatx80_to_float64_soft(a, s);
+}
+static inline floatx80 int32_to_floatx80_rt(int32_t a, float_status *s)
+{
+    if (__builtin_expect(g_xemu_native_x87, 1))
+        return f64_to_fx80((double)a);
+    return int32_to_floatx80_soft(a, s);
+}
 
-static inline floatx80 float32_to_floatx80_arm64(float32 val, float_status *s)
-{
-    union { float32 i; float f; } u;
-    u.i = val;
-    return f64_to_fx80((double)u.f);
-}
-#define float32_to_floatx80   float32_to_floatx80_arm64
-
-static inline float32 floatx80_to_float32_arm64(floatx80 a, float_status *s)
-{
-    union { float f; float32 i; } u;
-    u.f = (float)fx80_to_f64(a);
-    return u.i;
-}
-#define floatx80_to_float32   floatx80_to_float32_arm64
-
-static inline floatx80 float64_to_floatx80_arm64(float64 val, float_status *s)
-{
-    union { float64 i; double d; } u;
-    u.i = val;
-    return f64_to_fx80(u.d);
-}
-#define float64_to_floatx80   float64_to_floatx80_arm64
-
-static inline float64 floatx80_to_float64_arm64(floatx80 a, float_status *s)
-{
-    union { double d; float64 i; } u;
-    u.d = fx80_to_f64(a);
-    return u.i;
-}
-#define floatx80_to_float64   floatx80_to_float64_arm64
-
-static inline floatx80 int32_to_floatx80_arm64(int32_t a, float_status *s)
-{
-    return f64_to_fx80((double)a);
-}
-#define int32_to_floatx80     int32_to_floatx80_arm64
+#define floatx80_add          floatx80_add_rt
+#define floatx80_sub          floatx80_sub_rt
+#define floatx80_mul          floatx80_mul_rt
+#define floatx80_div          floatx80_div_rt
+#define floatx80_compare      floatx80_compare_rt
+#define float32_to_floatx80   float32_to_floatx80_rt
+#define floatx80_to_float32   floatx80_to_float32_rt
+#define float64_to_floatx80   float64_to_floatx80_rt
+#define floatx80_to_float64   floatx80_to_float64_rt
+#define int32_to_floatx80     int32_to_floatx80_rt
 
 #endif /* XBOX && __aarch64__ */
+
+#if defined(XBOX)
+#include "exec/tb-flush.h"
+#include "hw/core/cpu.h"
+
+void xemu_set_native_x87(bool enable)
+{
+#if defined(__aarch64__)
+    if (g_xemu_native_x87 == enable) return;
+    g_xemu_native_x87 = enable;
+    CPUState *cpu = first_cpu;
+    if (cpu) {
+        queue_tb_flush(cpu);
+    }
+#else
+    (void)enable;
+#endif
+}
+
+bool xemu_get_native_x87(void)
+{
+#if defined(__aarch64__)
+    return g_xemu_native_x87;
+#else
+    return false;
+#endif
+}
+#endif /* XBOX */
 
 /*
  * x86_64 hard FPU: dual-compilation via fpu_helper_hard.c.

@@ -26,6 +26,9 @@
 #include "xemu-settings.h"
 #include "hw/xbox/nv2a/debug.h"
 
+extern "C" void xemu_set_native_x87(bool enable);
+extern "C" bool xemu_get_native_x87(void);
+
 #ifdef CONFIG_VULKAN
 #include <adrenotools/driver.h>
 #include <dlfcn.h>
@@ -659,6 +662,11 @@ static SetupFiles SyncSetupFiles() {
   ds.vsync = GetPrefBool(env, activity, "vsync", false);
   ds.unlock_framerate = GetPrefBool(env, activity, "unlock_framerate", true);
   ds.validation_layers = GetPrefBool(env, activity, "validation_layers", false);
+
+  bool native_x87 = GetPrefBool(env, activity, "native_x87", true);
+  xemu_set_native_x87(native_x87);
+  __android_log_print(ANDROID_LOG_INFO, "xemu-android",
+                      "native x87 FPU: %s", native_x87 ? "ON" : "OFF");
   std::string filterPref = GetPrefString(env, activity, "filtering");
   if (!filterPref.empty()) ds.filtering = filterPref;
   std::string arPref = GetPrefString(env, activity, "aspect_ratio");
@@ -1047,6 +1055,26 @@ extern "C" JNIEXPORT jstring JNICALL
 Java_com_izzy2lost_x1box_MainActivity_nativeGetDriverInfo(JNIEnv *env, jobject)
 {
     return env->NewStringUTF(g_vulkan_driver_info);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_izzy2lost_x1box_SettingsActivity_nativeGetNativeX87(JNIEnv *, jobject)
+{
+    return xemu_get_native_x87() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_izzy2lost_x1box_SettingsActivity_nativeSetNativeX87(JNIEnv *, jobject, jboolean enable)
+{
+    xemu_set_native_x87(enable == JNI_TRUE);
+    if (!enable) {
+        const char *storage = SDL_AndroidGetInternalStoragePath();
+        if (storage) {
+            char path[PATH_MAX];
+            snprintf(path, sizeof(path), "%s/x1box/tb_cache.bin", storage);
+            remove(path);
+        }
+    }
 }
 
 #ifdef CONFIG_VULKAN

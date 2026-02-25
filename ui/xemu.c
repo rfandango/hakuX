@@ -170,14 +170,15 @@ static bool sdl2_gl_has_extension(const char *ext_list, const char *ext)
 
 static void android_log_gl_error(const char *stage)
 {
+#ifdef XEMU_ANDROID_GL_DEBUG
     GLenum err;
-    bool logged = false;
     while ((err = glGetError()) != GL_NO_ERROR) {
         __android_log_print(ANDROID_LOG_ERROR, "xemu-android",
                             "GL error at %s: 0x%x", stage, err);
-        logged = true;
     }
-    (void)logged;
+#else
+    (void)stage;
+#endif
 }
 
 static GLuint android_gl_compile_shader(GLenum type, const char *src)
@@ -1582,7 +1583,16 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
             sdl2_poll_events(scon);
             bql_unlock();
             qemu_mutex_unlock_main_loop();
+#ifdef __ANDROID__
+            int64_t remaining_ms = (next_render_ns - now) / 1000000;
+            if (remaining_ms > 2) {
+                SDL_Delay((int)(remaining_ms - 1));
+            } else {
+                SDL_Delay(0);
+            }
+#else
             SDL_Delay(1);
+#endif
             return;
         }
         now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
@@ -1691,10 +1701,12 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
             }
             if (!g_android_cpu_tex) {
                 glGenTextures(1, &g_android_cpu_tex);
+                glBindTexture(GL_TEXTURE_2D, g_android_cpu_tex);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            } else {
+                glBindTexture(GL_TEXTURE_2D, g_android_cpu_tex);
             }
-            glBindTexture(GL_TEXTURE_2D, g_android_cpu_tex);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             if (rb_w != g_android_cpu_tex_w || rb_h != g_android_cpu_tex_h) {
                 g_android_cpu_tex_w = rb_w;
                 g_android_cpu_tex_h = rb_h;
@@ -1716,6 +1728,7 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
         }
     } else {
         tex = nv2a_get_framebuffer_surface();
+#ifdef XEMU_ANDROID_GL_DEBUG
         if (tex != 0 && glIsTexture(tex) == GL_FALSE) {
             if ((g_android_frame_counter % 120) == 0) {
                 __android_log_print(ANDROID_LOG_WARN, "xemu-android",
@@ -1724,6 +1737,7 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
             }
             tex = 0;
         }
+#endif
     }
 #else
     tex = nv2a_get_framebuffer_surface();
@@ -1794,7 +1808,9 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
     bql_unlock();
     qemu_mutex_unlock_main_loop();
 
-#ifndef __ANDROID__
+#ifdef __ANDROID__
+    glFlush();
+#else
     glFinish();
 #endif
     nv2a_release_framebuffer_surface();
@@ -1806,7 +1822,8 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
     android_log_gl_error("refresh-swap");
 #endif
 
-    /* VGA update for dirty-region tracking */
+#ifndef __ANDROID__
+    /* VGA update for dirty-region tracking (not needed on Android NV2A path) */
     qemu_mutex_lock_main_loop();
     bql_lock();
     graphic_hw_update(scon->dcl.con);
@@ -1815,6 +1832,7 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
     }
     bql_unlock();
     qemu_mutex_unlock_main_loop();
+#endif
 
 }
 

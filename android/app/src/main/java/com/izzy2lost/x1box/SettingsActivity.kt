@@ -81,6 +81,17 @@ class SettingsActivity : AppCompatActivity() {
       prefs.edit().putBoolean("unlock_framerate", checked).apply()
     }
 
+    val switchNativeX87 = findViewById<MaterialSwitch>(R.id.switch_native_x87)
+    try {
+      switchNativeX87.isChecked = nativeGetNativeX87()
+    } catch (_: Exception) {
+      switchNativeX87.isChecked = prefs.getBoolean("native_x87", true)
+    }
+    switchNativeX87.setOnCheckedChangeListener { _, checked ->
+      prefs.edit().putBoolean("native_x87", checked).apply()
+      try { nativeSetNativeX87(checked) } catch (_: Exception) {}
+    }
+
     val switchValidation = findViewById<MaterialSwitch>(R.id.switch_validation_layers)
     switchValidation.isChecked = prefs.getBoolean("validation_layers", false)
     switchValidation.setOnCheckedChangeListener { _, checked ->
@@ -316,6 +327,9 @@ class SettingsActivity : AppCompatActivity() {
       .setNegativeButton(android.R.string.cancel, null)
       .show()
   }
+
+  private external fun nativeGetNativeX87(): Boolean
+  private external fun nativeSetNativeX87(enable: Boolean)
 
   companion object {
     private const val FATX_SUPERBLOCK_SIZE = 4096
