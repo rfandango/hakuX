@@ -1198,7 +1198,7 @@ static void sync_staging_buffer(PGRAPHState *pg, VkCommandBuffer cmd,
                                 int index_src, int index_dst)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
-    StorageBuffer *b_src = &r->storage_buffers[index_src];
+    StorageBuffer *b_src = get_staging_buffer(r, index_src);
     StorageBuffer *b_dst = &r->storage_buffers[index_dst];
 
     if (!b_src->buffer_offset) {
@@ -1356,6 +1356,33 @@ const enum NV2A_PROF_COUNTERS_ENUM finish_reason_to_counter_enum[] = {
     [VK_FINISH_REASON_STALLED] = NV2A_PROF_FINISH_STALLED,
 };
 
+#if OPT_ALWAYS_DEFERRED_FENCES
+void pgraph_vk_flush_all_frames(PGRAPHState *pg)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    for (int i = 0; i < NUM_SUBMIT_FRAMES; i++) {
+        if (r->frame_submitted[i]) {
+            VK_CHECK(vkWaitForFences(r->device, 1, &r->frame_fences[i],
+                                     VK_TRUE, UINT64_MAX));
+            r->frame_submitted[i] = false;
+            for (int j = 0; j < r->deferred_framebuffer_count[i]; j++) {
+                vkDestroyFramebuffer(r->device,
+                                     r->deferred_framebuffers[i][j], NULL);
+            }
+            r->deferred_framebuffer_count[i] = 0;
+        }
+        if (i != r->current_frame) {
+            r->frame_staging[i].index_staging.buffer_offset = 0;
+            r->frame_staging[i].vertex_inline_staging.buffer_offset = 0;
+            r->frame_staging[i].uniform_staging.buffer_offset = 0;
+            r->frame_staging[i].staging_src.buffer_offset = 0;
+            bitmap_clear(r->frame_staging[i].uploaded_bitmap,
+                         0, r->bitmap_size);
+        }
+    }
+}
+#endif
+
 void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
@@ -1375,11 +1402,31 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
         VK_CHECK(vkEndCommandBuffer(r->command_buffer));
 
         VkCommandBuffer cmd = pgraph_vk_ensure_nondraw_commands(pg);
+
+#if OPT_ALWAYS_DEFERRED_FENCES
+        /* WAR barrier: previous submissions may still be reading from shared
+         * destination buffers (UNIFORM, INDEX, VERTEX_INLINE, VERTEX_RAM).
+         * The staging sync below overwrites these from offset 0. Ensure all
+         * previous reads complete before we write. */
+        VkMemoryBarrier war_barrier = {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_MEMORY_READ_BIT |
+                             VK_ACCESS_MEMORY_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT |
+                             VK_ACCESS_MEMORY_WRITE_BIT,
+        };
+        vkCmdPipelineBarrier(
+            cmd,
+            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            0, 1, &war_barrier, 0, NULL, 0, NULL);
+#endif
+
         sync_staging_buffer(pg, cmd, BUFFER_INDEX_STAGING, BUFFER_INDEX);
         sync_staging_buffer(pg, cmd, BUFFER_VERTEX_INLINE_STAGING,
                                 BUFFER_VERTEX_INLINE);
         sync_staging_buffer(pg, cmd, BUFFER_UNIFORM_STAGING, BUFFER_UNIFORM);
-        bitmap_clear(r->uploaded_bitmap, 0, r->bitmap_size);
+        bitmap_clear(get_uploaded_bitmap(r), 0, r->bitmap_size);
         flush_memory_buffer(pg, cmd);
         VK_CHECK(vkEndCommandBuffer(r->aux_command_buffer));
         r->in_aux_command_buffer = false;
@@ -1411,6 +1458,17 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
         r->frame_submitted[r->current_frame] = true;
         r->submit_count += 1;
 
+#if OPT_ALWAYS_DEFERRED_FENCES
+        if (finish_reason != VK_FINISH_REASON_FLIP_STALL &&
+            finish_reason != VK_FINISH_REASON_PRESENTING) {
+            /* Mid-frame finishes split one emulated frame across two GPU
+             * submissions. Wait for the just-submitted half to complete so
+             * the second half can safely reuse shared surfaces/textures. */
+            VK_CHECK(vkWaitForFences(r->device, 1, &r->command_buffer_fence,
+                                     VK_TRUE, UINT64_MAX));
+        }
+#endif
+
 #if OPT_TEX_NONDRAW_CMD
         pgraph_vk_staging_reset(pg);
 #endif
@@ -1427,7 +1485,8 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
         }
 
 #if OPT_DEFERRED_FENCES && OPT_N_BUFFERED_SUBMIT
-        if (finish_reason == VK_FINISH_REASON_FLIP_STALL ||
+        if (OPT_ALWAYS_DEFERRED_FENCES ||
+            finish_reason == VK_FINISH_REASON_FLIP_STALL ||
             finish_reason == VK_FINISH_REASON_PRESENTING) {
             memcpy(r->deferred_framebuffers[r->current_frame],
                    r->framebuffers,
@@ -1448,6 +1507,14 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
                                          NULL);
                 }
                 r->deferred_framebuffer_count[next_frame] = 0;
+#if OPT_ALWAYS_DEFERRED_FENCES
+                r->frame_staging[next_frame].index_staging.buffer_offset = 0;
+                r->frame_staging[next_frame].vertex_inline_staging.buffer_offset = 0;
+                r->frame_staging[next_frame].uniform_staging.buffer_offset = 0;
+                r->frame_staging[next_frame].staging_src.buffer_offset = 0;
+                bitmap_clear(r->frame_staging[next_frame].uploaded_bitmap,
+                             0, r->bitmap_size);
+#endif
             }
 
             r->current_frame = next_frame;
@@ -1482,7 +1549,14 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
         destroy_framebuffers(pg);
 #endif
 
+#if OPT_ALWAYS_DEFERRED_FENCES
+        /* Descriptor sets are still in use by in-flight GPU frames.
+         * Don't reset indices; they'll be reset when pools are exhausted
+         * after flushing all frames. */
+#else
         r->descriptor_set_index = 0;
+#endif
+        r->need_descriptor_rebind = true;
         r->in_command_buffer = false;
         r->color_drawn_in_cb = false;
         r->zeta_drawn_in_cb = false;
@@ -1496,7 +1570,9 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
     NV2AState *d = container_of(pg, NV2AState, pgraph);
     pgraph_vk_process_pending_reports_internal(d);
 
+#if !OPT_ALWAYS_DEFERRED_FENCES
     pgraph_vk_compute_finish_complete(r);
+#endif
 }
 
 void pgraph_vk_begin_command_buffer(PGRAPHState *pg)
@@ -2185,7 +2261,7 @@ static VertexBufferRemap remap_unaligned_attributes(PGRAPHState *pg,
 
     // reserve space
     if (remap.attributes) {
-        StorageBuffer *buffer = &r->storage_buffers[BUFFER_VERTEX_INLINE_STAGING];
+        StorageBuffer *buffer = get_staging_buffer(r, BUFFER_VERTEX_INLINE_STAGING);
         VkDeviceSize starting_offset = ROUND_UP(buffer->buffer_offset, 16);
         size_t total_space_required =
             (starting_offset - buffer->buffer_offset) + remap.buffer_space_required;
@@ -2203,7 +2279,7 @@ static void copy_remapped_attributes_to_inline_buffer(PGRAPHState *pg,
 {
     NV2AState *d = container_of(pg, NV2AState, pgraph);
     PGRAPHVkState *r = pg->vk_renderer_state;
-    StorageBuffer *buffer = &r->storage_buffers[BUFFER_VERTEX_INLINE_STAGING];
+    StorageBuffer *buffer = get_staging_buffer(r, BUFFER_VERTEX_INLINE_STAGING);
 
     if (!remap.attributes) {
         return;

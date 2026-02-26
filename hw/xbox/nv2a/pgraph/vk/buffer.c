@@ -230,10 +230,97 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
         }
     }
 
+#if OPT_ALWAYS_DEFERRED_FENCES
+    for (int i = 0; i < NUM_SUBMIT_FRAMES; i++) {
+        FrameStagingState *fs = &r->frame_staging[i];
+
+        size_t idx_cap = MIN(r->storage_buffers[BUFFER_INDEX].buffer_size,
+                             8 * mib);
+        size_t vtx_cap = MIN(r->storage_buffers[BUFFER_VERTEX_INLINE].buffer_size,
+                             32 * mib);
+        size_t uni_cap = MIN(r->storage_buffers[BUFFER_UNIFORM].buffer_size,
+                             16 * mib);
+        size_t stg_cap = MIN(r->storage_buffers[BUFFER_STAGING_SRC].buffer_size,
+                             32 * mib);
+
+        fs->index_staging = (StorageBuffer){
+            .alloc_info = host_alloc_create_info,
+            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            .buffer_size = idx_cap,
+        };
+        fs->vertex_inline_staging = (StorageBuffer){
+            .alloc_info = host_alloc_create_info,
+            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            .buffer_size = vtx_cap,
+        };
+        fs->uniform_staging = (StorageBuffer){
+            .alloc_info = host_alloc_create_info,
+            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            .buffer_size = uni_cap,
+        };
+        fs->staging_src = (StorageBuffer){
+            .alloc_info = host_alloc_create_info,
+            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            .buffer_size = stg_cap,
+        };
+
+        char name[64];
+        StorageBuffer *bufs[] = {
+            &fs->index_staging, &fs->vertex_inline_staging,
+            &fs->uniform_staging, &fs->staging_src
+        };
+        const char *names[] = {
+            "INDEX_STAGING", "VTXINLINE_STAGING", "UNIFORM_STAGING",
+            "STAGING_SRC"
+        };
+        for (int j = 0; j < ARRAY_SIZE(bufs); j++) {
+            snprintf(name, sizeof(name), "FRAME%d_%s", i, names[j]);
+            VK_LOG_ERROR("buffer_init: create %s size=%zu", name, bufs[j]->buffer_size);
+            if (!create_buffer(pg, bufs[j], name, errp)) {
+                goto fail;
+            }
+            VkResult res = vmaMapMemory(r->allocator, bufs[j]->allocation,
+                                        (void **)&bufs[j]->mapped);
+            if (res != VK_SUCCESS) {
+                error_setg(errp, "Failed to map per-frame buffer %s: %d",
+                           name, res);
+                goto fail;
+            }
+        }
+
+        fs->uploaded_bitmap = bitmap_new(r->bitmap_size);
+        if (!fs->uploaded_bitmap) {
+            error_setg(errp, "Failed to allocate per-frame uploaded bitmap");
+            goto fail;
+        }
+        bitmap_clear(fs->uploaded_bitmap, 0, r->bitmap_size);
+    }
+    VK_LOG_ERROR("buffer_init: per-frame staging buffers created (%d frames)",
+                 NUM_SUBMIT_FRAMES);
+#endif
+
     pgraph_prim_rewrite_init(&r->prim_rewrite_buf);
     return true;
 
 fail:
+#if OPT_ALWAYS_DEFERRED_FENCES
+    for (int i = 0; i < NUM_SUBMIT_FRAMES; i++) {
+        FrameStagingState *fs = &r->frame_staging[i];
+        StorageBuffer *bufs[] = {
+            &fs->index_staging, &fs->vertex_inline_staging,
+            &fs->uniform_staging, &fs->staging_src
+        };
+        for (int j = 0; j < ARRAY_SIZE(bufs); j++) {
+            if (bufs[j]->mapped) {
+                vmaUnmapMemory(r->allocator, bufs[j]->allocation);
+                bufs[j]->mapped = NULL;
+            }
+            destroy_buffer(pg, bufs[j]);
+        }
+        g_free(fs->uploaded_bitmap);
+        fs->uploaded_bitmap = NULL;
+    }
+#endif
     for (int i = 0; i < BUFFER_COUNT; i++) {
         if (r->storage_buffers[i].mapped) {
             vmaUnmapMemory(r->allocator, r->storage_buffers[i].allocation);
@@ -251,6 +338,24 @@ void pgraph_vk_finalize_buffers(NV2AState *d)
 {
     PGRAPHState *pg = &d->pgraph;
     PGRAPHVkState *r = pg->vk_renderer_state;
+
+#if OPT_ALWAYS_DEFERRED_FENCES
+    for (int i = 0; i < NUM_SUBMIT_FRAMES; i++) {
+        FrameStagingState *fs = &r->frame_staging[i];
+        StorageBuffer *bufs[] = {
+            &fs->index_staging, &fs->vertex_inline_staging,
+            &fs->uniform_staging, &fs->staging_src
+        };
+        for (int j = 0; j < ARRAY_SIZE(bufs); j++) {
+            if (bufs[j]->mapped) {
+                vmaUnmapMemory(r->allocator, bufs[j]->allocation);
+            }
+            destroy_buffer(pg, bufs[j]);
+        }
+        g_free(fs->uploaded_bitmap);
+        fs->uploaded_bitmap = NULL;
+    }
+#endif
 
     for (int i = 0; i < BUFFER_COUNT; i++) {
         if (r->storage_buffers[i].mapped) {
@@ -270,7 +375,7 @@ bool pgraph_vk_buffer_has_space_for(PGRAPHState *pg, int index,
                                     VkDeviceAddress alignment)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
-    StorageBuffer *b = &r->storage_buffers[index];
+    StorageBuffer *b = get_staging_buffer(r, index);
     return (ROUND_UP(b->buffer_offset, alignment) + size) <= b->buffer_size;
 }
 
@@ -286,7 +391,7 @@ VkDeviceSize pgraph_vk_append_to_buffer(PGRAPHState *pg, int index, void **data,
     }
     assert(pgraph_vk_buffer_has_space_for(pg, index, total_size, alignment));
 
-    StorageBuffer *b = &r->storage_buffers[index];
+    StorageBuffer *b = get_staging_buffer(r, index);
     VkDeviceSize starting_offset = ROUND_UP(b->buffer_offset, alignment);
 
     assert(b->mapped);
@@ -303,8 +408,8 @@ VkDeviceSize pgraph_vk_append_to_buffer(PGRAPHState *pg, int index, void **data,
 VkDeviceSize pgraph_vk_staging_alloc(PGRAPHState *pg, VkDeviceSize size)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
-    StorageBuffer *b = &r->storage_buffers[BUFFER_STAGING_SRC];
-    VkDeviceSize offset = b->buffer_offset;
+    StorageBuffer *b = get_staging_buffer(r, BUFFER_STAGING_SRC);
+    VkDeviceSize offset = ROUND_UP(b->buffer_offset, 16);
     if (offset + size > b->buffer_size) {
         return VK_WHOLE_SIZE;
     }
@@ -315,5 +420,5 @@ VkDeviceSize pgraph_vk_staging_alloc(PGRAPHState *pg, VkDeviceSize size)
 void pgraph_vk_staging_reset(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
-    r->storage_buffers[BUFFER_STAGING_SRC].buffer_offset = 0;
+    get_staging_buffer(r, BUFFER_STAGING_SRC)->buffer_offset = 0;
 }

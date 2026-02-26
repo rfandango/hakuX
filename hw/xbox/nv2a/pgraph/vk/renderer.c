@@ -98,10 +98,13 @@ static void check_driver_identity_and_wipe_caches(PGRAPHVkState *r)
                 current.vendor_id, current.device_id, current.driver_version);
 #endif
 
+        char *smk_path = g_strdup_printf("%sshader_module_keys.bin", base);
         remove_directory_recursive(spv_dir);
         unlink(plc_path);
+        unlink(smk_path);
         g_free(spv_dir);
         g_free(plc_path);
+        g_free(smk_path);
 
         g_file_set_contents(id_path, (const gchar *)&current,
                             sizeof(GpuDriverIdentity), NULL);
@@ -146,6 +149,7 @@ static void pgraph_vk_init(NV2AState *d, Error **errp)
     PGRAPHState *pg = &d->pgraph;
 
     pg->vk_renderer_state = (PGRAPHVkState *)g_malloc0(sizeof(PGRAPHVkState));
+    pg->vk_renderer_state->need_descriptor_rebind = true;
 
 #if HAVE_EXTERNAL_MEMORY
     bool use_external_memory = pgraph_vk_gl_external_memory_available();
@@ -172,32 +176,32 @@ static void pgraph_vk_init(NV2AState *d, Error **errp)
 
     check_driver_identity_and_wipe_caches(pg->vk_renderer_state);
 
-    VK_LOG("init: command_buffers");
+    VK_LOG_ERROR("init: command_buffers");
     pgraph_vk_init_command_buffers(pg);
-    VK_LOG("init: buffers");
+    VK_LOG_ERROR("init: buffers");
     if (!pgraph_vk_init_buffers(d, errp)) {
         VK_LOG_ERROR("init: buffers FAILED");
         return;
     }
-    VK_LOG("init: surfaces");
+    VK_LOG_ERROR("init: surfaces");
     pgraph_vk_init_surfaces(pg);
-    VK_LOG("init: shaders");
+    VK_LOG_ERROR("init: shaders");
     pgraph_vk_init_shaders(pg);
-    VK_LOG("init: pipelines");
+    VK_LOG_ERROR("init: pipelines");
     pgraph_vk_init_pipelines(pg);
-    VK_LOG("init: textures");
+    VK_LOG_ERROR("init: textures");
     pgraph_vk_init_textures(pg);
-    VK_LOG("init: reports");
+    VK_LOG_ERROR("init: reports");
     pgraph_vk_init_reports(pg);
-    VK_LOG("init: compute");
+    VK_LOG_ERROR("init: compute");
     pgraph_vk_init_compute(pg);
-    VK_LOG("init: display");
+    VK_LOG_ERROR("init: display");
     pgraph_vk_init_display(pg);
 
     pgraph_vk_update_vertex_ram_buffer(&d->pgraph, 0, d->vram_ptr,
                                    memory_region_size(d->vram));
 
-    VK_LOG("init: renderer_ready");
+    VK_LOG_ERROR("init: renderer_ready");
 
 }
 

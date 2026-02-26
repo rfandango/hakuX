@@ -334,6 +334,13 @@ static void update_descriptor_sets(PGRAPHState *pg,
     assert(count == 3);
     VkWriteDescriptorSet descriptor_writes[3];
 
+#if OPT_ALWAYS_DEFERRED_FENCES
+    if (r->compute.descriptor_set_index >=
+        ARRAY_SIZE(r->compute.descriptor_sets)) {
+        pgraph_vk_flush_all_frames(pg);
+        r->compute.descriptor_set_index = 0;
+    }
+#endif
     assert(r->compute.descriptor_set_index <
            ARRAY_SIZE(r->compute.descriptor_sets));
 

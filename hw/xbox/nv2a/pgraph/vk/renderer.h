@@ -58,7 +58,13 @@
 #define OPT_SURF_BATCH_UPLOAD   1
 #define OPT_TRIPLE_BUFFERING    1
 #define OPT_LARGER_POOLS        1
+#define OPT_ALWAYS_DEFERRED_FENCES 1
 #define OPT_PRECISE_BARRIERS    1
+
+#if OPT_ALWAYS_DEFERRED_FENCES
+_Static_assert(OPT_TRIPLE_BUFFERING && OPT_N_BUFFERED_SUBMIT && OPT_DEFERRED_FENCES,
+               "OPT_ALWAYS_DEFERRED_FENCES requires triple buffering and deferred fences");
+#endif
 
 typedef struct QueueFamilyIndices {
     int queue_family;
@@ -125,6 +131,16 @@ typedef struct StorageBuffer {
     size_t buffer_size;
     uint8_t *mapped;
 } StorageBuffer;
+
+#if OPT_ALWAYS_DEFERRED_FENCES
+typedef struct FrameStagingState {
+    StorageBuffer index_staging;
+    StorageBuffer vertex_inline_staging;
+    StorageBuffer uniform_staging;
+    StorageBuffer staging_src;
+    unsigned long *uploaded_bitmap;
+} FrameStagingState;
+#endif
 
 typedef struct SurfaceBinding {
     QTAILQ_ENTRY(SurfaceBinding) entry;
@@ -433,9 +449,14 @@ typedef struct PGRAPHVkState {
     VkDescriptorSet descriptor_sets[1024];
 #endif
     int descriptor_set_index;
+    bool need_descriptor_rebind;
 
     StorageBuffer storage_buffers[BUFFER_COUNT];
     PrimRewriteBuf prim_rewrite_buf;
+
+#if OPT_ALWAYS_DEFERRED_FENCES
+    FrameStagingState frame_staging[NUM_SUBMIT_FRAMES];
+#endif
 
     MemorySyncRequirement vertex_ram_buffer_syncs[NV2A_VERTEXSHADER_ATTRIBUTES];
     size_t num_vertex_ram_buffer_syncs;
@@ -499,6 +520,35 @@ typedef struct PGRAPHVkState {
     PGRAPHVkDisplayState display;
     PGRAPHVkComputeState compute;
 } PGRAPHVkState;
+
+static inline StorageBuffer *get_staging_buffer(PGRAPHVkState *r, int buffer_id)
+{
+#if OPT_ALWAYS_DEFERRED_FENCES
+    switch (buffer_id) {
+    case BUFFER_INDEX_STAGING:
+        return &r->frame_staging[r->current_frame].index_staging;
+    case BUFFER_VERTEX_INLINE_STAGING:
+        return &r->frame_staging[r->current_frame].vertex_inline_staging;
+    case BUFFER_UNIFORM_STAGING:
+        return &r->frame_staging[r->current_frame].uniform_staging;
+    case BUFFER_STAGING_SRC:
+        return &r->frame_staging[r->current_frame].staging_src;
+    default:
+        return &r->storage_buffers[buffer_id];
+    }
+#else
+    return &r->storage_buffers[buffer_id];
+#endif
+}
+
+static inline unsigned long *get_uploaded_bitmap(PGRAPHVkState *r)
+{
+#if OPT_ALWAYS_DEFERRED_FENCES
+    return r->frame_staging[r->current_frame].uploaded_bitmap;
+#else
+    return r->uploaded_bitmap;
+#endif
+}
 
 // renderer.c
 void pgraph_vk_check_memory_budget(PGRAPHState *pg);
@@ -664,6 +714,9 @@ void pgraph_vk_clear_surface(NV2AState *d, uint32_t parameter);
 void pgraph_vk_draw_begin(NV2AState *d);
 void pgraph_vk_draw_end(NV2AState *d);
 void pgraph_vk_finish(PGRAPHState *pg, FinishReason why);
+#if OPT_ALWAYS_DEFERRED_FENCES
+void pgraph_vk_flush_all_frames(PGRAPHState *pg);
+#endif
 void pgraph_vk_flush_draw(NV2AState *d);
 void pgraph_vk_begin_command_buffer(PGRAPHState *pg);
 void pgraph_vk_ensure_command_buffer(PGRAPHState *pg);

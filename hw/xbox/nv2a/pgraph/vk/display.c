@@ -243,17 +243,30 @@ static void upload_pvideo_image(PGRAPHState *pg, PvideoState state)
 
     // FIXME: Dirty tracking. We don't necessarily need to upload so much.
 
+    size_t display_data_size = state.in_width * state.in_height * 4;
+
+#if OPT_ALWAYS_DEFERRED_FENCES
+    VkDeviceSize staging_base = pgraph_vk_staging_alloc(pg, display_data_size);
+    if (staging_base == VK_WHOLE_SIZE) {
+        pgraph_vk_flush_all_frames(pg);
+        pgraph_vk_staging_reset(pg);
+        staging_base = pgraph_vk_staging_alloc(pg, display_data_size);
+        assert(staging_base != VK_WHOLE_SIZE);
+    }
+#else
+    VkDeviceSize staging_base = 0;
+#endif
+
+    StorageBuffer *disp_staging = get_staging_buffer(r, BUFFER_STAGING_SRC);
     uint8_t *mapped_memory_ptr =
-        (uint8_t *)r->storage_buffers[BUFFER_STAGING_SRC].mapped;
+        (uint8_t *)disp_staging->mapped + staging_base;
 
     convert_texture_data__CR8YB8CB8YA8(
         mapped_memory_ptr, d->vram_ptr + state.base + state.offset,
         state.in_width, state.in_height, state.pitch);
 
-    size_t display_data_size = state.in_width * state.in_height * 4;
-    vmaFlushAllocation(r->allocator,
-                       r->storage_buffers[BUFFER_STAGING_SRC].allocation, 0,
-                       display_data_size);
+    vmaFlushAllocation(r->allocator, disp_staging->allocation,
+                       staging_base, display_data_size);
 
     VkCommandBuffer cmd = pgraph_vk_begin_single_time_commands(pg);
 
@@ -263,7 +276,8 @@ static void upload_pvideo_image(PGRAPHState *pg, PvideoState state)
         .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .buffer = r->storage_buffers[BUFFER_STAGING_SRC].buffer,
+        .buffer = disp_staging->buffer,
+        .offset = staging_base,
         .size = display_data_size
     };
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_HOST_BIT,
@@ -275,7 +289,7 @@ static void upload_pvideo_image(PGRAPHState *pg, PvideoState state)
         VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
     VkBufferImageCopy region = {
-        .bufferOffset = 0,
+        .bufferOffset = staging_base,
         .bufferRowLength = 0,
         .bufferImageHeight = 0,
         .imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -285,7 +299,7 @@ static void upload_pvideo_image(PGRAPHState *pg, PvideoState state)
         .imageOffset = (VkOffset3D){ 0, 0, 0 },
         .imageExtent = (VkExtent3D){ state.in_width, state.in_height, 1 },
     };
-    vkCmdCopyBufferToImage(cmd, r->storage_buffers[BUFFER_STAGING_SRC].buffer,
+    vkCmdCopyBufferToImage(cmd, disp_staging->buffer,
                            disp->pvideo.image,
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 

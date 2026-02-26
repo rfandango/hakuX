@@ -285,14 +285,26 @@ class SettingsActivity : AppCompatActivity() {
       .setMessage(R.string.settings_clear_shader_cache_confirm_message)
       .setPositiveButton(R.string.settings_clear_shader_cache) { _, _ ->
         try {
-          val baseDir = File(filesDir, "xemu/xemu")
+          val tag = "XemuShaderCache"
+          val baseDir = filesDir
+          Log.i(tag, "clearShaderCache: baseDir=${baseDir.absolutePath}")
+
           val spvDir = File(baseDir, "spv_cache")
           if (spvDir.isDirectory) {
-            spvDir.listFiles()?.forEach { it.delete() }
-            spvDir.delete()
+            val files = spvDir.listFiles()
+            Log.i(tag, "  spv_cache: ${files?.size ?: 0} files")
+            files?.forEach { it.delete() }
+            val rmDir = spvDir.delete()
+            Log.i(tag, "  spv_cache dir removed=$rmDir")
+          } else {
+            Log.i(tag, "  spv_cache: not found")
           }
-          File(baseDir, "vk_pipeline_cache.bin").delete()
-          File(baseDir, "gpu_driver_id.bin").delete()
+
+          val plc = File(baseDir, "vk_pipeline_cache.bin")
+          Log.i(tag, "  vk_pipeline_cache.bin exists=${plc.exists()} deleted=${plc.delete()}")
+          val smk = File(baseDir, "shader_module_keys.bin")
+          Log.i(tag, "  shader_module_keys.bin exists=${smk.exists()} deleted=${smk.delete()}")
+
           Toast.makeText(this, getString(R.string.settings_clear_shader_cache_success), Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
           Log.e("XemuShaderCache", "clearShaderCache failed", e)

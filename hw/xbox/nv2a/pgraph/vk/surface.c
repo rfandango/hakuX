@@ -185,6 +185,10 @@ static void download_surface_to_buffer(NV2AState *d, SurfaceBinding *surface,
         pgraph_vk_finish(pg, VK_FINISH_REASON_SURFACE_DOWN);
     } else if (compute_needs_finish) {
         pgraph_vk_finish(pg, VK_FINISH_REASON_NEED_BUFFER_SPACE);
+#if OPT_ALWAYS_DEFERRED_FENCES
+        pgraph_vk_flush_all_frames(pg);
+        r->compute.descriptor_set_index = 0;
+#endif
     }
 
     bool downscale = (pg->surface_scale_factor != 1);
@@ -1124,7 +1128,6 @@ void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
     // Upload image data from host to staging buffer
     //
 
-    StorageBuffer *copy_buffer = &r->storage_buffers[BUFFER_STAGING_SRC];
     size_t uploaded_image_size = surface->height * surface->width *
                                  surface->fmt.bytes_per_pixel;
 
@@ -1132,12 +1135,24 @@ void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
     VkDeviceSize staging_base = pgraph_vk_staging_alloc(pg, uploaded_image_size);
     if (staging_base == VK_WHOLE_SIZE) {
         pgraph_vk_finish(pg, VK_FINISH_REASON_NEED_BUFFER_SPACE);
+#if OPT_ALWAYS_DEFERRED_FENCES
+        staging_base = pgraph_vk_staging_alloc(pg, uploaded_image_size);
+        if (staging_base == VK_WHOLE_SIZE) {
+            pgraph_vk_flush_all_frames(pg);
+            pgraph_vk_staging_reset(pg);
+            staging_base = pgraph_vk_staging_alloc(pg, uploaded_image_size);
+            assert(staging_base != VK_WHOLE_SIZE);
+        }
+#else
         pgraph_vk_staging_reset(pg);
         staging_base = pgraph_vk_staging_alloc(pg, uploaded_image_size);
         assert(staging_base != VK_WHOLE_SIZE);
+#endif
     }
+    StorageBuffer *copy_buffer = get_staging_buffer(r, BUFFER_STAGING_SRC);
     void *mapped_memory_ptr = copy_buffer->mapped + staging_base;
 #else
+    StorageBuffer *copy_buffer = get_staging_buffer(r, BUFFER_STAGING_SRC);
     assert(uploaded_image_size <= copy_buffer->buffer_size);
     VkDeviceSize staging_base = 0;
     void *mapped_memory_ptr = copy_buffer->mapped;

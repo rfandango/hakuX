@@ -21,6 +21,7 @@
 #include "qemu/fast-hash.h"
 #include "qemu/mstring.h"
 #include "renderer.h"
+#include "ui/xemu-settings.h"
 
 #define VSH_UBO_BINDING 0
 #define PSH_UBO_BINDING 1
@@ -147,10 +148,10 @@ void pgraph_vk_update_descriptor_sets(PGRAPHState *pg)
 
     bool need_uniform_write =
         r->uniforms_changed ||
-        !r->storage_buffers[BUFFER_UNIFORM_STAGING].buffer_offset;
+        !get_staging_buffer(r, BUFFER_UNIFORM_STAGING)->buffer_offset;
 
     if (!(r->shader_bindings_changed || r->texture_bindings_changed ||
-          (r->descriptor_set_index == 0) || need_uniform_write)) {
+          r->need_descriptor_rebind || need_uniform_write)) {
         return; // Nothing changed
     }
 
@@ -170,7 +171,14 @@ void pgraph_vk_update_descriptor_sets(PGRAPHState *pg)
     bool need_descriptor_write_reset =
         (r->descriptor_set_index >= ARRAY_SIZE(r->descriptor_sets));
 
-    if (need_descriptor_write_reset || need_ubo_staging_buffer_reset) {
+    if (need_descriptor_write_reset) {
+        pgraph_vk_finish(pg, VK_FINISH_REASON_NEED_BUFFER_SPACE);
+#if OPT_ALWAYS_DEFERRED_FENCES
+        pgraph_vk_flush_all_frames(pg);
+#endif
+        r->descriptor_set_index = 0;
+        need_uniform_write = true;
+    } else if (need_ubo_staging_buffer_reset) {
         pgraph_vk_finish(pg, VK_FINISH_REASON_NEED_BUFFER_SPACE);
         need_uniform_write = true;
     }
@@ -211,6 +219,14 @@ void pgraph_vk_update_descriptor_sets(PGRAPHState *pg)
 
     VkDescriptorImageInfo image_infos[NV2A_MAX_TEXTURES];
     for (int i = 0; i < NV2A_MAX_TEXTURES; i++) {
+#if OPT_ALWAYS_DEFERRED_FENCES
+        if (r->texture_bindings[i]->image_view == VK_NULL_HANDLE) {
+            VK_LOG_ERROR("DIAG: descriptor set %d binding tex[%d] "
+                         "has NULL image_view! image=%p",
+                         r->descriptor_set_index, i,
+                         (void *)r->texture_bindings[i]->image);
+        }
+#endif
         image_infos[i] = (VkDescriptorImageInfo){
             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             .imageView = r->texture_bindings[i]->image_view,
@@ -229,6 +245,7 @@ void pgraph_vk_update_descriptor_sets(PGRAPHState *pg)
 
     vkUpdateDescriptorSets(r->device, 6, descriptor_writes, 0, NULL);
 
+    r->need_descriptor_rebind = false;
     r->descriptor_set_index++;
 }
 
@@ -324,6 +341,25 @@ static bool shader_cache_entry_compare(Lru *lru, LruNode *node, const void *key)
     return memcmp(&snode->state, key, sizeof(ShaderState));
 }
 
+static bool shader_module_warmup_in_progress;
+
+static void shader_module_key_persist(const ShaderModuleCacheKey *key)
+{
+    if (!g_config.perf.cache_shaders || shader_module_warmup_in_progress) {
+        return;
+    }
+
+    const char *base = xemu_settings_get_base_path();
+    char *path = g_strdup_printf("%sshader_module_keys.bin", base);
+
+    FILE *f = fopen(path, "ab");
+    if (f) {
+        fwrite(key, sizeof(ShaderModuleCacheKey), 1, f);
+        fclose(f);
+    }
+    g_free(path);
+}
+
 static void shader_module_cache_entry_init(Lru *lru, LruNode *node,
                                            const void *key)
 {
@@ -356,6 +392,8 @@ static void shader_module_cache_entry_init(Lru *lru, LruNode *node,
         r, module->key.kind, mstring_get_str(code));
     pgraph_vk_ref_shader_module(module->module_info);
     mstring_unref(code);
+
+    shader_module_key_persist(&module->key);
 }
 
 static void shader_module_cache_entry_post_evict(Lru *lru, LruNode *node)
@@ -405,6 +443,35 @@ static void shader_cache_init(PGRAPHState *pg)
     r->shader_module_cache.compare_nodes = shader_module_cache_entry_compare;
     r->shader_module_cache.post_node_evict =
         shader_module_cache_entry_post_evict;
+
+    if (g_config.perf.cache_shaders) {
+        const char *base = xemu_settings_get_base_path();
+        char *path = g_strdup_printf("%sshader_module_keys.bin", base);
+        gchar *data = NULL;
+        gsize len = 0;
+
+        if (g_file_get_contents(path, &data, &len, NULL) && len > 0) {
+            size_t num_keys = len / sizeof(ShaderModuleCacheKey);
+            ShaderModuleCacheKey *keys = (ShaderModuleCacheKey *)data;
+
+            shader_module_warmup_in_progress = true;
+            int warmed = 0;
+            for (size_t i = 0; i < num_keys; i++) {
+                uint64_t hash = fast_hash((void *)&keys[i],
+                                          sizeof(ShaderModuleCacheKey));
+                if (!lru_contains_hash(&r->shader_module_cache, hash)) {
+                    lru_lookup(&r->shader_module_cache, hash, &keys[i]);
+                    warmed++;
+                }
+            }
+            shader_module_warmup_in_progress = false;
+
+            VK_LOG_ERROR("Shader module warm-up: %d/%zu modules pre-compiled",
+                         warmed, num_keys);
+        }
+        g_free(data);
+        g_free(path);
+    }
 }
 
 static void shader_cache_finalize(PGRAPHState *pg)
