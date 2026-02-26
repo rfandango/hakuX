@@ -114,6 +114,18 @@ static void check_driver_identity_and_wipe_caches(PGRAPHVkState *r)
 static GloContext *g_gl_context;
 #endif
 
+void pgraph_vk_gl_make_context_current(void)
+{
+#if HAVE_EXTERNAL_MEMORY
+    if (!g_gl_context) {
+        g_gl_context = glo_context_create();
+    }
+    if (g_gl_context) {
+        glo_set_current(g_gl_context);
+    }
+#endif
+}
+
 static void early_context_init(void)
 {
 #if HAVE_EXTERNAL_MEMORY
@@ -136,24 +148,7 @@ static void pgraph_vk_init(NV2AState *d, Error **errp)
     pg->vk_renderer_state = (PGRAPHVkState *)g_malloc0(sizeof(PGRAPHVkState));
 
 #if HAVE_EXTERNAL_MEMORY
-    bool use_external_memory = false;
-#ifdef __ANDROID__
-    if (!g_gl_context) {
-        // On Android, we need to ensure the main GL context is accessible
-        // for context sharing. The EGL state should already be cached.
-        __android_log_print(ANDROID_LOG_INFO, "xemu-android",
-                            "pgraph_vk_init: creating GL offscreen context");
-        g_gl_context = glo_context_create();
-        if (!g_gl_context) {
-            __android_log_print(ANDROID_LOG_ERROR, "xemu-android",
-                                "pgraph_vk_init: glo_context_create failed");
-        }
-    }
-#endif
-    if (g_gl_context) {
-        glo_set_current(g_gl_context);
-        use_external_memory = pgraph_vk_gl_external_memory_available();
-    }
+    bool use_external_memory = pgraph_vk_gl_external_memory_available();
     if (!use_external_memory) {
 #ifdef __ANDROID__
         __android_log_print(ANDROID_LOG_WARN, "xemu-android",
@@ -812,12 +807,39 @@ static int pgraph_vk_get_framebuffer_surface(NV2AState *d)
 
 #if HAVE_EXTERNAL_MEMORY
     if (r->display.use_external_memory) {
+#if OPT_DISPLAY_DOUBLE_BUFFER
+        DisplayImage *ready = &r->display.images[r->display.display_idx];
+        if (ready->valid) {
+            if (ready->fence_submitted) {
+                VK_CHECK(vkWaitForFences(r->device, 1, &ready->fence,
+                                         VK_TRUE, UINT64_MAX));
+                ready->fence_submitted = false;
+            }
+            int tex = ready->gl_texture_id;
+
+            qemu_event_reset(&d->pgraph.sync_complete);
+            qatomic_set(&pg->sync_pending, true);
+            pfifo_kick(d);
+            qemu_mutex_unlock(&d->pfifo.lock);
+            return tex;
+        }
+#endif
         qemu_event_reset(&d->pgraph.sync_complete);
         qatomic_set(&pg->sync_pending, true);
         pfifo_kick(d);
         qemu_mutex_unlock(&d->pfifo.lock);
         qemu_event_wait(&d->pgraph.sync_complete);
-        return r->display.gl_texture_id;
+#if OPT_DISPLAY_DOUBLE_BUFFER
+        ready = &r->display.images[r->display.display_idx];
+        if (ready->valid && ready->fence_submitted) {
+            VK_CHECK(vkWaitForFences(r->device, 1, &ready->fence,
+                                     VK_TRUE, UINT64_MAX));
+            ready->fence_submitted = false;
+        }
+        return ready->valid ? ready->gl_texture_id : 0;
+#else
+        return r->display.images[0].gl_texture_id;
+#endif
     }
     qemu_mutex_unlock(&d->pfifo.lock);
     pgraph_vk_wait_for_surface_download(surface);

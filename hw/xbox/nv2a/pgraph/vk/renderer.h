@@ -42,7 +42,10 @@
 #include "constants.h"
 #include "glsl.h"
 
-#define HAVE_EXTERNAL_MEMORY 0
+#define HAVE_EXTERNAL_MEMORY 1
+
+#define OPT_DISPLAY_DOUBLE_BUFFER 1
+#define NUM_DISPLAY_IMAGES (OPT_DISPLAY_DOUBLE_BUFFER ? 2 : 1)
 
 #define OPT_N_BUFFERED_SUBMIT   1
 #define OPT_DEFERRED_FENCES     1
@@ -269,23 +272,47 @@ typedef struct PvideoState {
     uint32_t color_key;
 } PvideoState;
 
+typedef struct DisplayImage {
+    VkImage image;
+    VkImageView image_view;
+    VkDeviceMemory memory;
+    VkFramebuffer framebuffer;
+    VkFence fence;
+    bool fence_submitted;
+    bool valid;
+    VkCommandBuffer cmd_buffer;
+#if HAVE_EXTERNAL_MEMORY
+#ifdef __ANDROID__
+    struct AHardwareBuffer *ahb;
+    void *egl_image;
+#elif defined(WIN32)
+    HANDLE handle;
+#else
+    int fd;
+#endif
+    GLuint gl_texture_id;
+#ifndef __ANDROID__
+    GLuint gl_memory_obj;
+#endif
+#endif
+} DisplayImage;
+
 typedef struct PGRAPHVkDisplayState {
     ShaderModuleInfo *display_frag;
 
     VkDescriptorPool descriptor_pool;
     VkDescriptorSetLayout descriptor_set_layout;
-    VkDescriptorSet descriptor_set;
+    VkDescriptorSet descriptor_sets[NUM_DISPLAY_IMAGES];
 
     VkPipelineLayout pipeline_layout;
     VkPipeline pipeline;
 
     VkRenderPass render_pass;
-    VkFramebuffer framebuffer;
-
-    VkImage image;
-    VkImageView image_view;
-    VkDeviceMemory memory;
     VkSampler sampler;
+
+    DisplayImage images[NUM_DISPLAY_IMAGES];
+    int render_idx;
+    int display_idx;
 
     struct {
         PvideoState state;
@@ -299,15 +326,6 @@ typedef struct PGRAPHVkDisplayState {
     int width, height;
     int draw_time;
     bool use_external_memory;
-
-    // OpenGL Interop
-#ifdef WIN32
-    HANDLE handle;
-#else
-    int fd;
-#endif
-    GLuint gl_memory_obj;
-    GLuint gl_texture_id;
 } PGRAPHVkDisplayState;
 
 typedef enum {
@@ -589,6 +607,7 @@ void pgraph_vk_init_display(PGRAPHState *pg);
 void pgraph_vk_finalize_display(PGRAPHState *pg);
 void pgraph_vk_render_display(PGRAPHState *pg);
 bool pgraph_vk_gl_external_memory_available(void);
+void pgraph_vk_gl_make_context_current(void);
 
 // texture.c
 void pgraph_vk_init_textures(PGRAPHState *pg);

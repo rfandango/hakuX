@@ -1450,11 +1450,14 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
 
 #if OPT_DEFERRED_FENCES && OPT_N_BUFFERED_SUBMIT
         /*
-         * Targeted deferred fences: only defer for FLIP_STALL (frame
-         * boundary). All other finish reasons involve resource reuse
+         * Targeted deferred fences: defer for FLIP_STALL and PRESENTING
+         * (frame boundary / display blit). The display blit runs on the
+         * same queue so implicit ordering guarantees it sees completed
+         * rendering. All other finish reasons involve resource reuse
          * and must wait synchronously.
          */
-        if (finish_reason == VK_FINISH_REASON_FLIP_STALL) {
+        if (finish_reason == VK_FINISH_REASON_FLIP_STALL ||
+            finish_reason == VK_FINISH_REASON_PRESENTING) {
             memcpy(r->deferred_framebuffers[r->current_frame],
                    r->framebuffers,
                    r->framebuffer_index * sizeof(VkFramebuffer));
