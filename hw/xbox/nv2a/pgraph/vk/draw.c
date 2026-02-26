@@ -630,15 +630,27 @@ static bool check_pipeline_dirty(PGRAPHState *pg)
     PGRAPHVkState *r = pg->vk_renderer_state;
 
     if (!r->pipeline_binding || r->shader_bindings_changed ||
-        r->texture_bindings_changed || check_render_pass_dirty(pg)) {
+        r->texture_bindings_changed || r->pipeline_state_dirty ||
+        check_render_pass_dirty(pg)) {
+        r->pipeline_state_dirty = false;
         return true;
     }
 
+#if OPT_DYNAMIC_STATES
     const unsigned int regs[] = {
-        NV_PGRAPH_BLEND,       NV_PGRAPH_BLENDCOLOR,  NV_PGRAPH_CONTROL_0,
-        NV_PGRAPH_CONTROL_1,   NV_PGRAPH_CONTROL_2,   NV_PGRAPH_CONTROL_3,
-        NV_PGRAPH_SETUPRASTER, NV_PGRAPH_ZOFFSETBIAS, NV_PGRAPH_ZOFFSETFACTOR,
+        NV_PGRAPH_BLEND,     NV_PGRAPH_CONTROL_0,
+        NV_PGRAPH_CONTROL_2, NV_PGRAPH_CONTROL_3,
+        NV_PGRAPH_SETUPRASTER, NV_PGRAPH_CONTROL_1,
     };
+#else
+    const unsigned int regs[] = {
+        NV_PGRAPH_BLEND,       NV_PGRAPH_CONTROL_0,
+        NV_PGRAPH_BLENDCOLOR,  NV_PGRAPH_CONTROL_2,
+        NV_PGRAPH_CONTROL_3,   NV_PGRAPH_SETUPRASTER,
+        NV_PGRAPH_ZOFFSETBIAS, NV_PGRAPH_ZOFFSETFACTOR,
+        NV_PGRAPH_CONTROL_1,
+    };
+#endif
 
     for (int i = 0; i < ARRAY_SIZE(regs); i++) {
         if (pgraph_is_reg_dirty(pg, regs[i])) {
@@ -677,17 +689,30 @@ static void init_pipeline_key(PGRAPHState *pg, PipelineKey *key)
            sizeof(key->attribute_descriptions[0]) *
                r->num_active_vertex_attribute_descriptions);
 
-    // FIXME: Register masking
-    // FIXME: Use more dynamic state updates
+#if OPT_DYNAMIC_STATES
     const int regs[] = {
-        NV_PGRAPH_BLEND,       NV_PGRAPH_BLENDCOLOR,  NV_PGRAPH_CONTROL_0,
-        NV_PGRAPH_CONTROL_1,   NV_PGRAPH_CONTROL_2,   NV_PGRAPH_CONTROL_3,
-        NV_PGRAPH_SETUPRASTER, NV_PGRAPH_ZOFFSETBIAS, NV_PGRAPH_ZOFFSETFACTOR,
+        NV_PGRAPH_BLEND,     NV_PGRAPH_CONTROL_0,
+        NV_PGRAPH_CONTROL_2, NV_PGRAPH_CONTROL_3,
+        NV_PGRAPH_SETUPRASTER, NV_PGRAPH_CONTROL_1,
     };
+#else
+    const int regs[] = {
+        NV_PGRAPH_BLEND,       NV_PGRAPH_CONTROL_0,
+        NV_PGRAPH_BLENDCOLOR,  NV_PGRAPH_CONTROL_2,
+        NV_PGRAPH_CONTROL_3,   NV_PGRAPH_SETUPRASTER,
+        NV_PGRAPH_ZOFFSETBIAS, NV_PGRAPH_ZOFFSETFACTOR,
+        NV_PGRAPH_CONTROL_1,
+    };
+#endif
     assert(ARRAY_SIZE(regs) == ARRAY_SIZE(key->regs));
     for (int i = 0; i < ARRAY_SIZE(regs); i++) {
         key->regs[i] = pgraph_reg_r(pg, regs[i]);
     }
+#if OPT_DYNAMIC_STATES
+    key->regs[5] &= ~(NV_PGRAPH_CONTROL_1_STENCIL_REF |
+                       NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ |
+                       NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE);
+#endif
 }
 
 static void create_pipeline(PGRAPHState *pg)
@@ -932,9 +957,17 @@ static void create_pipeline(PGRAPHState *pg)
         .blendConstants[3] = blend_constant[3],
     };
 
-    VkDynamicState dynamic_states[3] = { VK_DYNAMIC_STATE_VIEWPORT,
-                                         VK_DYNAMIC_STATE_SCISSOR };
-    int num_dynamic_states = 2;
+    VkDynamicState dynamic_states[8] = {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR,
+#if OPT_DYNAMIC_STATES
+        VK_DYNAMIC_STATE_BLEND_CONSTANTS,
+        VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK,
+        VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
+        VK_DYNAMIC_STATE_STENCIL_REFERENCE,
+#endif
+    };
+    int num_dynamic_states = OPT_DYNAMIC_STATES ? 6 : 2;
 
     snode->has_dynamic_line_width =
         (r->enabled_physical_device_features.wideLines == VK_TRUE) &&
@@ -1172,6 +1205,34 @@ static void flush_memory_buffer(PGRAPHState *pg, VkCommandBuffer cmd)
                          &barrier, 0, NULL);
 }
 
+static VkAttachmentLoadOp get_optimal_color_load_op(PGRAPHVkState *r)
+{
+    if (!r->color_binding) {
+        return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    }
+    if (r->color_drawn_in_cb) {
+        return VK_ATTACHMENT_LOAD_OP_LOAD;
+    }
+    if (!r->color_binding->initialized) {
+        return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    }
+    return VK_ATTACHMENT_LOAD_OP_LOAD;
+}
+
+static VkAttachmentLoadOp get_optimal_zeta_load_op(PGRAPHVkState *r)
+{
+    if (!r->zeta_binding) {
+        return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    }
+    if (r->zeta_drawn_in_cb) {
+        return VK_ATTACHMENT_LOAD_OP_LOAD;
+    }
+    if (!r->zeta_binding->initialized) {
+        return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    }
+    return VK_ATTACHMENT_LOAD_OP_LOAD;
+}
+
 static void begin_render_pass(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
@@ -1187,9 +1248,20 @@ static void begin_render_pass(PGRAPHState *pg)
 
     assert(r->framebuffer_index > 0);
 
+#if OPT_LOAD_OPS
+    RenderPassState begin_state;
+    init_render_pass_state(pg, &begin_state);
+    begin_state.color_load_op = get_optimal_color_load_op(r);
+    begin_state.zeta_load_op = get_optimal_zeta_load_op(r);
+    begin_state.stencil_load_op = begin_state.zeta_load_op;
+    r->begin_render_pass = get_render_pass(r, &begin_state);
+#else
+    r->begin_render_pass = r->render_pass;
+#endif
+
     VkRenderPassBeginInfo render_pass_begin_info = {
         .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-        .renderPass = r->render_pass,
+        .renderPass = r->begin_render_pass,
         .framebuffer = r->framebuffers[r->framebuffer_index - 1],
         .renderArea.extent.width = vp_width,
         .renderArea.extent.height = vp_height,
@@ -1199,7 +1271,6 @@ static void begin_render_pass(PGRAPHState *pg)
     vkCmdBeginRenderPass(r->command_buffer, &render_pass_begin_info,
                          VK_SUBPASS_CONTENTS_INLINE);
     r->in_render_pass = true;
-
 }
 
 static void end_render_pass(PGRAPHVkState *r)
@@ -1549,6 +1620,27 @@ static void begin_draw(PGRAPHState *pg)
     }
 
     if (!pg->clearing) {
+#if OPT_DYNAMIC_STATES
+        float blend_constant[4] = { 0, 0, 0, 0 };
+        uint32_t blend_color = pgraph_reg_r(pg, NV_PGRAPH_BLENDCOLOR);
+        pgraph_argb_pack32_to_rgba_float(blend_color, blend_constant);
+        vkCmdSetBlendConstants(r->command_buffer, blend_constant);
+
+        uint32_t control_1 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1);
+        uint32_t stencil_ref = GET_MASK(control_1,
+                                        NV_PGRAPH_CONTROL_1_STENCIL_REF);
+        uint32_t mask_read = GET_MASK(control_1,
+                                      NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ);
+        uint32_t mask_write = GET_MASK(control_1,
+                                       NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE);
+        vkCmdSetStencilCompareMask(r->command_buffer,
+                                   VK_STENCIL_FACE_FRONT_AND_BACK, mask_read);
+        vkCmdSetStencilWriteMask(r->command_buffer,
+                                 VK_STENCIL_FACE_FRONT_AND_BACK, mask_write);
+        vkCmdSetStencilReference(r->command_buffer,
+                                 VK_STENCIL_FACE_FRONT_AND_BACK, stencil_ref);
+#endif
+
         bind_descriptor_sets(pg);
         push_vertex_attr_values(pg);
     }
