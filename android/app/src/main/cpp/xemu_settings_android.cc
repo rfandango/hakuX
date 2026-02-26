@@ -34,7 +34,7 @@ static void xemu_settings_apply_defaults(void)
 
     g_config.general.show_welcome = true;
     g_config.general.updates.check = true;
-    g_config.general.skip_boot_anim = false;
+    g_config.general.skip_boot_anim = true;
     g_config.general.last_viewed_menu_index = 0;
 
     g_config.input.auto_bind = true;
