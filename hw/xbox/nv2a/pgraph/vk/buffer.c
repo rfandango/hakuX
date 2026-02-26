@@ -183,7 +183,11 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
         .alloc_info = device_alloc_create_info,
         .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                  VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+#if OPT_LARGER_POOLS
+        .buffer_size = 16 * 1024 * 1024,
+#else
         .buffer_size = 8 * 1024 * 1024,
+#endif
     };
 
     r->storage_buffers[BUFFER_UNIFORM_STAGING] = (StorageBuffer){
@@ -294,4 +298,22 @@ VkDeviceSize pgraph_vk_append_to_buffer(PGRAPHState *pg, int index, void **data,
     }
 
     return starting_offset;
+}
+
+VkDeviceSize pgraph_vk_staging_alloc(PGRAPHState *pg, VkDeviceSize size)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    StorageBuffer *b = &r->storage_buffers[BUFFER_STAGING_SRC];
+    VkDeviceSize offset = b->buffer_offset;
+    if (offset + size > b->buffer_size) {
+        return VK_WHOLE_SIZE;
+    }
+    b->buffer_offset = offset + size;
+    return offset;
+}
+
+void pgraph_vk_staging_reset(PGRAPHState *pg)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    r->storage_buffers[BUFFER_STAGING_SRC].buffer_offset = 0;
 }

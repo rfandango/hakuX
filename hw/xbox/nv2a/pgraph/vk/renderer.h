@@ -53,7 +53,11 @@
 #define OPT_LOAD_OPS            1
 #define OPT_CLEAR_REFACTOR      1
 #define OPT_COMPUTE_SWIZZLE     1
-#define OPT_TEX_NONDRAW_CMD     0
+#define OPT_TEX_NONDRAW_CMD     1
+#define OPT_SURF_BATCH_CREATE   1
+#define OPT_SURF_BATCH_UPLOAD   1
+#define OPT_TRIPLE_BUFFERING    1
+#define OPT_LARGER_POOLS        1
 #define OPT_PRECISE_BARRIERS    1
 
 typedef struct QueueFamilyIndices {
@@ -350,7 +354,11 @@ typedef struct ComputePipeline {
 typedef struct PGRAPHVkComputeState {
     VkDescriptorPool descriptor_pool;
     VkDescriptorSetLayout descriptor_set_layout;
+#if OPT_LARGER_POOLS
+    VkDescriptorSet descriptor_sets[2048];
+#else
     VkDescriptorSet descriptor_sets[1024];
+#endif
     int descriptor_set_index;
     VkPipelineLayout pipeline_layout;
     Lru pipeline_cache;
@@ -373,7 +381,7 @@ typedef struct PGRAPHVkState {
     VmaAllocator allocator;
     uint32_t allocator_last_submit_index;
 
-#define NUM_SUBMIT_FRAMES (OPT_N_BUFFERED_SUBMIT ? 2 : 1)
+#define NUM_SUBMIT_FRAMES (OPT_N_BUFFERED_SUBMIT ? (OPT_TRIPLE_BUFFERING ? 3 : 2) : 1)
     VkQueue queue;
     VkCommandPool command_pool;
     VkCommandBuffer command_buffers[NUM_SUBMIT_FRAMES * 2];
@@ -419,7 +427,11 @@ typedef struct PGRAPHVkState {
 
     VkDescriptorPool descriptor_pool;
     VkDescriptorSetLayout descriptor_set_layout;
+#if OPT_LARGER_POOLS
+    VkDescriptorSet descriptor_sets[2048];
+#else
     VkDescriptorSet descriptor_sets[1024];
+#endif
     int descriptor_set_index;
 
     StorageBuffer storage_buffers[BUFFER_COUNT];
@@ -536,6 +548,8 @@ bool pgraph_vk_buffer_has_space_for(PGRAPHState *pg, int index,
 VkDeviceSize pgraph_vk_append_to_buffer(PGRAPHState *pg, int index, void **data,
                                         VkDeviceSize *sizes, size_t count,
                                         VkDeviceAddress alignment);
+VkDeviceSize pgraph_vk_staging_alloc(PGRAPHState *pg, VkDeviceSize size);
+void pgraph_vk_staging_reset(PGRAPHState *pg);
 
 // command.c
 void pgraph_vk_init_command_buffers(PGRAPHState *pg);

@@ -502,9 +502,19 @@ static void upload_texture_image(PGRAPHState *pg, int texture_idx,
         }
     }
 
+#if OPT_TEX_NONDRAW_CMD
+    VkDeviceSize staging_base = pgraph_vk_staging_alloc(pg, texture_data_size);
+    if (staging_base == VK_WHOLE_SIZE) {
+        pgraph_vk_finish(pg, VK_FINISH_REASON_NEED_BUFFER_SPACE);
+        pgraph_vk_staging_reset(pg);
+        staging_base = pgraph_vk_staging_alloc(pg, texture_data_size);
+        assert(staging_base != VK_WHOLE_SIZE);
+    }
+#else
     assert(texture_data_size <=
            r->storage_buffers[BUFFER_STAGING_SRC].buffer_size);
-
+    VkDeviceSize staging_base = 0;
+#endif
     uint8_t *mapped_memory_ptr =
         (uint8_t *)r->storage_buffers[BUFFER_STAGING_SRC].mapped;
 
@@ -513,7 +523,7 @@ static void upload_texture_image(PGRAPHState *pg, int texture_idx,
         g_malloc0_n(num_regions, sizeof(VkBufferImageCopy));
 
     VkBufferImageCopy *region = regions;
-    VkDeviceSize buffer_offset = 0;
+    VkDeviceSize buffer_offset = staging_base;
 
     for (int layer_idx = 0; layer_idx < num_layers; layer_idx++) {
         TextureLayer *layer = &layout->layers[layer_idx];
@@ -544,8 +554,8 @@ static void upload_texture_image(PGRAPHState *pg, int texture_idx,
     assert(buffer_offset <= r->storage_buffers[BUFFER_STAGING_SRC].buffer_size);
 
     vmaFlushAllocation(r->allocator,
-                       r->storage_buffers[BUFFER_STAGING_SRC].allocation, 0,
-                       buffer_offset);
+                       r->storage_buffers[BUFFER_STAGING_SRC].allocation,
+                       staging_base, buffer_offset - staging_base);
 
 #if OPT_TEX_NONDRAW_CMD
     VkCommandBuffer cmd = pgraph_vk_begin_nondraw_commands(pg);
@@ -561,7 +571,8 @@ static void upload_texture_image(PGRAPHState *pg, int texture_idx,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .buffer = r->storage_buffers[BUFFER_STAGING_SRC].buffer,
-        .size = buffer_offset
+        .offset = staging_base,
+        .size = buffer_offset - staging_base
     };
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_HOST_BIT,
                          VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 1,

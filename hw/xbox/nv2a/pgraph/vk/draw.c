@@ -1411,6 +1411,10 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
         r->frame_submitted[r->current_frame] = true;
         r->submit_count += 1;
 
+#if OPT_TEX_NONDRAW_CMD
+        pgraph_vk_staging_reset(pg);
+#endif
+
         bool check_budget = false;
 
         const int max_num_submits_before_budget_update = 5;

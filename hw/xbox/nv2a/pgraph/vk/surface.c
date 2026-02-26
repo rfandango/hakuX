@@ -914,8 +914,11 @@ static void create_surface_image(PGRAPHState *pg, SurfaceBinding *surface)
     VK_CHECK(vkCreateImageView(r->device, &image_view_create_info, NULL,
                                &surface->image_view));
 
-    // FIXME: Go right into main command buffer
+#if OPT_SURF_BATCH_CREATE
+    VkCommandBuffer cmd = pgraph_vk_begin_nondraw_commands(pg);
+#else
     VkCommandBuffer cmd = pgraph_vk_begin_single_time_commands(pg);
+#endif
     pgraph_vk_begin_debug_marker(r, cmd, RGBA_RED, __func__);
 
     pgraph_vk_transition_image_layout(
@@ -926,7 +929,11 @@ static void create_surface_image(PGRAPHState *pg, SurfaceBinding *surface)
 
     nv2a_profile_inc_counter(NV2A_PROF_QUEUE_SUBMIT_3);
     pgraph_vk_end_debug_marker(r, cmd);
+#if OPT_SURF_BATCH_CREATE
+    pgraph_vk_end_nondraw_commands(pg, cmd);
+#else
     pgraph_vk_end_single_time_commands(pg, cmd);
+#endif
     nv2a_profile_inc_counter(NV2A_PROF_SURF_CREATE);
 }
 
@@ -1057,7 +1064,14 @@ void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
 
     nv2a_profile_inc_counter(NV2A_PROF_SURF_UPLOAD);
 
-    pgraph_vk_finish(pg, VK_FINISH_REASON_SURFACE_CREATE); // FIXME: SURFACE_UP
+#if OPT_SURF_BATCH_UPLOAD
+    if (r->in_command_buffer &&
+        surface->draw_time >= r->command_buffer_start_time) {
+        pgraph_vk_finish(pg, VK_FINISH_REASON_SURFACE_CREATE);
+    }
+#else
+    pgraph_vk_finish(pg, VK_FINISH_REASON_SURFACE_CREATE);
+#endif
 
     trace_nv2a_pgraph_surface_upload(
                  surface->color ? "COLOR" : "ZETA",
@@ -1113,9 +1127,21 @@ void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
     StorageBuffer *copy_buffer = &r->storage_buffers[BUFFER_STAGING_SRC];
     size_t uploaded_image_size = surface->height * surface->width *
                                  surface->fmt.bytes_per_pixel;
-    assert(uploaded_image_size <= copy_buffer->buffer_size);
 
+#if OPT_SURF_BATCH_UPLOAD
+    VkDeviceSize staging_base = pgraph_vk_staging_alloc(pg, uploaded_image_size);
+    if (staging_base == VK_WHOLE_SIZE) {
+        pgraph_vk_finish(pg, VK_FINISH_REASON_NEED_BUFFER_SPACE);
+        pgraph_vk_staging_reset(pg);
+        staging_base = pgraph_vk_staging_alloc(pg, uploaded_image_size);
+        assert(staging_base != VK_WHOLE_SIZE);
+    }
+    void *mapped_memory_ptr = copy_buffer->mapped + staging_base;
+#else
+    assert(uploaded_image_size <= copy_buffer->buffer_size);
+    VkDeviceSize staging_base = 0;
     void *mapped_memory_ptr = copy_buffer->mapped;
+#endif
 
     if (use_compute_to_unswizzle) {
         memcpy(mapped_memory_ptr, buf, uploaded_image_size);
@@ -1125,10 +1151,14 @@ void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
                      surface->pitch, surface->height);
     }
 
-    vmaFlushAllocation(r->allocator, copy_buffer->allocation, 0,
+    vmaFlushAllocation(r->allocator, copy_buffer->allocation, staging_base,
                        uploaded_image_size);
 
+#if OPT_SURF_BATCH_UPLOAD
+    VkCommandBuffer cmd = pgraph_vk_begin_nondraw_commands(pg);
+#else
     VkCommandBuffer cmd = pgraph_vk_begin_single_time_commands(pg);
+#endif
     pgraph_vk_begin_debug_marker(r, cmd, RGBA_RED, __func__);
 
     VkBufferMemoryBarrier host_barrier = {
@@ -1138,6 +1168,7 @@ void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .buffer = copy_buffer->buffer,
+        .offset = staging_base,
         .size = uploaded_image_size
     };
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_HOST_BIT,
@@ -1150,6 +1181,7 @@ void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
     int num_regions = 0;
 
     regions[num_regions++] = (VkBufferImageCopy){
+        .bufferOffset = staging_base,
         .imageSubresource.aspectMask = surface->color ?
                                            VK_IMAGE_ASPECT_COLOR_BIT :
                                            VK_IMAGE_ASPECT_DEPTH_BIT,
@@ -1159,6 +1191,7 @@ void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
 
     if (surface->host_fmt.aspect & VK_IMAGE_ASPECT_STENCIL_BIT) {
         regions[num_regions++] = (VkBufferImageCopy){
+            .bufferOffset = staging_base,
             .imageSubresource.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT,
             .imageSubresource.layerCount = 1,
             .imageExtent = (VkExtent3D){ surface->width, surface->height, 1 },
@@ -1177,6 +1210,7 @@ void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
 
         size_t packed_size = uploaded_image_size;
         VkBufferCopy buffer_copy_region = {
+            .srcOffset = staging_base,
             .size = packed_size,
         };
         vkCmdCopyBuffer(cmd, copy_buffer->buffer,
@@ -1196,6 +1230,7 @@ void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .buffer = copy_buffer->buffer,
+            .offset = staging_base,
             .size = uploaded_image_size
         };
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -1277,7 +1312,7 @@ void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
     if (use_compute_to_unswizzle) {
         size_t swizzle_size = uploaded_image_size;
 
-        VkBufferCopy buf_copy = { .size = swizzle_size };
+        VkBufferCopy buf_copy = { .srcOffset = staging_base, .size = swizzle_size };
         vkCmdCopyBuffer(cmd, copy_buffer->buffer,
                         r->storage_buffers[BUFFER_COMPUTE_DST].buffer, 1,
                         &buf_copy);
@@ -1432,7 +1467,11 @@ void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
 
     nv2a_profile_inc_counter(NV2A_PROF_QUEUE_SUBMIT_2);
     pgraph_vk_end_debug_marker(r, cmd);
+#if OPT_SURF_BATCH_UPLOAD
+    pgraph_vk_end_nondraw_commands(pg, cmd);
+#else
     pgraph_vk_end_single_time_commands(pg, cmd);
+#endif
 
     surface->initialized = true;
 }
