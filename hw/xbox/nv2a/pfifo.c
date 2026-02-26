@@ -26,7 +26,7 @@
 #endif
 
 #ifndef XEMU_OPT_PFIFO_LOCK_BATCH
-#define XEMU_OPT_PFIFO_LOCK_BATCH 0
+#define XEMU_OPT_PFIFO_LOCK_BATCH 1
 #endif
 
 #if defined(__ANDROID__) && XEMU_OPT_THREAD_AFFINITY
@@ -242,8 +242,11 @@ static ssize_t pfifo_run_puller(NV2AState *d, uint32_t method_entry,
         SET_MASK(*pull1, NV_PFIFO_CACHE1_PULL1_ENGINE, entry.engine);
 
 #if XEMU_OPT_PFIFO_LOCK_BATCH
-        /* Hold pfifo.lock throughout; matches lock order pfifo->pgraph */
+        /* Atomic grab-and-release: acquire pgraph.lock while holding
+         * pfifo.lock to eliminate the contention window, then release
+         * pfifo.lock before executing methods (which may need BQL). */
         qemu_mutex_lock(&d->pgraph.lock);
+        qemu_mutex_unlock(&d->pfifo.lock);
 
         if (can_fifo_access(d)) {
             pgraph_context_switch(d, entry.channel_id);
@@ -255,6 +258,7 @@ static ssize_t pfifo_run_puller(NV2AState *d, uint32_t method_entry,
         }
 
         qemu_mutex_unlock(&d->pgraph.lock);
+        qemu_mutex_lock(&d->pfifo.lock);
 #else
         qemu_mutex_unlock(&d->pfifo.lock);
         qemu_mutex_lock(&d->pgraph.lock);
@@ -292,6 +296,7 @@ static ssize_t pfifo_run_puller(NV2AState *d, uint32_t method_entry,
 
 #if XEMU_OPT_PFIFO_LOCK_BATCH
         qemu_mutex_lock(&d->pgraph.lock);
+        qemu_mutex_unlock(&d->pfifo.lock);
 
         if (can_fifo_access(d)) {
             num_proc =
@@ -300,6 +305,7 @@ static ssize_t pfifo_run_puller(NV2AState *d, uint32_t method_entry,
         }
 
         qemu_mutex_unlock(&d->pgraph.lock);
+        qemu_mutex_lock(&d->pfifo.lock);
 #else
         qemu_mutex_unlock(&d->pfifo.lock);
         qemu_mutex_lock(&d->pgraph.lock);
