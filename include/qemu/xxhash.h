@@ -48,6 +48,21 @@
  * xxhash32, customized for input variables that are not guaranteed to be
  * contiguous in memory.
  */
+#if defined(__aarch64__)
+#include <arm_acle.h>
+
+__attribute__((target("crc")))
+static inline uint32_t qemu_xxhash8(uint64_t ab, uint64_t cd, uint64_t ef,
+                                    uint32_t g, uint32_t h)
+{
+    uint32_t crc = __crc32cd(QEMU_XXHASH_SEED, ab);
+    crc = __crc32cd(crc, cd);
+    crc = __crc32cd(crc, ef);
+    crc = __crc32cw(crc, g);
+    crc = __crc32cw(crc, h);
+    return crc;
+}
+#else
 static inline uint32_t qemu_xxhash8(uint64_t ab, uint64_t cd, uint64_t ef,
                                     uint32_t g, uint32_t h)
 {
@@ -102,6 +117,7 @@ static inline uint32_t qemu_xxhash8(uint64_t ab, uint64_t cd, uint64_t ef,
 
     return h32;
 }
+#endif
 
 static inline uint32_t qemu_xxhash2(uint64_t ab)
 {
