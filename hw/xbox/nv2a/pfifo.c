@@ -232,6 +232,8 @@ static ssize_t pfifo_run_puller(NV2AState *d, uint32_t method_entry,
         GET_MASK(method_entry, NV_PFIFO_CACHE1_METHOD_SUBCHANNEL);
     bool inc = !GET_MASK(method_entry, NV_PFIFO_CACHE1_METHOD_TYPE);
 
+    int64_t method_t0;
+
     if (method == 0) {
         RAMHTEntry entry = ramht_lookup(d, parameter);
         assert(entry.valid);
@@ -253,9 +255,13 @@ static ssize_t pfifo_run_puller(NV2AState *d, uint32_t method_entry,
         if (can_fifo_access(d)) {
             pgraph_context_switch(d, entry.channel_id);
             if (!d->pgraph.waiting_for_context_switch) {
+                method_t0 = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
                 num_proc =
                     pgraph_method(d, subchannel, 0, entry.instance, parameters,
                                   num_words_available, max_lookahead_words, inc);
+                g_nv2a_stats.cpu_working.method_exec_ns +=
+                    qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - method_t0;
+                g_nv2a_stats.cpu_working.method_count++;
             }
         }
 
@@ -268,9 +274,13 @@ static ssize_t pfifo_run_puller(NV2AState *d, uint32_t method_entry,
         if (can_fifo_access(d)) {
             pgraph_context_switch(d, entry.channel_id);
             if (!d->pgraph.waiting_for_context_switch) {
+                method_t0 = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
                 num_proc =
                     pgraph_method(d, subchannel, 0, entry.instance, parameters,
                                   num_words_available, max_lookahead_words, inc);
+                g_nv2a_stats.cpu_working.method_exec_ns +=
+                    qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - method_t0;
+                g_nv2a_stats.cpu_working.method_count++;
             }
         }
 
@@ -301,9 +311,13 @@ static ssize_t pfifo_run_puller(NV2AState *d, uint32_t method_entry,
         qemu_mutex_unlock(&d->pfifo.lock);
 
         if (can_fifo_access(d)) {
+            method_t0 = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
             num_proc =
                 pgraph_method(d, subchannel, method, parameter, parameters,
                               num_words_available, max_lookahead_words, inc);
+            g_nv2a_stats.cpu_working.method_exec_ns +=
+                qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - method_t0;
+            g_nv2a_stats.cpu_working.method_count++;
         }
 
         qemu_mutex_unlock(&d->pgraph.lock);
@@ -313,9 +327,13 @@ static ssize_t pfifo_run_puller(NV2AState *d, uint32_t method_entry,
         qemu_mutex_lock(&d->pgraph.lock);
 
         if (can_fifo_access(d)) {
+            method_t0 = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
             num_proc =
                 pgraph_method(d, subchannel, method, parameter, parameters,
                               num_words_available, max_lookahead_words, inc);
+            g_nv2a_stats.cpu_working.method_exec_ns +=
+                qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - method_t0;
+            g_nv2a_stats.cpu_working.method_count++;
         }
 
         qemu_mutex_unlock(&d->pgraph.lock);
@@ -380,6 +398,8 @@ static void pfifo_run_pusher(NV2AState *d)
 
     hwaddr dma_len;
     uint8_t *dma = nv_dma_map(d, dma_instance, &dma_len);
+
+    uint32_t dma_get_start = *dma_get;
 
     while (!pfifo_pusher_should_stall(d)) {
         uint32_t dma_get_v = *dma_get;
@@ -527,6 +547,12 @@ static void pfifo_run_pusher(NV2AState *d)
     // NV2A_DPRINTF("DMA pusher done: max 0x%" HWADDR_PRIx ", 0x%" HWADDR_PRIx " - 0x%" HWADDR_PRIx "\n",
     //      dma_len, control->dma_get, control->dma_put);
 
+    uint32_t dma_get_end = *dma_get;
+    if (dma_get_end >= dma_get_start) {
+        g_nv2a_stats.cpu_working.pusher_words +=
+            (dma_get_end - dma_get_start) / 4;
+    }
+
     uint32_t error = GET_MASK(*dma_state, NV_PFIFO_CACHE1_DMA_STATE_ERROR);
     if (error) {
         NV2A_DPRINTF("pb error: %d\n", error);
@@ -558,7 +584,16 @@ void *pfifo_thread(void *arg)
         pgraph_process_pending(d);
 
         if (!d->pfifo.halt) {
+            uint32_t get_before = d->pfifo.regs[NV_PFIFO_CACHE1_DMA_GET];
+            bool was_post_flip = g_nv2a_stats.phase_working.post_flip;
+            int64_t push_t0 = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
             pfifo_run_pusher(d);
+            g_nv2a_stats.cpu_working.pusher_run_ns +=
+                qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - push_t0;
+            if (d->pfifo.regs[NV_PFIFO_CACHE1_DMA_GET] != get_before
+                && was_post_flip) {
+                g_nv2a_stats.phase_working.post_flip = false;
+            }
         }
 
         pgraph_process_pending_reports(d);
@@ -566,9 +601,15 @@ void *pfifo_thread(void *arg)
         if (!d->pfifo.fifo_kick) {
             qemu_cond_signal(&d->pfifo.fifo_idle_cond);
 
-            NV2A_PHASE_TIMER_BEGIN(fifo_idle);
+            int64_t idle_t0 = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
             qemu_cond_wait(&d->pfifo.fifo_cond, &d->pfifo.lock);
-            NV2A_PHASE_TIMER_END(fifo_idle);
+            int64_t idle_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - idle_t0;
+            g_nv2a_stats.phase_working.fifo_idle_ns += idle_ns;
+            if (g_nv2a_stats.phase_working.post_flip) {
+                g_nv2a_stats.phase_working.fifo_idle_frame_ns += idle_ns;
+            } else {
+                g_nv2a_stats.phase_working.fifo_idle_starve_ns += idle_ns;
+            }
         }
 
         if (d->exiting) {

@@ -79,7 +79,10 @@ void user_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
     unsigned int channel_id = addr >> 16;
     assert(channel_id < NV2A_NUM_CHANNELS);
 
+    int64_t lock_t0 = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     qemu_mutex_lock(&d->pfifo.lock);
+    g_nv2a_stats.cpu_working.lock_wait_ns +=
+        qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - lock_t0;
 
     uint32_t channel_modes = d->pfifo.regs[NV_PFIFO_MODE];
     if (channel_modes & (1 << channel_id)) {
@@ -92,6 +95,7 @@ void user_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
             switch (addr & 0xFFFF) {
             case NV_USER_DMA_PUT:
                 d->pfifo.regs[NV_PFIFO_CACHE1_DMA_PUT] = val;
+                g_nv2a_stats.cpu_working.kick_count++;
                 break;
             case NV_USER_DMA_GET:
                 d->pfifo.regs[NV_PFIFO_CACHE1_DMA_GET] = val;

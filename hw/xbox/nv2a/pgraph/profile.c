@@ -22,6 +22,11 @@
 #include <android/log.h>
 #endif
 
+#ifdef XBOX
+extern uint64_t tb_cache_stats_lookup_hits;
+extern uint64_t tb_cache_stats_lookup_misses;
+#endif
+
 NV2AStats g_nv2a_stats;
 
 void nv2a_profile_increment(void)
@@ -59,6 +64,8 @@ static void snapshot_phase_timing(void)
     SMOOTH(finish);
     SMOOTH(flip_idle);
     SMOOTH(fifo_idle);
+    SMOOTH(fifo_idle_frame);
+    SMOOTH(fifo_idle_starve);
     SMOOTH(draw_vtx_attr);
     SMOOTH(draw_vtx_sync);
     SMOOTH(draw_prim_rw);
@@ -75,7 +82,56 @@ static void snapshot_phase_timing(void)
                   p->shader_compile_ms + p->draw_dispatch_ms +
                   p->finish_ms + p->flip_idle_ms + p->fifo_idle_ms;
 
+    bool saved_post_flip = w->post_flip;
     memset(w, 0, sizeof(*w));
+    w->post_flip = saved_post_flip;
+}
+
+static void snapshot_cpu_timing(void)
+{
+    CpuTimingWork *w = &g_nv2a_stats.cpu_working;
+    CpuTimingStats *p = &g_nv2a_stats.cpu;
+    const float alpha = 0.2f;
+
+#define SMOOTH_MS(dst, src_ns) \
+    (dst) = (dst) * (1.0f - alpha) + (float)(src_ns) / 1e6f * alpha
+
+    SMOOTH_MS(p->lock_wait_ms, w->lock_wait_ns);
+    SMOOTH_MS(p->pusher_run_ms, w->pusher_run_ns);
+    SMOOTH_MS(p->method_exec_ms, w->method_exec_ns);
+
+#undef SMOOTH_MS
+
+#define SMOOTH_CNT(dst, src) \
+    (dst) = (dst) * (1.0f - alpha) + (float)(src) * alpha
+
+    SMOOTH_CNT(p->kick_count, w->kick_count);
+    SMOOTH_CNT(p->pusher_words, w->pusher_words);
+    SMOOTH_CNT(p->method_count, w->method_count);
+
+#undef SMOOTH_CNT
+
+#ifdef XBOX
+    {
+        uint64_t cur_hits   = tb_cache_stats_lookup_hits;
+        uint64_t cur_misses = tb_cache_stats_lookup_misses;
+        uint64_t dh = cur_hits   - w->tb_hits_snap;
+        uint64_t dm = cur_misses - w->tb_misses_snap;
+        float frame_pct = (dh + dm) > 0
+                          ? (float)dh / (float)(dh + dm) * 100.0f
+                          : 100.0f;
+        p->tb_hit_pct = p->tb_hit_pct * (1.0f - alpha) + frame_pct * alpha;
+        w->tb_hits_snap   = cur_hits;
+        w->tb_misses_snap = cur_misses;
+    }
+#endif
+
+    w->lock_wait_ns   = 0;
+    w->pusher_run_ns  = 0;
+    w->method_exec_ns = 0;
+    w->kick_count     = 0;
+    w->pusher_words   = 0;
+    w->method_count   = 0;
 }
 
 void nv2a_profile_flip_stall(void)
@@ -92,6 +148,9 @@ void nv2a_profile_flip_stall(void)
     memset(&g_nv2a_stats.frame_working, 0, sizeof(g_nv2a_stats.frame_working));
 
     snapshot_phase_timing();
+    snapshot_cpu_timing();
+
+    g_nv2a_stats.phase_working.post_flip = true;
 
     /* Track game frame time (flip-to-flip interval) */
     static int64_t prev_flip_us;
@@ -111,6 +170,8 @@ void nv2a_profile_flip_stall(void)
         char buf[256];
         nv2a_profile_get_phase_timing_str(buf, sizeof(buf));
         __android_log_print(ANDROID_LOG_INFO, "xemu-phase", "%s", buf);
+        nv2a_profile_get_cpu_timing_str(buf, sizeof(buf));
+        __android_log_print(ANDROID_LOG_INFO, "xemu-cpu", "%s", buf);
     }
 #endif
 }
@@ -144,7 +205,7 @@ void nv2a_profile_get_phase_timing_str(char *buf, int bufsize)
              "Surf:%.1f Tex:%.1f Shd:%.1f Draw:%.1f "
              "[Pipe:%.1f(Tx:%.1f Sh:%.1f Lu:%.1f) "
              "Desc:%.1f Setup:%.1f Cmd:%.1f] "
-             "Fin:%.1f Flip:%.1f Idle:%.1f | Tot:%.1f ms",
+             "Fin:%.1f Flip:%.1f Idle:%.1f(Fr:%.1f St:%.1f) | Tot:%.1f ms",
              p->surface_update_ms,
              p->texture_upload_ms,
              p->shader_compile_ms,
@@ -159,7 +220,23 @@ void nv2a_profile_get_phase_timing_str(char *buf, int bufsize)
              p->finish_ms,
              p->flip_idle_ms,
              p->fifo_idle_ms,
+             p->fifo_idle_frame_ms,
+             p->fifo_idle_starve_ms,
              p->total_ms);
+}
+
+void nv2a_profile_get_cpu_timing_str(char *buf, int bufsize)
+{
+    CpuTimingStats *p = &g_nv2a_stats.cpu;
+    snprintf(buf, bufsize,
+             "CPU: K:%.0f W:%.1fK M:%.0f Lock:%.1fms Push:%.1fms Meth:%.1fms TbH:%.1f%%",
+             p->kick_count,
+             p->pusher_words / 1000.0f,
+             p->method_count,
+             p->lock_wait_ms,
+             p->pusher_run_ms,
+             p->method_exec_ms,
+             p->tb_hit_pct);
 }
 
 void nv2a_profile_get_shader_stats_str(char *buf, int bufsize)

@@ -157,6 +157,9 @@ typedef struct FramePhaseTimingWork {
     int64_t finish_ns;
     int64_t flip_idle_ns;
     int64_t fifo_idle_ns;
+    int64_t fifo_idle_frame_ns;
+    int64_t fifo_idle_starve_ns;
+    bool post_flip;
     /* Sub-phases within draw_dispatch */
     int64_t draw_vtx_attr_ns;
     int64_t draw_vtx_sync_ns;
@@ -179,6 +182,8 @@ typedef struct FramePhaseTimingStats {
     float finish_ms;
     float flip_idle_ms;
     float fifo_idle_ms;
+    float fifo_idle_frame_ms;
+    float fifo_idle_starve_ms;
     float total_ms;
     /* Sub-phases within draw_dispatch */
     float draw_vtx_attr_ms;
@@ -194,6 +199,27 @@ typedef struct FramePhaseTimingStats {
     float pipe_lookup_ms;
 } FramePhaseTimingStats;
 
+typedef struct CpuTimingWork {
+    int64_t lock_wait_ns;
+    int64_t pusher_run_ns;
+    int64_t method_exec_ns;
+    uint32_t kick_count;
+    uint32_t pusher_words;
+    uint32_t method_count;
+    uint64_t tb_hits_snap;
+    uint64_t tb_misses_snap;
+} CpuTimingWork;
+
+typedef struct CpuTimingStats {
+    float lock_wait_ms;
+    float pusher_run_ms;
+    float method_exec_ms;
+    float kick_count;
+    float pusher_words;
+    float method_count;
+    float tb_hit_pct;
+} CpuTimingStats;
+
 typedef struct NV2AStats {
     int64_t last_flip_time;
     unsigned int frame_count;
@@ -207,6 +233,8 @@ typedef struct NV2AStats {
     ShaderPipelineStats shader_stats;
     FramePhaseTimingWork phase_working;
     FramePhaseTimingStats phase;
+    CpuTimingWork cpu_working;
+    CpuTimingStats cpu;
 } NV2AStats;
 
 #ifdef __cplusplus
@@ -222,6 +250,7 @@ void nv2a_profile_flip_stall(void);
 void nv2a_profile_get_pacing_str(char *buf, int bufsize);
 void nv2a_profile_get_shader_stats_str(char *buf, int bufsize);
 void nv2a_profile_get_phase_timing_str(char *buf, int bufsize);
+void nv2a_profile_get_cpu_timing_str(char *buf, int bufsize);
 
 static inline void nv2a_profile_inc_counter(enum NV2A_PROF_COUNTERS_ENUM cnt)
 {
