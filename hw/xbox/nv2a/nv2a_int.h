@@ -85,6 +85,7 @@ typedef struct NV2AState {
     int64_t last_flip_ns;
     int64_t last_frame_ns;
     int64_t avg_frame_ns;
+    int64_t vblank_defer_request_ns;
     bool unlock_mode_active;
 
     MemoryRegion *vram;

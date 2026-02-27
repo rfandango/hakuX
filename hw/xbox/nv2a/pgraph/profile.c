@@ -76,6 +76,8 @@ static void snapshot_phase_timing(void)
     SMOOTH(pipe_bind_tex);
     SMOOTH(pipe_bind_shd);
     SMOOTH(pipe_lookup);
+    SMOOTH(finish_fence);
+    SMOOTH(finish_submit);
 #undef SMOOTH
 
     p->total_ms = p->surface_update_ms + p->texture_upload_ms +
@@ -106,6 +108,7 @@ static void snapshot_cpu_timing(void)
     (dst) = (dst) * (1.0f - alpha) + (float)(src) * alpha
 
     SMOOTH_CNT(p->kick_count, w->kick_count);
+    SMOOTH_CNT(p->kick_count_spun, w->kick_count_spun);
     SMOOTH_CNT(p->pusher_words, w->pusher_words);
     SMOOTH_CNT(p->method_count, w->method_count);
     SMOOTH_CNT(p->method_fast_hit, w->method_fast_hit);
@@ -132,6 +135,7 @@ static void snapshot_cpu_timing(void)
     w->pusher_run_ns     = 0;
     w->method_exec_ns    = 0;
     w->kick_count        = 0;
+    w->kick_count_spun   = 0;
     w->pusher_words      = 0;
     w->method_count      = 0;
     w->method_fast_hit   = 0;
@@ -176,6 +180,8 @@ void nv2a_profile_flip_stall(void)
         __android_log_print(ANDROID_LOG_INFO, "xemu-phase", "%s", buf);
         nv2a_profile_get_cpu_timing_str(buf, sizeof(buf));
         __android_log_print(ANDROID_LOG_INFO, "xemu-cpu", "%s", buf);
+        nv2a_profile_get_pacing_str(buf, sizeof(buf));
+        __android_log_print(ANDROID_LOG_INFO, "xemu-pace", "%s", buf);
     }
 #endif
 }
@@ -184,7 +190,7 @@ void nv2a_profile_get_pacing_str(char *buf, int bufsize)
 {
     FramePacingStats *p = &g_nv2a_stats.pacing;
     snprintf(buf, bufsize,
-             "G:%.1f(%.1f-%.1f) D:%.1f(%.1f-%.1f) S:%.1f J:%.1f Df:%u",
+             "G:%.1f(%.1f-%.1f) D:%.1f(%.1f-%.1f) S:%.1f J:%.1f Df:%u Vd:%.1f Ul:%c",
              p->game_frame_ms,
              p->game_frame_min_ms,
              p->game_frame_max_ms,
@@ -193,7 +199,9 @@ void nv2a_profile_get_pacing_str(char *buf, int bufsize)
              p->display_frame_max_ms,
              p->swap_ms,
              p->vblank_jitter_ms,
-             p->defers_total);
+             p->defers_total,
+             p->vblank_delivery_ms,
+             p->unlock_mode_active ? 'Y' : 'N');
     /* Reset min/max every call so the window reflects recent behavior */
     p->game_frame_min_ms = 0;
     p->game_frame_max_ms = 0;
@@ -209,7 +217,7 @@ void nv2a_profile_get_phase_timing_str(char *buf, int bufsize)
              "Surf:%.1f Tex:%.1f Shd:%.1f Draw:%.1f "
              "[Pipe:%.1f(Tx:%.1f Sh:%.1f Lu:%.1f) "
              "Desc:%.1f Setup:%.1f Cmd:%.1f] "
-             "Fin:%.1f Flip:%.1f Idle:%.1f(Fr:%.1f St:%.1f) | Tot:%.1f ms",
+             "Fin:%.1f(Sub:%.1f Fen:%.1f) Flip:%.1f Idle:%.1f(Fr:%.1f St:%.1f) | Tot:%.1f ms",
              p->surface_update_ms,
              p->texture_upload_ms,
              p->shader_compile_ms,
@@ -222,6 +230,8 @@ void nv2a_profile_get_phase_timing_str(char *buf, int bufsize)
              p->draw_setup_ms,
              p->draw_vk_cmd_ms,
              p->finish_ms,
+             p->finish_submit_ms,
+             p->finish_fence_ms,
              p->flip_idle_ms,
              p->fifo_idle_ms,
              p->fifo_idle_frame_ms,
@@ -232,8 +242,12 @@ void nv2a_profile_get_phase_timing_str(char *buf, int bufsize)
 void nv2a_profile_get_cpu_timing_str(char *buf, int bufsize)
 {
     CpuTimingStats *p = &g_nv2a_stats.cpu;
+    float spin_pct = p->kick_count > 0
+                     ? p->kick_count_spun / p->kick_count * 100.0f
+                     : 0.0f;
     snprintf(buf, bufsize,
-             "CPU: K:%.0f W:%.1fK M:%.0f(Fh:%.0f Ni:%.0f) Lock:%.1fms Push:%.1fms TbH:%.1f%%",
+             "CPU: K:%.0f W:%.1fK M:%.0f(Fh:%.0f Ni:%.0f) "
+             "Lock:%.1fms Push:%.1fms SpH:%.0f%% TbH:%.1f%%",
              p->kick_count,
              p->pusher_words / 1000.0f,
              p->method_count,
@@ -241,6 +255,7 @@ void nv2a_profile_get_cpu_timing_str(char *buf, int bufsize)
              p->method_noninc_words,
              p->lock_wait_ms,
              p->pusher_run_ms,
+             spin_pct,
              p->tb_hit_pct);
 }
 

@@ -1475,17 +1475,18 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
         };
         nv2a_profile_inc_counter(NV2A_PROF_QUEUE_SUBMIT);
         vkResetFences(r->device, 1, &r->command_buffer_fence);
+        NV2A_PHASE_TIMER_BEGIN(finish_submit);
         VK_CHECK(vkQueueSubmit(r->queue, ARRAY_SIZE(submit_infos), submit_infos,
                                r->command_buffer_fence));
+        NV2A_PHASE_TIMER_END(finish_submit);
         r->frame_submitted[r->current_frame] = true;
         r->submit_count += 1;
+
+        NV2A_PHASE_TIMER_BEGIN(finish_fence);
 
 #if OPT_ALWAYS_DEFERRED_FENCES
         if (finish_reason != VK_FINISH_REASON_FLIP_STALL &&
             finish_reason != VK_FINISH_REASON_PRESENTING) {
-            /* Mid-frame finishes split one emulated frame across two GPU
-             * submissions. Wait for the just-submitted half to complete so
-             * the second half can safely reuse shared surfaces/textures. */
             VK_CHECK(vkWaitForFences(r->device, 1, &r->command_buffer_fence,
                                      VK_TRUE, UINT64_MAX));
         }
@@ -1583,6 +1584,8 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
         r->color_drawn_in_cb = false;
         r->zeta_drawn_in_cb = false;
         r->queries_reset_in_cb = false;
+
+        NV2A_PHASE_TIMER_END(finish_fence);
 
         if (check_budget) {
             pgraph_vk_check_memory_budget(pg);

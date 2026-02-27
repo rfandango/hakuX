@@ -136,6 +136,8 @@ typedef struct FramePacingStats {
     unsigned int defers_window;
     unsigned int vblank_fired;
     float vblank_jitter_ms;
+    float vblank_delivery_ms;
+    bool unlock_mode_active;
 } FramePacingStats;
 
 typedef struct ShaderPipelineStats {
@@ -172,6 +174,9 @@ typedef struct FramePhaseTimingWork {
     int64_t pipe_bind_tex_ns;
     int64_t pipe_bind_shd_ns;
     int64_t pipe_lookup_ns;
+    /* Sub-phases within finish */
+    int64_t finish_fence_ns;
+    int64_t finish_submit_ns;
 } FramePhaseTimingWork;
 
 typedef struct FramePhaseTimingStats {
@@ -197,6 +202,9 @@ typedef struct FramePhaseTimingStats {
     float pipe_bind_tex_ms;
     float pipe_bind_shd_ms;
     float pipe_lookup_ms;
+    /* Sub-phases within finish */
+    float finish_fence_ms;
+    float finish_submit_ms;
 } FramePhaseTimingStats;
 
 typedef struct CpuTimingWork {
@@ -204,6 +212,7 @@ typedef struct CpuTimingWork {
     int64_t pusher_run_ns;
     int64_t method_exec_ns;
     uint32_t kick_count;
+    uint32_t kick_count_spun;
     uint32_t pusher_words;
     uint32_t method_count;
     uint32_t method_fast_hit;
@@ -217,6 +226,7 @@ typedef struct CpuTimingStats {
     float pusher_run_ms;
     float method_exec_ms;
     float kick_count;
+    float kick_count_spun;
     float pusher_words;
     float method_count;
     float method_fast_hit;

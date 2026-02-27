@@ -29,6 +29,14 @@
 #define XEMU_OPT_PFIFO_LOCK_BATCH 1
 #endif
 
+#ifndef XEMU_OPT_FIFO_SPIN
+#define XEMU_OPT_FIFO_SPIN 1
+#endif
+
+#if XEMU_OPT_FIFO_SPIN
+#define FIFO_SPIN_NS 1000000 /* 1 ms */
+#endif
+
 #if defined(__ANDROID__) && XEMU_OPT_THREAD_AFFINITY
 #include <sys/syscall.h>
 #include <sys/resource.h>
@@ -148,8 +156,10 @@ void pfifo_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
 
 void pfifo_kick(NV2AState *d)
 {
-    d->pfifo.fifo_kick = true;
-    qemu_cond_broadcast(&d->pfifo.fifo_cond);
+    if (!d->pfifo.fifo_kick) {
+        d->pfifo.fifo_kick = true;
+        qemu_cond_broadcast(&d->pfifo.fifo_cond);
+    }
 }
 
 static bool can_fifo_access(NV2AState *d) {
@@ -589,10 +599,41 @@ void *pfifo_thread(void *arg)
         pgraph_process_pending_reports(d);
 
         if (!d->pfifo.fifo_kick) {
-            qemu_cond_signal(&d->pfifo.fifo_idle_cond);
-
             int64_t idle_t0 = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+
+#if XEMU_OPT_FIFO_SPIN
+            qemu_mutex_unlock(&d->pfifo.lock);
+
+            bool spun_awake = false;
+            int64_t spin_deadline = idle_t0 + FIFO_SPIN_NS;
+            for (unsigned spin_i = 0; ; spin_i++) {
+                if (qatomic_read(&d->pfifo.fifo_kick)) {
+                    spun_awake = true;
+                    break;
+                }
+                if ((spin_i & 0xFF) == 0 &&
+                    qemu_clock_get_ns(QEMU_CLOCK_REALTIME) >= spin_deadline) {
+                    break;
+                }
+#ifdef __aarch64__
+                __asm__ volatile("yield" ::: "memory");
+#endif
+            }
+            if (spun_awake) {
+                g_nv2a_stats.cpu_working.kick_count_spun++;
+            }
+
+            qemu_mutex_lock(&d->pfifo.lock);
+
+            if (!spun_awake && !d->pfifo.fifo_kick) {
+                qemu_cond_signal(&d->pfifo.fifo_idle_cond);
+                qemu_cond_wait(&d->pfifo.fifo_cond, &d->pfifo.lock);
+            }
+#else
+            qemu_cond_signal(&d->pfifo.fifo_idle_cond);
             qemu_cond_wait(&d->pfifo.fifo_cond, &d->pfifo.lock);
+#endif
+
             int64_t idle_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - idle_t0;
             g_nv2a_stats.phase_working.fifo_idle_ns += idle_ns;
             if (g_nv2a_stats.phase_working.post_flip) {

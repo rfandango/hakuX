@@ -1552,6 +1552,7 @@ DEF_METHOD(NV097, FLIP_STALL)
          * VBLANK is currently deferred (waiting for the game to finish).
          * Fire it immediately instead of waiting for the next retry tick.
          */
+        d->vblank_defer_request_ns = now;
         timer_mod(d->vblank_timer, now);
     }
 }

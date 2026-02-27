@@ -283,10 +283,14 @@ static void nv2a_vblank_timer_cb(void *opaque)
     if (in_deferral_window &&
         d->flip_active &&
         !qatomic_read(&d->pgraph.waiting_for_flip) &&
-        d->vblank_defer_count < defer_cap) {
-        d->vblank_defer_count++;
+        !d->vblank_deferred) {
+        int64_t max_defer = poll_interval * defer_cap;
+        int64_t remaining = defer_window - time_in_frame;
+        int64_t fire_at = now + MIN(max_defer, remaining);
+
+        d->vblank_defer_count = 1;
         qatomic_set(&d->vblank_deferred, true);
-        timer_mod(d->vblank_timer, now + poll_interval);
+        timer_mod(d->vblank_timer, fire_at);
         return;
     }
 
@@ -296,8 +300,15 @@ static void nv2a_vblank_timer_cb(void *opaque)
 
     /* Track VBLANK firing stats */
     g_nv2a_stats.pacing.vblank_fired++;
+    g_nv2a_stats.pacing.unlock_mode_active = unlocked;
     if (was_deferred) {
         g_nv2a_stats.pacing.defers_total++;
+        if (d->vblank_defer_request_ns) {
+            float delivery_ms = (float)(now - d->vblank_defer_request_ns) / 1e6f;
+            g_nv2a_stats.pacing.vblank_delivery_ms =
+                g_nv2a_stats.pacing.vblank_delivery_ms * 0.8f + delivery_ms * 0.2f;
+            d->vblank_defer_request_ns = 0;
+        }
     }
     if (s_last_vblank_fire_ns) {
         float delta_ms = (float)(now - s_last_vblank_fire_ns) / 1e6f;
@@ -425,6 +436,7 @@ static void nv2a_init_vga(NV2AState *d)
 static void nv2a_lock_fifo(NV2AState *d)
 {
     qemu_mutex_lock(&d->pfifo.lock);
+    d->pfifo.fifo_kick = true;
     qemu_cond_broadcast(&d->pfifo.fifo_cond);
     bql_unlock();
     qemu_cond_wait(&d->pfifo.fifo_idle_cond, &d->pfifo.lock);
