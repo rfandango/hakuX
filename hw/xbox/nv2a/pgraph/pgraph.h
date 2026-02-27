@@ -235,6 +235,7 @@ typedef struct PGRAPHState {
     DECLARE_BITMAP(regs_dirty, 0x2000 / sizeof(uint32_t));
 
     unsigned int last_subchannel;
+    uint32_t cached_graphics_class;
 
     bool clearing; // FIXME: Internal
     bool waiting_for_nop;

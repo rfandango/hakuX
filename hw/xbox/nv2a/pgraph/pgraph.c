@@ -48,8 +48,74 @@
 
 typedef struct {
     uint16_t reg;
-    uint16_t mask_idx;
+    uint8_t  mask_idx;
+    uint8_t  xlat;
 } MethodFastPath;
+
+enum {
+    XLAT_NONE = 0,
+    XLAT_BLEND_FACTOR,
+    XLAT_BLEND_EQN,
+    XLAT_DEPTH_FUNC,
+    XLAT_STENCIL_OP,
+    XLAT_SHADE_MODE,
+    XLAT_POLYGON_MODE,
+    XLAT_CULL_FACE,
+    XLAT_FRONT_FACE,
+    XLAT_TEX_DIRTY_0,
+    XLAT_TEX_DIRTY_1,
+    XLAT_TEX_DIRTY_2,
+    XLAT_TEX_DIRTY_3,
+};
+
+static inline uint32_t fast_xlat(unsigned int type, uint32_t p)
+{
+    switch (type) {
+    case XLAT_BLEND_FACTOR:
+        if (p <= 0x0001) return p;
+        if (p >= 0x0300 && p <= 0x0308) return p - 0x0300 + 2;
+        if (p >= 0x8001 && p <= 0x8004) return p - 0x8001 + 12;
+        return UINT32_MAX;
+    case XLAT_BLEND_EQN:
+        switch (p) {
+        case 0x800A: return 0; case 0x800B: return 1;
+        case 0x8006: return 2; case 0x8007: return 3; case 0x8008: return 4;
+        case 0xF005: return 5; case 0xF006: return 6;
+        default: return UINT32_MAX;
+        }
+    case XLAT_DEPTH_FUNC:
+        if (p >= 0x200 && p <= 0x207) return p & 0xF;
+        return UINT32_MAX;
+    case XLAT_STENCIL_OP:
+        switch (p) {
+        case 0x1E00: return 1; case 0x0000: return 2;
+        case 0x1E01: return 3; case 0x1E02: return 4; case 0x1E03: return 5;
+        case 0x150A: return 6; case 0x8507: return 7; case 0x8508: return 8;
+        default: return UINT32_MAX;
+        }
+    case XLAT_SHADE_MODE:
+        if (p == 0x1D00) return 0;
+        if (p == 0x1D01) return 1;
+        return UINT32_MAX;
+    case XLAT_POLYGON_MODE:
+        if (p >= 0x1B00 && p <= 0x1B02) {
+            static const uint8_t map[] = { 1, 2, 0 };
+            return map[p - 0x1B00];
+        }
+        return UINT32_MAX;
+    case XLAT_CULL_FACE:
+        if (p == 0x404) return 1;
+        if (p == 0x405) return 2;
+        if (p == 0x408) return 3;
+        return UINT32_MAX;
+    case XLAT_FRONT_FACE:
+        if (p == 0x900) return 0;
+        if (p == 0x901) return 1;
+        return UINT32_MAX;
+    default:
+        return UINT32_MAX;
+    }
+}
 
 static const uint32_t mask_lut[] = {
     /* 0: unused (direct write sentinel) */  0,
@@ -89,10 +155,24 @@ static const uint32_t mask_lut[] = {
     /* 34 */ NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX,
     /* 35 */ NV_PGRAPH_ANTIALIASING_ENABLE,
     /* 36 */ 0xFFF, /* SET_DOT_RGBMAPPING: NV_PGRAPH_SHADERCTL low 12 bits */
+    /* 37 */ NV_PGRAPH_BLEND_SFACTOR,
+    /* 38 */ NV_PGRAPH_BLEND_DFACTOR,
+    /* 39 */ NV_PGRAPH_BLEND_EQN,
+    /* 40 */ NV_PGRAPH_CONTROL_0_ZFUNC,
+    /* 41 */ NV_PGRAPH_CONTROL_2_STENCIL_OP_FAIL,
+    /* 42 */ NV_PGRAPH_CONTROL_2_STENCIL_OP_ZFAIL,
+    /* 43 */ NV_PGRAPH_CONTROL_2_STENCIL_OP_ZPASS,
+    /* 44 */ NV_PGRAPH_CONTROL_3_SHADEMODE,
+    /* 45 */ NV_PGRAPH_SETUPRASTER_FRONTFACEMODE,
+    /* 46 */ NV_PGRAPH_SETUPRASTER_BACKFACEMODE,
+    /* 47 */ NV_PGRAPH_SETUPRASTER_CULLCTRL,
+    /* 48 */ NV_PGRAPH_SETUPRASTER_FRONTFACE,
 };
 
-#define MF_DIRECT(r) { (r), 0 }
-#define MF_MASKED(r, m) { (r), (m) }
+#define MF_DIRECT(r)       { (r), 0, XLAT_NONE }
+#define MF_MASKED(r, m)    { (r), (m), XLAT_NONE }
+#define MF_XLAT(r, m, x)   { (r), (m), (x) }
+#define MF_TEX(r, slot)    { (r), 0, XLAT_TEX_DIRTY_0 + (slot) }
 
 #define MI(method) ((method) >> 2)
 
@@ -308,11 +388,95 @@ static const MethodFastPath method_fast[0x800] = {
 
     /* SET_DOT_RGBMAPPING  0x1E74 */
     [MI(0x1E74)] = MF_MASKED(NV_PGRAPH_SHADERCTL, 36),
+
+    /* --- Category C: Translated method writes --- */
+
+    /* SET_BLEND_FUNC_SFACTOR  0x0344 */
+    [MI(0x0344)] = MF_XLAT(NV_PGRAPH_BLEND, 37, XLAT_BLEND_FACTOR),
+    /* SET_BLEND_FUNC_DFACTOR  0x0348 */
+    [MI(0x0348)] = MF_XLAT(NV_PGRAPH_BLEND, 38, XLAT_BLEND_FACTOR),
+    /* SET_BLEND_EQUATION  0x0350 */
+    [MI(0x0350)] = MF_XLAT(NV_PGRAPH_BLEND, 39, XLAT_BLEND_EQN),
+    /* SET_DEPTH_FUNC  0x0354 */
+    [MI(0x0354)] = MF_XLAT(NV_PGRAPH_CONTROL_0, 40, XLAT_DEPTH_FUNC),
+    /* SET_STENCIL_OP_FAIL  0x0370 */
+    [MI(0x0370)] = MF_XLAT(NV_PGRAPH_CONTROL_2, 41, XLAT_STENCIL_OP),
+    /* SET_STENCIL_OP_ZFAIL  0x0374 */
+    [MI(0x0374)] = MF_XLAT(NV_PGRAPH_CONTROL_2, 42, XLAT_STENCIL_OP),
+    /* SET_STENCIL_OP_ZPASS  0x0378 */
+    [MI(0x0378)] = MF_XLAT(NV_PGRAPH_CONTROL_2, 43, XLAT_STENCIL_OP),
+    /* SET_SHADE_MODE  0x037C */
+    [MI(0x037C)] = MF_XLAT(NV_PGRAPH_CONTROL_3, 44, XLAT_SHADE_MODE),
+    /* SET_FRONT_POLYGON_MODE  0x038C */
+    [MI(0x038C)] = MF_XLAT(NV_PGRAPH_SETUPRASTER, 45, XLAT_POLYGON_MODE),
+    /* SET_BACK_POLYGON_MODE  0x0390 */
+    [MI(0x0390)] = MF_XLAT(NV_PGRAPH_SETUPRASTER, 46, XLAT_POLYGON_MODE),
+    /* SET_CULL_FACE  0x039C */
+    [MI(0x039C)] = MF_XLAT(NV_PGRAPH_SETUPRASTER, 47, XLAT_CULL_FACE),
+    /* SET_FRONT_FACE  0x03A0 */
+    [MI(0x03A0)] = MF_XLAT(NV_PGRAPH_SETUPRASTER, 48, XLAT_FRONT_FACE),
+
+    /* --- Category D: Texture methods with dirty tracking --- */
+
+    /* SET_TEXTURE_OFFSET  0x1B00 stride=64 */
+    [MI(0x1B00)]       = MF_TEX(NV_PGRAPH_TEXOFFSET0,     0),
+    [MI(0x1B00 + 64)]  = MF_TEX(NV_PGRAPH_TEXOFFSET1,     1),
+    [MI(0x1B00 + 128)] = MF_TEX(NV_PGRAPH_TEXOFFSET2,     2),
+    [MI(0x1B00 + 192)] = MF_TEX(NV_PGRAPH_TEXOFFSET3,     3),
+
+    /* SET_TEXTURE_CONTROL0  0x1B0C stride=64 */
+    [MI(0x1B0C)]       = MF_TEX(NV_PGRAPH_TEXCTL0_0,      0),
+    [MI(0x1B0C + 64)]  = MF_TEX(NV_PGRAPH_TEXCTL0_1,      1),
+    [MI(0x1B0C + 128)] = MF_TEX(NV_PGRAPH_TEXCTL0_2,      2),
+    [MI(0x1B0C + 192)] = MF_TEX(NV_PGRAPH_TEXCTL0_3,      3),
+
+    /* SET_TEXTURE_CONTROL1  0x1B10 stride=64 */
+    [MI(0x1B10)]       = MF_TEX(NV_PGRAPH_TEXCTL1_0,      0),
+    [MI(0x1B10 + 64)]  = MF_TEX(NV_PGRAPH_TEXCTL1_1,      1),
+    [MI(0x1B10 + 128)] = MF_TEX(NV_PGRAPH_TEXCTL1_2,      2),
+    [MI(0x1B10 + 192)] = MF_TEX(NV_PGRAPH_TEXCTL1_3,      3),
+
+    /* SET_TEXTURE_FILTER  0x1B14 stride=64 */
+    [MI(0x1B14)]       = MF_TEX(NV_PGRAPH_TEXFILTER0,     0),
+    [MI(0x1B14 + 64)]  = MF_TEX(NV_PGRAPH_TEXFILTER1,     1),
+    [MI(0x1B14 + 128)] = MF_TEX(NV_PGRAPH_TEXFILTER2,     2),
+    [MI(0x1B14 + 192)] = MF_TEX(NV_PGRAPH_TEXFILTER3,     3),
+
+    /* SET_TEXTURE_IMAGE_RECT  0x1B1C stride=64 */
+    [MI(0x1B1C)]       = MF_TEX(NV_PGRAPH_TEXIMAGERECT0,  0),
+    [MI(0x1B1C + 64)]  = MF_TEX(NV_PGRAPH_TEXIMAGERECT1,  1),
+    [MI(0x1B1C + 128)] = MF_TEX(NV_PGRAPH_TEXIMAGERECT2,  2),
+    [MI(0x1B1C + 192)] = MF_TEX(NV_PGRAPH_TEXIMAGERECT3,  3),
 };
 
 #undef MF_DIRECT
 #undef MF_MASKED
+#undef MF_XLAT
+#undef MF_TEX
 #undef MI
+
+static inline bool fast_entry_apply(PGRAPHState *pg,
+                                    const MethodFastPath *f, uint32_t p)
+{
+    if (f->xlat >= XLAT_TEX_DIRTY_0 && f->xlat <= XLAT_TEX_DIRTY_3) {
+        int slot = f->xlat - XLAT_TEX_DIRTY_0;
+        pg->texture_dirty[slot] |= (p != pgraph_reg_r(pg, f->reg));
+        pgraph_reg_w(pg, f->reg, p);
+        return true;
+    }
+    if (f->xlat) {
+        p = fast_xlat(f->xlat, p);
+        if (p == UINT32_MAX) return false;
+    }
+    if (f->mask_idx == 0) {
+        pgraph_reg_w(pg, f->reg, p);
+    } else {
+        uint32_t rv = pgraph_reg_r(pg, f->reg);
+        SET_MASK(rv, mask_lut[f->mask_idx], p);
+        pgraph_reg_w(pg, f->reg, rv);
+    }
+    return true;
+}
 
 #endif /* XEMU_OPT_METHOD_FAST_TABLE */
 
@@ -468,6 +632,7 @@ void pgraph_context_switch(NV2AState *d, unsigned int channel_id)
     bool valid = channel_valid && pgraph_channel_id == channel_id;
     if (!valid) {
         pg->last_subchannel = UINT_MAX;
+        pg->cached_graphics_class = 0;
         PG_SET_MASK(NV_PGRAPH_TRAPPED_ADDR,
                  NV_PGRAPH_TRAPPED_ADDR_CHID, channel_id);
 
@@ -520,6 +685,7 @@ void pgraph_init(NV2AState *d)
     pg->frame_time = 0;
     pg->draw_time = 0;
     pg->last_subchannel = UINT_MAX;
+    pg->cached_graphics_class = 0;
 
     pg->material_alpha = 0.0f;
     PG_SET_MASK(NV_PGRAPH_CONTROL_3, NV_PGRAPH_CONTROL_3_SHADEMODE,
@@ -894,6 +1060,7 @@ static const struct {
 #undef DEF_METHOD_CASE_4_OFFSET
 #undef DEF_METHOD_CASE_4
 
+#if TRACE_NV2A_PGRAPH_METHOD_ENABLED
 static void pgraph_method_log(unsigned int subchannel,
                               unsigned int graphics_class,
                               unsigned int method, uint32_t parameter)
@@ -936,6 +1103,7 @@ static void pgraph_method_log(unsigned int subchannel,
     }
     last = method;
 }
+#endif
 
 static void pgraph_method_inc(MethodFunc handler, uint32_t end,
                               METHOD_HANDLER_ARG_DECL)
@@ -947,10 +1115,12 @@ static void pgraph_method_inc(MethodFunc handler, uint32_t end,
     size_t count = MIN(num_words_available, (end - method) / 4);
     for (size_t i = 0; i < count; i++) {
         parameter = ldl_le_p(parameters + i);
+#if TRACE_NV2A_PGRAPH_METHOD_ENABLED
         if (i) {
             pgraph_method_log(subchannel, NV_KELVIN_PRIMITIVE, method,
                               parameter);
         }
+#endif
         handler(METHOD_HANDLER_ARGS);
         method += 4;
     }
@@ -966,10 +1136,12 @@ static void pgraph_method_non_inc(MethodFunc handler, METHOD_HANDLER_ARG_DECL)
 
     for (size_t i = 0; i < num_words_available; i++) {
         parameter = ldl_le_p(parameters + i);
+#if TRACE_NV2A_PGRAPH_METHOD_ENABLED
         if (i) {
             pgraph_method_log(subchannel, NV_KELVIN_PRIMITIVE, method,
                               parameter);
         }
+#endif
         handler(METHOD_HANDLER_ARGS);
     }
     *num_words_consumed = num_words_available;
@@ -1012,13 +1184,7 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
         unsigned int midx = METHOD_ADDR_TO_INDEX(method);
         const MethodFastPath *fast = &method_fast[midx];
         if (fast->reg) {
-            if (fast->mask_idx == 0) {
-                pgraph_reg_w(pg, fast->reg, parameter);
-            } else {
-                uint32_t rv = pgraph_reg_r(pg, fast->reg);
-                SET_MASK(rv, mask_lut[fast->mask_idx], parameter);
-                pgraph_reg_w(pg, fast->reg, rv);
-            }
+            if (!fast_entry_apply(pg, fast, parameter)) goto slow_path;
             size_t consumed = 1;
             while (consumed < num_words_available) {
                 unsigned int next_midx = midx + 1;
@@ -1026,21 +1192,63 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
                 const MethodFastPath *nf = &method_fast[next_midx];
                 if (!nf->reg) break;
                 uint32_t p = ldl_le_p(parameters + consumed);
-                if (nf->mask_idx == 0) {
-                    pgraph_reg_w(pg, nf->reg, p);
-                } else {
-                    uint32_t rv = pgraph_reg_r(pg, nf->reg);
-                    SET_MASK(rv, mask_lut[nf->mask_idx], p);
-                    pgraph_reg_w(pg, nf->reg, rv);
-                }
+                if (!fast_entry_apply(pg, nf, p)) break;
                 midx = next_midx;
                 consumed++;
             }
+
+            /* Cross-command coalescing: peek at subsequent DMA commands
+             * and consume consecutive INC fast-path commands without
+             * returning to the puller (avoids per-command lock swaps). */
+            while (consumed < max_lookahead_words) {
+                uint32_t hdr = ldl_le_p(parameters + consumed);
+                if ((hdr & 0xe0030003) != 0) break;
+                uint32_t next_method = hdr & 0x1ffc;
+                uint32_t next_sub    = (hdr >> 13) & 7;
+                uint32_t next_count  = (hdr >> 18) & 0x7ff;
+                if (next_sub != subchannel || next_method < 0x100
+                    || next_count == 0) break;
+                unsigned int nm = METHOD_ADDR_TO_INDEX(next_method);
+                if (nm + next_count > 0x800) break;
+                if (consumed + 1 + next_count > max_lookahead_words) break;
+                bool all_fast = true;
+                for (uint32_t i = 0; i < next_count; i++) {
+                    if (!method_fast[nm + i].reg) {
+                        all_fast = false;
+                        break;
+                    }
+                }
+                if (!all_fast) break;
+                consumed++;
+                for (uint32_t i = 0; i < next_count; i++) {
+                    const MethodFastPath *cf = &method_fast[nm + i];
+                    uint32_t p = ldl_le_p(parameters + consumed);
+                    if (!fast_entry_apply(pg, cf, p)) {
+                        /* Xlat failed mid-command; undo consumed header,
+                         * remaining data words stay in the stream for the
+                         * puller to re-dispatch via slow path. */
+                        consumed -= (i + 1);
+                        goto coalesce_done;
+                    }
+                    consumed++;
+                }
+            }
+coalesce_done:
             g_nv2a_stats.cpu_working.method_fast_hit += consumed;
             return consumed;
         }
+slow_path:
+        ;
     }
 #endif
+
+    /* Kelvin fast entry: when subchannel is unchanged and we already know the
+     * graphics class is NV_KELVIN_PRIMITIVE, skip the full preamble. */
+    if (likely(subchannel == pg->last_subchannel &&
+               pg->cached_graphics_class == NV_KELVIN_PRIMITIVE &&
+               method != NV_SET_OBJECT)) {
+        goto kelvin_dispatch;
+    }
 
     bool channel_valid =
         PG_GET_MASK(NV_PGRAPH_CTX_CONTROL, NV_PGRAPH_CTX_CONTROL_CHID);
@@ -1086,11 +1294,13 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
 
     uint32_t graphics_class = PG_GET_MASK(NV_PGRAPH_CTX_SWITCH1,
                                        NV_PGRAPH_CTX_SWITCH1_GRCLASS);
+    pg->cached_graphics_class = graphics_class;
 
+#if TRACE_NV2A_PGRAPH_METHOD_ENABLED
     pgraph_method_log(subchannel, graphics_class, method, parameter);
+#endif
 
     if (subchannel != 0) {
-        // catches context switching issues on xbox d3d
         assert(graphics_class != 0x97);
     }
 
@@ -1188,7 +1398,8 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
         }
         break;
     }
-    case NV_KELVIN_PRIMITIVE: {
+    case NV_KELVIN_PRIMITIVE:
+    kelvin_dispatch: {
         MethodFunc handler =
             pgraph_kelvin_methods[METHOD_ADDR_TO_INDEX(method)].handler;
         if (handler == NULL) {
@@ -1228,7 +1439,7 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
     return num_processed;
 
 unhandled:
-    trace_nv2a_pgraph_method_unhandled(subchannel, graphics_class,
+    trace_nv2a_pgraph_method_unhandled(subchannel, pg->cached_graphics_class,
                                            method, parameter);
     return num_processed;
 }
