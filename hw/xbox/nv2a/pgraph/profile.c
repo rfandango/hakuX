@@ -18,6 +18,9 @@
  */
 
 #include "hw/xbox/nv2a/nv2a_int.h"
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
 
 NV2AStats g_nv2a_stats;
 
@@ -39,6 +42,42 @@ void nv2a_profile_increment(void)
     }
 }
 
+static void snapshot_phase_timing(void)
+{
+    FramePhaseTimingWork *w = &g_nv2a_stats.phase_working;
+    FramePhaseTimingStats *p = &g_nv2a_stats.phase;
+    const float alpha = 0.2f;
+
+#define SMOOTH(field) \
+    p->field##_ms = p->field##_ms * (1.0f - alpha) + \
+                    (float)(w->field##_ns) / 1e6f * alpha
+
+    SMOOTH(surface_update);
+    SMOOTH(texture_upload);
+    SMOOTH(shader_compile);
+    SMOOTH(draw_dispatch);
+    SMOOTH(finish);
+    SMOOTH(flip_idle);
+    SMOOTH(fifo_idle);
+    SMOOTH(draw_vtx_attr);
+    SMOOTH(draw_vtx_sync);
+    SMOOTH(draw_prim_rw);
+    SMOOTH(draw_pipeline);
+    SMOOTH(draw_desc_set);
+    SMOOTH(draw_setup);
+    SMOOTH(draw_vk_cmd);
+    SMOOTH(pipe_bind_tex);
+    SMOOTH(pipe_bind_shd);
+    SMOOTH(pipe_lookup);
+#undef SMOOTH
+
+    p->total_ms = p->surface_update_ms + p->texture_upload_ms +
+                  p->shader_compile_ms + p->draw_dispatch_ms +
+                  p->finish_ms + p->flip_idle_ms + p->fifo_idle_ms;
+
+    memset(w, 0, sizeof(*w));
+}
+
 void nv2a_profile_flip_stall(void)
 {
     int64_t now = qemu_clock_get_us(QEMU_CLOCK_REALTIME);
@@ -52,6 +91,8 @@ void nv2a_profile_flip_stall(void)
     g_nv2a_stats.frame_count++;
     memset(&g_nv2a_stats.frame_working, 0, sizeof(g_nv2a_stats.frame_working));
 
+    snapshot_phase_timing();
+
     /* Track game frame time (flip-to-flip interval) */
     static int64_t prev_flip_us;
     if (prev_flip_us) {
@@ -64,6 +105,14 @@ void nv2a_profile_flip_stall(void)
             p->game_frame_max_ms = frame_ms;
     }
     prev_flip_us = now;
+
+#ifdef __ANDROID__
+    if ((g_nv2a_stats.frame_count % 60) == 0) {
+        char buf[256];
+        nv2a_profile_get_phase_timing_str(buf, sizeof(buf));
+        __android_log_print(ANDROID_LOG_INFO, "xemu-phase", "%s", buf);
+    }
+#endif
 }
 
 void nv2a_profile_get_pacing_str(char *buf, int bufsize)
@@ -86,6 +135,31 @@ void nv2a_profile_get_pacing_str(char *buf, int bufsize)
     p->display_frame_min_ms = 0;
     p->display_frame_max_ms = 0;
     p->defers_total = 0;
+}
+
+void nv2a_profile_get_phase_timing_str(char *buf, int bufsize)
+{
+    FramePhaseTimingStats *p = &g_nv2a_stats.phase;
+    snprintf(buf, bufsize,
+             "Surf:%.1f Tex:%.1f Shd:%.1f Draw:%.1f "
+             "[Pipe:%.1f(Tx:%.1f Sh:%.1f Lu:%.1f) "
+             "Desc:%.1f Setup:%.1f Cmd:%.1f] "
+             "Fin:%.1f Flip:%.1f Idle:%.1f | Tot:%.1f ms",
+             p->surface_update_ms,
+             p->texture_upload_ms,
+             p->shader_compile_ms,
+             p->draw_dispatch_ms,
+             p->draw_pipeline_ms,
+             p->pipe_bind_tex_ms,
+             p->pipe_bind_shd_ms,
+             p->pipe_lookup_ms,
+             p->draw_desc_set_ms,
+             p->draw_setup_ms,
+             p->draw_vk_cmd_ms,
+             p->finish_ms,
+             p->flip_idle_ms,
+             p->fifo_idle_ms,
+             p->total_ms);
 }
 
 void nv2a_profile_get_shader_stats_str(char *buf, int bufsize)

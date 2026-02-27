@@ -185,7 +185,14 @@ LruNode *lru_lookup(Lru *lru, uint64_t hash, const void *key)
     }
 
 	if (found) {
-		QTAILQ_REMOVE(&lru->bins[bin], found, next_bin);
+		if (QTAILQ_FIRST(&lru->bins[bin]) != found) {
+			QTAILQ_REMOVE(&lru->bins[bin], found, next_bin);
+			QTAILQ_INSERT_HEAD(&lru->bins[bin], found, next_bin);
+		}
+		if (QTAILQ_FIRST(&lru->global) != found) {
+			QTAILQ_REMOVE(&lru->global, found, next_global);
+			QTAILQ_INSERT_HEAD(&lru->global, found, next_global);
+		}
 	} else {
 		found = lru_get_one_free(lru);
 		found->hash = hash;
@@ -196,11 +203,11 @@ LruNode *lru_lookup(Lru *lru, uint64_t hash, const void *key)
 
 		lru->num_used += 1;
 		lru->num_free -= 1;
-	}
 
-	QTAILQ_REMOVE(&lru->global, found, next_global);
-	QTAILQ_INSERT_HEAD(&lru->global, found, next_global);
-	QTAILQ_INSERT_HEAD(&lru->bins[bin], found, next_bin);
+		QTAILQ_REMOVE(&lru->global, found, next_global);
+		QTAILQ_INSERT_HEAD(&lru->global, found, next_global);
+		QTAILQ_INSERT_HEAD(&lru->bins[bin], found, next_bin);
+	}
 
 	return found;
 }

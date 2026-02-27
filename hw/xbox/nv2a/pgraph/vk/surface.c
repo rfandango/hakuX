@@ -1797,6 +1797,7 @@ static void update_surface_part(NV2AState *d, bool upload, bool color)
 void pgraph_vk_surface_update(NV2AState *d, bool upload, bool color_write,
                               bool zeta_write)
 {
+    NV2A_PHASE_TIMER_BEGIN(surface_update);
     PGRAPHState *pg = &d->pgraph;
     PGRAPHVkState *r = pg->vk_renderer_state;
 
@@ -1878,6 +1879,7 @@ void pgraph_vk_surface_update(NV2AState *d, bool upload, bool color_write,
 
     expire_old_surfaces(d);
     prune_invalid_surfaces(r, num_invalid_surfaces_to_keep);
+    NV2A_PHASE_TIMER_END(surface_update);
 }
 
 static bool check_format_and_usage_supported(PGRAPHVkState *r, VkFormat format,

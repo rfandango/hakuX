@@ -50,6 +50,9 @@ void pgraph_rdi_write(PGRAPHState *pg, unsigned int select,
         assert((address / 4) < NV2A_VERTEXSHADER_CONSTANTS);
         pg->vsh_constants_dirty[address / 4] |=
             (val != pg->vsh_constants[address / 4][3 - address % 4]);
+        if (val != pg->vsh_constants[address / 4][3 - address % 4]) {
+            pg->vsh_constants_any_dirty = true;
+        }
         pg->vsh_constants[address / 4][3 - address % 4] = val;
         break;
     default:

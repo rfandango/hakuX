@@ -478,6 +478,7 @@ static bool check_texture_possibly_dirty(NV2AState *d,
 static void upload_texture_image(PGRAPHState *pg, int texture_idx,
                                  TextureBinding *binding)
 {
+    NV2A_PHASE_TIMER_BEGIN(texture_upload);
     PGRAPHVkState *r = pg->vk_renderer_state;
     TextureShape *state = &binding->key.state;
     VkColorFormatInfo vkf = kelvin_color_format_vk_map[state->color_format];
@@ -616,6 +617,7 @@ static void upload_texture_image(PGRAPHState *pg, int texture_idx,
             g_free(layer->levels[level_idx].decoded_data);
         }
     }
+    NV2A_PHASE_TIMER_END(texture_upload);
 }
 
 static void copy_zeta_surface_to_texture(PGRAPHState *pg, SurfaceBinding *surface,
@@ -1468,17 +1470,32 @@ void pgraph_vk_bind_textures(NV2AState *d)
 
     for (int i = 0; i < NV2A_MAX_TEXTURES; i++) {
         if (!pgraph_is_texture_enabled(pg, i)) {
-            r->texture_bindings[i] = &r->dummy_texture;
+            if (r->texture_bindings[i] != &r->dummy_texture) {
+                r->texture_bindings[i] = &r->dummy_texture;
+                r->texture_bindings_changed = true;
+            }
+            pg->texture_dirty[i] = false;
             continue;
         }
 
-        create_texture(pg, i);
+        if (!pg->texture_dirty[i] && r->texture_bindings[i] &&
+            r->texture_bindings[i] != &r->dummy_texture &&
+            !r->texture_bindings[i]->possibly_dirty) {
+            continue;
+        }
 
-        pg->texture_dirty[i] = false; // FIXME: Move to renderer?
+        TextureBinding *prev_binding = r->texture_bindings[i];
+        create_texture(pg, i);
+        if (r->texture_bindings[i] != prev_binding) {
+            r->texture_bindings_changed = true;
+        }
+
+        pg->texture_dirty[i] = false;
     }
 
-    r->texture_bindings_changed = true;
-    r->pipeline_state_dirty = true;
+    if (r->texture_bindings_changed) {
+        r->pipeline_state_dirty = true;
+    }
     update_timestamps(r);
     NV2A_VK_DGROUP_END();
 }

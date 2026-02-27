@@ -181,14 +181,18 @@ typedef struct PGRAPHState {
 
     uint32_t vsh_constants[NV2A_VERTEXSHADER_CONSTANTS][4];
     bool vsh_constants_dirty[NV2A_VERTEXSHADER_CONSTANTS];
+    bool vsh_constants_any_dirty;
 
     /* lighting constant arrays */
     uint32_t ltctxa[NV2A_LTCTXA_COUNT][4];
     bool ltctxa_dirty[NV2A_LTCTXA_COUNT];
+    bool ltctxa_any_dirty;
     uint32_t ltctxb[NV2A_LTCTXB_COUNT][4];
     bool ltctxb_dirty[NV2A_LTCTXB_COUNT];
+    bool ltctxb_any_dirty;
     uint32_t ltc1[NV2A_LTC1_COUNT][4];
     bool ltc1_dirty[NV2A_LTC1_COUNT];
+    bool ltc1_any_dirty;
 
     float material_alpha;
 

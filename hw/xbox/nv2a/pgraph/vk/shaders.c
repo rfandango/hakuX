@@ -513,7 +513,6 @@ static void apply_uniform_updates(ShaderUniformLayout *layout,
     }
 }
 
-// FIXME: Dirty tracking
 static void update_shader_uniforms(PGRAPHState *pg)
 {
     NV2A_VK_DGROUP_BEGIN("%s", __func__);
@@ -523,8 +522,6 @@ static void update_shader_uniforms(PGRAPHState *pg)
 
     assert(r->shader_binding);
     ShaderBinding *binding = r->shader_binding;
-    ShaderUniformLayout *layouts[] = { &binding->vsh.module_info->uniforms,
-                                       &binding->psh.module_info->uniforms };
 
     VshUniformValues vsh_values;
     pgraph_glsl_set_vsh_uniform_values(pg, &binding->state.vsh,
@@ -554,16 +551,7 @@ static void update_shader_uniforms(PGRAPHState *pg)
                           binding->psh.uniform_locs, &psh_values,
                           PshUniform__COUNT);
 
-    for (int i = 0; i < ARRAY_SIZE(layouts); i++) {
-        uint64_t hash =
-            fast_hash(layouts[i]->allocation, layouts[i]->total_size);
-        r->uniforms_changed |= (hash != r->uniform_buffer_hashes[i]);
-        r->uniform_buffer_hashes[i] = hash;
-    }
-
-    nv2a_profile_inc_counter(r->uniforms_changed ?
-                                 NV2A_PROF_SHADER_UBO_DIRTY :
-                                 NV2A_PROF_SHADER_UBO_NOTDIRTY);
+    r->uniforms_changed = true;
 
     NV2A_VK_DGROUP_END();
 }

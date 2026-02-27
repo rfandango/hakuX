@@ -149,6 +149,51 @@ typedef struct ShaderPipelineStats {
     unsigned int pipeline_cache_disk_saved;
 } ShaderPipelineStats;
 
+typedef struct FramePhaseTimingWork {
+    int64_t surface_update_ns;
+    int64_t texture_upload_ns;
+    int64_t shader_compile_ns;
+    int64_t draw_dispatch_ns;
+    int64_t finish_ns;
+    int64_t flip_idle_ns;
+    int64_t fifo_idle_ns;
+    /* Sub-phases within draw_dispatch */
+    int64_t draw_vtx_attr_ns;
+    int64_t draw_vtx_sync_ns;
+    int64_t draw_prim_rw_ns;
+    int64_t draw_pipeline_ns;
+    int64_t draw_desc_set_ns;
+    int64_t draw_setup_ns;
+    int64_t draw_vk_cmd_ns;
+    /* Sub-phases within draw_pipeline (create_pipeline) */
+    int64_t pipe_bind_tex_ns;
+    int64_t pipe_bind_shd_ns;
+    int64_t pipe_lookup_ns;
+} FramePhaseTimingWork;
+
+typedef struct FramePhaseTimingStats {
+    float surface_update_ms;
+    float texture_upload_ms;
+    float shader_compile_ms;
+    float draw_dispatch_ms;
+    float finish_ms;
+    float flip_idle_ms;
+    float fifo_idle_ms;
+    float total_ms;
+    /* Sub-phases within draw_dispatch */
+    float draw_vtx_attr_ms;
+    float draw_vtx_sync_ms;
+    float draw_prim_rw_ms;
+    float draw_pipeline_ms;
+    float draw_desc_set_ms;
+    float draw_setup_ms;
+    float draw_vk_cmd_ms;
+    /* Sub-phases within draw_pipeline (create_pipeline) */
+    float pipe_bind_tex_ms;
+    float pipe_bind_shd_ms;
+    float pipe_lookup_ms;
+} FramePhaseTimingStats;
+
 typedef struct NV2AStats {
     int64_t last_flip_time;
     unsigned int frame_count;
@@ -160,6 +205,8 @@ typedef struct NV2AStats {
     unsigned int frame_ptr;
     FramePacingStats pacing;
     ShaderPipelineStats shader_stats;
+    FramePhaseTimingWork phase_working;
+    FramePhaseTimingStats phase;
 } NV2AStats;
 
 #ifdef __cplusplus
@@ -174,11 +221,25 @@ void nv2a_profile_increment(void);
 void nv2a_profile_flip_stall(void);
 void nv2a_profile_get_pacing_str(char *buf, int bufsize);
 void nv2a_profile_get_shader_stats_str(char *buf, int bufsize);
+void nv2a_profile_get_phase_timing_str(char *buf, int bufsize);
 
 static inline void nv2a_profile_inc_counter(enum NV2A_PROF_COUNTERS_ENUM cnt)
 {
     g_nv2a_stats.frame_working.counters[cnt] += 1;
 }
+
+/*
+ * Lightweight per-frame phase timing. The macros assume qemu_clock_get_ns
+ * and QEMU_CLOCK_REALTIME are available at the call site (true for all
+ * NV2A .c files that include nv2a_int.h or renderer.h).
+ */
+#define NV2A_PHASE_TIMER_BEGIN(phase) \
+    int64_t _phase_t0_##phase = qemu_clock_get_ns(QEMU_CLOCK_REALTIME)
+
+#define NV2A_PHASE_TIMER_END(phase) do { \
+    g_nv2a_stats.phase_working.phase##_ns += \
+        qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - _phase_t0_##phase; \
+} while (0)
 
 void nv2a_dbg_renderdoc_init(void);
 void *nv2a_dbg_renderdoc_get_api(void);

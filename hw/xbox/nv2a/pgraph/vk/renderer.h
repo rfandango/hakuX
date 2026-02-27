@@ -501,6 +501,22 @@ typedef struct PGRAPHVkState {
     size_t uniform_buffer_offsets[2];
     bool uniforms_changed;
 
+    /* Cached uniform state for dirty tracking */
+    float cached_material_alpha;
+    float cached_specular_power;
+    float cached_specular_power_back;
+    float cached_point_params[8];
+    float cached_light_infinite_half_vector[NV2A_MAX_LIGHTS][3];
+    float cached_light_infinite_direction[NV2A_MAX_LIGHTS][3];
+    float cached_light_local_position[NV2A_MAX_LIGHTS][3];
+    float cached_light_local_attenuation[NV2A_MAX_LIGHTS][3];
+    unsigned int cached_surface_width;
+    unsigned int cached_surface_height;
+
+#define UNIFORM_CACHED_REGS_MAX 66
+    uint32_t cached_uniform_reg_values[UNIFORM_CACHED_REGS_MAX];
+    bool uniform_reg_cache_valid;
+
     VkQueryPool query_pool;
     int max_queries_in_flight;
     int num_queries_in_flight;

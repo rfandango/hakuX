@@ -184,6 +184,7 @@ static bool pfifo_stall_for_flip(NV2AState *d)
     bool should_stall = false;
 
     if (qatomic_read(&d->pgraph.waiting_for_flip)) {
+        NV2A_PHASE_TIMER_BEGIN(flip_idle);
         qemu_mutex_lock(&d->pgraph.lock);
         if (!is_flip_stall_complete(d)) {
             should_stall = true;
@@ -191,6 +192,7 @@ static bool pfifo_stall_for_flip(NV2AState *d)
             d->pgraph.waiting_for_flip = false;
         }
         qemu_mutex_unlock(&d->pgraph.lock);
+        NV2A_PHASE_TIMER_END(flip_idle);
     }
 
     return should_stall;
@@ -564,8 +566,9 @@ void *pfifo_thread(void *arg)
         if (!d->pfifo.fifo_kick) {
             qemu_cond_signal(&d->pfifo.fifo_idle_cond);
 
-            // Both the pusher and puller are waiting for some action
+            NV2A_PHASE_TIMER_BEGIN(fifo_idle);
             qemu_cond_wait(&d->pfifo.fifo_cond, &d->pfifo.lock);
+            NV2A_PHASE_TIMER_END(fifo_idle);
         }
 
         if (d->exiting) {
