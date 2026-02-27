@@ -108,6 +108,8 @@ static void snapshot_cpu_timing(void)
     SMOOTH_CNT(p->kick_count, w->kick_count);
     SMOOTH_CNT(p->pusher_words, w->pusher_words);
     SMOOTH_CNT(p->method_count, w->method_count);
+    SMOOTH_CNT(p->method_fast_hit, w->method_fast_hit);
+    SMOOTH_CNT(p->method_noninc_words, w->method_noninc_words);
 
 #undef SMOOTH_CNT
 
@@ -126,12 +128,14 @@ static void snapshot_cpu_timing(void)
     }
 #endif
 
-    w->lock_wait_ns   = 0;
-    w->pusher_run_ns  = 0;
-    w->method_exec_ns = 0;
-    w->kick_count     = 0;
-    w->pusher_words   = 0;
-    w->method_count   = 0;
+    w->lock_wait_ns      = 0;
+    w->pusher_run_ns     = 0;
+    w->method_exec_ns    = 0;
+    w->kick_count        = 0;
+    w->pusher_words      = 0;
+    w->method_count      = 0;
+    w->method_fast_hit   = 0;
+    w->method_noninc_words = 0;
 }
 
 void nv2a_profile_flip_stall(void)
@@ -229,13 +233,14 @@ void nv2a_profile_get_cpu_timing_str(char *buf, int bufsize)
 {
     CpuTimingStats *p = &g_nv2a_stats.cpu;
     snprintf(buf, bufsize,
-             "CPU: K:%.0f W:%.1fK M:%.0f Lock:%.1fms Push:%.1fms Meth:%.1fms TbH:%.1f%%",
+             "CPU: K:%.0f W:%.1fK M:%.0f(Fh:%.0f Ni:%.0f) Lock:%.1fms Push:%.1fms TbH:%.1f%%",
              p->kick_count,
              p->pusher_words / 1000.0f,
              p->method_count,
+             p->method_fast_hit,
+             p->method_noninc_words,
              p->lock_wait_ms,
              p->pusher_run_ms,
-             p->method_exec_ms,
              p->tb_hit_pct);
 }
 

@@ -234,6 +234,8 @@ typedef struct PGRAPHState {
     uint32_t regs_[0x2000];
     DECLARE_BITMAP(regs_dirty, 0x2000 / sizeof(uint32_t));
 
+    unsigned int last_subchannel;
+
     bool clearing; // FIXME: Internal
     bool waiting_for_nop;
     bool waiting_for_flip;

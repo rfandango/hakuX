@@ -40,6 +40,281 @@
         pgraph_reg_w(pg, reg, rv);           \
     } while (0)
 
+#ifndef XEMU_OPT_METHOD_FAST_TABLE
+#define XEMU_OPT_METHOD_FAST_TABLE 1
+#endif
+
+#if XEMU_OPT_METHOD_FAST_TABLE
+
+typedef struct {
+    uint16_t reg;
+    uint16_t mask_idx;
+} MethodFastPath;
+
+static const uint32_t mask_lut[] = {
+    /* 0: unused (direct write sentinel) */  0,
+    /*  1 */ NV_PGRAPH_SURFACE_READ_3D,
+    /*  2 */ NV_PGRAPH_SURFACE_WRITE_3D,
+    /*  3 */ NV_PGRAPH_SURFACE_MODULO_3D,
+    /*  4 */ NV_PGRAPH_SETUPRASTER_WINDOWCLIPTYPE,
+    /*  5 */ NV_PGRAPH_CONTROL_0_ALPHATESTENABLE,
+    /*  6 */ NV_PGRAPH_BLEND_EN,
+    /*  7 */ NV_PGRAPH_SETUPRASTER_CULLENABLE,
+    /*  8 */ NV_PGRAPH_CONTROL_0_ZENABLE,
+    /*  9 */ NV_PGRAPH_CONTROL_0_DITHERENABLE,
+    /* 10 */ NV_PGRAPH_CSV0_C_LIGHTING,
+    /* 11 */ NV_PGRAPH_SETUPRASTER_POINTSMOOTHENABLE,
+    /* 12 */ NV_PGRAPH_SETUPRASTER_LINESMOOTHENABLE,
+    /* 13 */ NV_PGRAPH_SETUPRASTER_POLYSMOOTHENABLE,
+    /* 14 */ NV_PGRAPH_CSV0_D_SKIN,
+    /* 15 */ NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE,
+    /* 16 */ NV_PGRAPH_SETUPRASTER_POFFSETPOINTENABLE,
+    /* 17 */ NV_PGRAPH_SETUPRASTER_POFFSETLINEENABLE,
+    /* 18 */ NV_PGRAPH_SETUPRASTER_POFFSETFILLENABLE,
+    /* 19 */ NV_PGRAPH_CONTROL_0_ALPHAFUNC,
+    /* 20 */ NV_PGRAPH_CONTROL_0_ALPHAREF,
+    /* 21 */ NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE,
+    /* 22 */ NV_PGRAPH_CONTROL_1_STENCIL_FUNC,
+    /* 23 */ NV_PGRAPH_CONTROL_1_STENCIL_REF,
+    /* 24 */ NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ,
+    /* 25 */ NV_PGRAPH_CONTROL_3_FOGENABLE,
+    /* 26 */ NV_PGRAPH_CSV0_C_NORMALIZATION_ENABLE,
+    /* 27 */ NV_PGRAPH_CSV0_C_SPECULAR_ENABLE,
+    /* 28 */ NV_PGRAPH_CSV0_D_LIGHTS,
+    /* 29 */ NV_PGRAPH_BLEND_LOGICOP_ENABLE,
+    /* 30 */ NV_PGRAPH_BLEND_LOGICOP,
+    /* 31 */ NV_PGRAPH_SHADOWCTL_SHADOW_ZFUNC,
+    /* 32 */ NV_PGRAPH_CSV0_D_TEXGEN_REF,
+    /* 33 */ NV_PGRAPH_CONTROL_0_ZWRITEENABLE,
+    /* 34 */ NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX,
+    /* 35 */ NV_PGRAPH_ANTIALIASING_ENABLE,
+    /* 36 */ 0xFFF, /* SET_DOT_RGBMAPPING: NV_PGRAPH_SHADERCTL low 12 bits */
+};
+
+#define MF_DIRECT(r) { (r), 0 }
+#define MF_MASKED(r, m) { (r), (m) }
+
+#define MI(method) ((method) >> 2)
+
+static const MethodFastPath method_fast[0x800] = {
+
+    /* --- Category A: Direct register writes --- */
+
+    /* SET_COMBINER_SPECULAR_FOG_CW0  0x0288 */
+    [MI(0x0288)] = MF_DIRECT(NV_PGRAPH_COMBINESPECFOG0),
+    /* SET_COMBINER_SPECULAR_FOG_CW1  0x028C */
+    [MI(0x028C)] = MF_DIRECT(NV_PGRAPH_COMBINESPECFOG1),
+
+    /* SET_BLEND_COLOR  0x034C */
+    [MI(0x034C)] = MF_DIRECT(NV_PGRAPH_BLENDCOLOR),
+
+    /* SET_POLYGON_OFFSET_SCALE_FACTOR  0x0384 */
+    [MI(0x0384)] = MF_DIRECT(NV_PGRAPH_ZOFFSETFACTOR),
+    /* SET_POLYGON_OFFSET_BIAS  0x0388 */
+    [MI(0x0388)] = MF_DIRECT(NV_PGRAPH_ZOFFSETBIAS),
+
+    /* SET_CLIP_MIN  0x0394 */
+    [MI(0x0394)] = MF_DIRECT(NV_PGRAPH_ZCLIPMIN),
+    /* SET_CLIP_MAX  0x0398 */
+    [MI(0x0398)] = MF_DIRECT(NV_PGRAPH_ZCLIPMAX),
+
+    /* SET_COMBINER_ALPHA_ICW  0x0260..0x027C (8 slots) */
+    [MI(0x0260)] = MF_DIRECT(NV_PGRAPH_COMBINEALPHAI0 + 0),
+    [MI(0x0264)] = MF_DIRECT(NV_PGRAPH_COMBINEALPHAI0 + 4),
+    [MI(0x0268)] = MF_DIRECT(NV_PGRAPH_COMBINEALPHAI0 + 8),
+    [MI(0x026C)] = MF_DIRECT(NV_PGRAPH_COMBINEALPHAI0 + 12),
+    [MI(0x0270)] = MF_DIRECT(NV_PGRAPH_COMBINEALPHAI0 + 16),
+    [MI(0x0274)] = MF_DIRECT(NV_PGRAPH_COMBINEALPHAI0 + 20),
+    [MI(0x0278)] = MF_DIRECT(NV_PGRAPH_COMBINEALPHAI0 + 24),
+    [MI(0x027C)] = MF_DIRECT(NV_PGRAPH_COMBINEALPHAI0 + 28),
+
+    /* SET_COMBINER_FACTOR0  0x0A60..0x0A7C (8 slots) */
+    [MI(0x0A60)] = MF_DIRECT(NV_PGRAPH_COMBINEFACTOR0 + 0),
+    [MI(0x0A64)] = MF_DIRECT(NV_PGRAPH_COMBINEFACTOR0 + 4),
+    [MI(0x0A68)] = MF_DIRECT(NV_PGRAPH_COMBINEFACTOR0 + 8),
+    [MI(0x0A6C)] = MF_DIRECT(NV_PGRAPH_COMBINEFACTOR0 + 12),
+    [MI(0x0A70)] = MF_DIRECT(NV_PGRAPH_COMBINEFACTOR0 + 16),
+    [MI(0x0A74)] = MF_DIRECT(NV_PGRAPH_COMBINEFACTOR0 + 20),
+    [MI(0x0A78)] = MF_DIRECT(NV_PGRAPH_COMBINEFACTOR0 + 24),
+    [MI(0x0A7C)] = MF_DIRECT(NV_PGRAPH_COMBINEFACTOR0 + 28),
+
+    /* SET_COMBINER_FACTOR1  0x0A80..0x0A9C (8 slots) */
+    [MI(0x0A80)] = MF_DIRECT(NV_PGRAPH_COMBINEFACTOR1 + 0),
+    [MI(0x0A84)] = MF_DIRECT(NV_PGRAPH_COMBINEFACTOR1 + 4),
+    [MI(0x0A88)] = MF_DIRECT(NV_PGRAPH_COMBINEFACTOR1 + 8),
+    [MI(0x0A8C)] = MF_DIRECT(NV_PGRAPH_COMBINEFACTOR1 + 12),
+    [MI(0x0A90)] = MF_DIRECT(NV_PGRAPH_COMBINEFACTOR1 + 16),
+    [MI(0x0A94)] = MF_DIRECT(NV_PGRAPH_COMBINEFACTOR1 + 20),
+    [MI(0x0A98)] = MF_DIRECT(NV_PGRAPH_COMBINEFACTOR1 + 24),
+    [MI(0x0A9C)] = MF_DIRECT(NV_PGRAPH_COMBINEFACTOR1 + 28),
+
+    /* SET_COMBINER_ALPHA_OCW  0x0AA0..0x0ABC (8 slots) */
+    [MI(0x0AA0)] = MF_DIRECT(NV_PGRAPH_COMBINEALPHAO0 + 0),
+    [MI(0x0AA4)] = MF_DIRECT(NV_PGRAPH_COMBINEALPHAO0 + 4),
+    [MI(0x0AA8)] = MF_DIRECT(NV_PGRAPH_COMBINEALPHAO0 + 8),
+    [MI(0x0AAC)] = MF_DIRECT(NV_PGRAPH_COMBINEALPHAO0 + 12),
+    [MI(0x0AB0)] = MF_DIRECT(NV_PGRAPH_COMBINEALPHAO0 + 16),
+    [MI(0x0AB4)] = MF_DIRECT(NV_PGRAPH_COMBINEALPHAO0 + 20),
+    [MI(0x0AB8)] = MF_DIRECT(NV_PGRAPH_COMBINEALPHAO0 + 24),
+    [MI(0x0ABC)] = MF_DIRECT(NV_PGRAPH_COMBINEALPHAO0 + 28),
+
+    /* SET_COMBINER_COLOR_ICW  0x0AC0..0x0ADC (8 slots) */
+    [MI(0x0AC0)] = MF_DIRECT(NV_PGRAPH_COMBINECOLORI0 + 0),
+    [MI(0x0AC4)] = MF_DIRECT(NV_PGRAPH_COMBINECOLORI0 + 4),
+    [MI(0x0AC8)] = MF_DIRECT(NV_PGRAPH_COMBINECOLORI0 + 8),
+    [MI(0x0ACC)] = MF_DIRECT(NV_PGRAPH_COMBINECOLORI0 + 12),
+    [MI(0x0AD0)] = MF_DIRECT(NV_PGRAPH_COMBINECOLORI0 + 16),
+    [MI(0x0AD4)] = MF_DIRECT(NV_PGRAPH_COMBINECOLORI0 + 20),
+    [MI(0x0AD8)] = MF_DIRECT(NV_PGRAPH_COMBINECOLORI0 + 24),
+    [MI(0x0ADC)] = MF_DIRECT(NV_PGRAPH_COMBINECOLORI0 + 28),
+
+    /* SET_COLOR_KEY_COLOR  0x0AE0..0x0AEC (4 slots) */
+    [MI(0x0AE0)] = MF_DIRECT(NV_PGRAPH_COLORKEYCOLOR0 + 0),
+    [MI(0x0AE4)] = MF_DIRECT(NV_PGRAPH_COLORKEYCOLOR0 + 4),
+    [MI(0x0AE8)] = MF_DIRECT(NV_PGRAPH_COLORKEYCOLOR0 + 8),
+    [MI(0x0AEC)] = MF_DIRECT(NV_PGRAPH_COLORKEYCOLOR0 + 12),
+
+    /* SET_SHADER_CLIP_PLANE_MODE  0x17F8 */
+    [MI(0x17F8)] = MF_DIRECT(NV_PGRAPH_SHADERCLIPMODE),
+
+    /* SET_EYE_VECTOR  0x181C..0x1824 (3 slots) */
+    [MI(0x181C)] = MF_DIRECT(NV_PGRAPH_EYEVEC0 + 0),
+    [MI(0x1820)] = MF_DIRECT(NV_PGRAPH_EYEVEC0 + 4),
+    [MI(0x1824)] = MF_DIRECT(NV_PGRAPH_EYEVEC0 + 8),
+
+    /* SET_TEXTURE_ADDRESS  CASE_4 stride=64 */
+    [MI(0x1B08)]       = MF_DIRECT(NV_PGRAPH_TEXADDRESS0 + 0),
+    [MI(0x1B08 + 64)]  = MF_DIRECT(NV_PGRAPH_TEXADDRESS0 + 4),
+    [MI(0x1B08 + 128)] = MF_DIRECT(NV_PGRAPH_TEXADDRESS0 + 8),
+    [MI(0x1B08 + 192)] = MF_DIRECT(NV_PGRAPH_TEXADDRESS0 + 12),
+
+    /* SET_TEXTURE_BORDER_COLOR  CASE_4 stride=64 */
+    [MI(0x1B24)]       = MF_DIRECT(NV_PGRAPH_BORDERCOLOR0 + 0),
+    [MI(0x1B24 + 64)]  = MF_DIRECT(NV_PGRAPH_BORDERCOLOR0 + 4),
+    [MI(0x1B24 + 128)] = MF_DIRECT(NV_PGRAPH_BORDERCOLOR0 + 8),
+    [MI(0x1B24 + 192)] = MF_DIRECT(NV_PGRAPH_BORDERCOLOR0 + 12),
+
+    /* SET_SEMAPHORE_OFFSET  0x1D6C */
+    [MI(0x1D6C)] = MF_DIRECT(NV_PGRAPH_SEMAPHOREOFFSET),
+
+    /* SET_ZSTENCIL_CLEAR_VALUE  0x1D8C */
+    [MI(0x1D8C)] = MF_DIRECT(NV_PGRAPH_ZSTENCILCLEARVALUE),
+    /* SET_COLOR_CLEAR_VALUE  0x1D90 */
+    [MI(0x1D90)] = MF_DIRECT(NV_PGRAPH_COLORCLEARVALUE),
+
+    /* SET_CLEAR_RECT_HORIZONTAL  0x1D98 */
+    [MI(0x1D98)] = MF_DIRECT(NV_PGRAPH_CLEARRECTX),
+    /* SET_CLEAR_RECT_VERTICAL  0x1D9C */
+    [MI(0x1D9C)] = MF_DIRECT(NV_PGRAPH_CLEARRECTY),
+
+    /* SET_SPECULAR_FOG_FACTOR  0x1E20..0x1E24 (2 slots) */
+    [MI(0x1E20)] = MF_DIRECT(NV_PGRAPH_SPECFOGFACTOR0 + 0),
+    [MI(0x1E24)] = MF_DIRECT(NV_PGRAPH_SPECFOGFACTOR0 + 4),
+
+    /* SET_COMBINER_COLOR_OCW  0x1E40..0x1E5C (8 slots) */
+    [MI(0x1E40)] = MF_DIRECT(NV_PGRAPH_COMBINECOLORO0 + 0),
+    [MI(0x1E44)] = MF_DIRECT(NV_PGRAPH_COMBINECOLORO0 + 4),
+    [MI(0x1E48)] = MF_DIRECT(NV_PGRAPH_COMBINECOLORO0 + 8),
+    [MI(0x1E4C)] = MF_DIRECT(NV_PGRAPH_COMBINECOLORO0 + 12),
+    [MI(0x1E50)] = MF_DIRECT(NV_PGRAPH_COMBINECOLORO0 + 16),
+    [MI(0x1E54)] = MF_DIRECT(NV_PGRAPH_COMBINECOLORO0 + 20),
+    [MI(0x1E58)] = MF_DIRECT(NV_PGRAPH_COMBINECOLORO0 + 24),
+    [MI(0x1E5C)] = MF_DIRECT(NV_PGRAPH_COMBINECOLORO0 + 28),
+
+    /* SET_COMBINER_CONTROL  0x1E60 */
+    [MI(0x1E60)] = MF_DIRECT(NV_PGRAPH_COMBINECTL),
+
+    /* SET_SHADER_STAGE_PROGRAM  0x1E70 */
+    [MI(0x1E70)] = MF_DIRECT(NV_PGRAPH_SHADERPROG),
+
+    /* --- Category B: Masked register writes --- */
+
+    /* SET_FLIP_READ  0x0120 */
+    [MI(0x0120)] = MF_MASKED(NV_PGRAPH_SURFACE, 1),
+    /* SET_FLIP_WRITE  0x0124 */
+    [MI(0x0124)] = MF_MASKED(NV_PGRAPH_SURFACE, 2),
+    /* SET_FLIP_MODULO  0x0128 */
+    [MI(0x0128)] = MF_MASKED(NV_PGRAPH_SURFACE, 3),
+
+    /* SET_FOG_ENABLE  0x02A4 */
+    [MI(0x02A4)] = MF_MASKED(NV_PGRAPH_CONTROL_3, 25),
+    /* SET_WINDOW_CLIP_TYPE  0x02B4 */
+    [MI(0x02B4)] = MF_MASKED(NV_PGRAPH_SETUPRASTER, 4),
+
+    /* SET_ALPHA_TEST_ENABLE  0x0300 */
+    [MI(0x0300)] = MF_MASKED(NV_PGRAPH_CONTROL_0, 5),
+    /* SET_BLEND_ENABLE  0x0304 */
+    [MI(0x0304)] = MF_MASKED(NV_PGRAPH_BLEND, 6),
+    /* SET_CULL_FACE_ENABLE  0x0308 */
+    [MI(0x0308)] = MF_MASKED(NV_PGRAPH_SETUPRASTER, 7),
+    /* SET_DEPTH_TEST_ENABLE  0x030C */
+    [MI(0x030C)] = MF_MASKED(NV_PGRAPH_CONTROL_0, 8),
+    /* SET_DITHER_ENABLE  0x0310 */
+    [MI(0x0310)] = MF_MASKED(NV_PGRAPH_CONTROL_0, 9),
+    /* SET_LIGHTING_ENABLE  0x0314 */
+    [MI(0x0314)] = MF_MASKED(NV_PGRAPH_CSV0_C, 10),
+    /* SET_POINT_SMOOTH_ENABLE  0x031C */
+    [MI(0x031C)] = MF_MASKED(NV_PGRAPH_SETUPRASTER, 11),
+    /* SET_LINE_SMOOTH_ENABLE  0x0320 */
+    [MI(0x0320)] = MF_MASKED(NV_PGRAPH_SETUPRASTER, 12),
+    /* SET_POLY_SMOOTH_ENABLE  0x0324 */
+    [MI(0x0324)] = MF_MASKED(NV_PGRAPH_SETUPRASTER, 13),
+    /* SET_SKIN_MODE  0x0328 */
+    [MI(0x0328)] = MF_MASKED(NV_PGRAPH_CSV0_D, 14),
+    /* SET_STENCIL_TEST_ENABLE  0x032C */
+    [MI(0x032C)] = MF_MASKED(NV_PGRAPH_CONTROL_1, 15),
+    /* SET_POLY_OFFSET_POINT_ENABLE  0x0330 */
+    [MI(0x0330)] = MF_MASKED(NV_PGRAPH_SETUPRASTER, 16),
+    /* SET_POLY_OFFSET_LINE_ENABLE  0x0334 */
+    [MI(0x0334)] = MF_MASKED(NV_PGRAPH_SETUPRASTER, 17),
+    /* SET_POLY_OFFSET_FILL_ENABLE  0x0338 */
+    [MI(0x0338)] = MF_MASKED(NV_PGRAPH_SETUPRASTER, 18),
+    /* SET_ALPHA_FUNC  0x033C */
+    [MI(0x033C)] = MF_MASKED(NV_PGRAPH_CONTROL_0, 19),
+    /* SET_ALPHA_REF  0x0340 */
+    [MI(0x0340)] = MF_MASKED(NV_PGRAPH_CONTROL_0, 20),
+
+    /* SET_STENCIL_MASK (write)  0x0360 */
+    [MI(0x0360)] = MF_MASKED(NV_PGRAPH_CONTROL_1, 21),
+    /* SET_STENCIL_FUNC  0x0364 */
+    [MI(0x0364)] = MF_MASKED(NV_PGRAPH_CONTROL_1, 22),
+    /* SET_STENCIL_FUNC_REF  0x0368 */
+    [MI(0x0368)] = MF_MASKED(NV_PGRAPH_CONTROL_1, 23),
+    /* SET_STENCIL_FUNC_MASK  0x036C */
+    [MI(0x036C)] = MF_MASKED(NV_PGRAPH_CONTROL_1, 24),
+
+    /* SET_NORMALIZATION_ENABLE  0x03A4 */
+    [MI(0x03A4)] = MF_MASKED(NV_PGRAPH_CSV0_C, 26),
+    /* SET_SPECULAR_ENABLE  0x03B8 */
+    [MI(0x03B8)] = MF_MASKED(NV_PGRAPH_CSV0_C, 27),
+    /* SET_LIGHT_ENABLE_MASK  0x03BC */
+    [MI(0x03BC)] = MF_MASKED(NV_PGRAPH_CSV0_D, 28),
+
+    /* SET_TEXGEN_VIEW_MODEL  0x09CC */
+    [MI(0x09CC)] = MF_MASKED(NV_PGRAPH_CSV0_D, 32),
+    /* SET_PROVOKING_VERTEX  0x09FC */
+    [MI(0x09FC)] = MF_MASKED(NV_PGRAPH_CONTROL_3, 34),
+
+    /* SET_LOGIC_OP_ENABLE  0x17BC */
+    [MI(0x17BC)] = MF_MASKED(NV_PGRAPH_BLEND, 29),
+    /* SET_LOGIC_OP  0x17C0 */
+    [MI(0x17C0)] = MF_MASKED(NV_PGRAPH_BLEND, 30),
+
+    /* SET_ANTI_ALIASING_CONTROL  0x1D7C */
+    [MI(0x1D7C)] = MF_MASKED(NV_PGRAPH_ANTIALIASING, 35),
+
+    /* SET_SHADOW_DEPTH_FUNC  0x1E6C */
+    [MI(0x1E6C)] = MF_MASKED(NV_PGRAPH_SHADOWCTL, 31),
+
+    /* SET_DOT_RGBMAPPING  0x1E74 */
+    [MI(0x1E74)] = MF_MASKED(NV_PGRAPH_SHADERCTL, 36),
+};
+
+#undef MF_DIRECT
+#undef MF_MASKED
+#undef MI
+
+#endif /* XEMU_OPT_METHOD_FAST_TABLE */
 
 NV2AState *g_nv2a;
 
@@ -192,6 +467,7 @@ void pgraph_context_switch(NV2AState *d, unsigned int channel_id)
 
     bool valid = channel_valid && pgraph_channel_id == channel_id;
     if (!valid) {
+        pg->last_subchannel = UINT_MAX;
         PG_SET_MASK(NV_PGRAPH_TRAPPED_ADDR,
                  NV_PGRAPH_TRAPPED_ADDR_CHID, channel_id);
 
@@ -243,6 +519,7 @@ void pgraph_init(NV2AState *d)
 
     pg->frame_time = 0;
     pg->draw_time = 0;
+    pg->last_subchannel = UINT_MAX;
 
     pg->material_alpha = 0.0f;
     PG_SET_MASK(NV_PGRAPH_CONTROL_3, NV_PGRAPH_CONTROL_3_SHADEMODE,
@@ -730,6 +1007,41 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
 
     PGRAPHState *pg = &d->pgraph;
 
+#if XEMU_OPT_METHOD_FAST_TABLE
+    if (inc && method >= 0x100) {
+        unsigned int midx = METHOD_ADDR_TO_INDEX(method);
+        const MethodFastPath *fast = &method_fast[midx];
+        if (fast->reg) {
+            if (fast->mask_idx == 0) {
+                pgraph_reg_w(pg, fast->reg, parameter);
+            } else {
+                uint32_t rv = pgraph_reg_r(pg, fast->reg);
+                SET_MASK(rv, mask_lut[fast->mask_idx], parameter);
+                pgraph_reg_w(pg, fast->reg, rv);
+            }
+            size_t consumed = 1;
+            while (consumed < num_words_available) {
+                unsigned int next_midx = midx + 1;
+                if (next_midx >= 0x800) break;
+                const MethodFastPath *nf = &method_fast[next_midx];
+                if (!nf->reg) break;
+                uint32_t p = ldl_le_p(parameters + consumed);
+                if (nf->mask_idx == 0) {
+                    pgraph_reg_w(pg, nf->reg, p);
+                } else {
+                    uint32_t rv = pgraph_reg_r(pg, nf->reg);
+                    SET_MASK(rv, mask_lut[nf->mask_idx], p);
+                    pgraph_reg_w(pg, nf->reg, rv);
+                }
+                midx = next_midx;
+                consumed++;
+            }
+            g_nv2a_stats.cpu_working.method_fast_hit += consumed;
+            return consumed;
+        }
+    }
+#endif
+
     bool channel_valid =
         PG_GET_MASK(NV_PGRAPH_CTX_CONTROL, NV_PGRAPH_CTX_CONTROL_CHID);
     assert(channel_valid);
@@ -755,19 +1067,22 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
         pgraph_reg_w(pg, NV_PGRAPH_CTX_CACHE3 + subchannel * 4, ctx_3);
         pgraph_reg_w(pg, NV_PGRAPH_CTX_CACHE4 + subchannel * 4, ctx_4);
         pgraph_reg_w(pg, NV_PGRAPH_CTX_CACHE5 + subchannel * 4, ctx_5);
+        pg->last_subchannel = UINT_MAX;
     }
 
-    // is this right?
-    pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH1,
-                 pgraph_reg_r(pg, NV_PGRAPH_CTX_CACHE1 + subchannel * 4));
-    pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH2,
-                 pgraph_reg_r(pg, NV_PGRAPH_CTX_CACHE2 + subchannel * 4));
-    pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH3,
-                 pgraph_reg_r(pg, NV_PGRAPH_CTX_CACHE3 + subchannel * 4));
-    pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH4,
-                 pgraph_reg_r(pg, NV_PGRAPH_CTX_CACHE4 + subchannel * 4));
-    pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH5,
-                 pgraph_reg_r(pg, NV_PGRAPH_CTX_CACHE5 + subchannel * 4));
+    if (subchannel != pg->last_subchannel) {
+        pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH1,
+                     pgraph_reg_r(pg, NV_PGRAPH_CTX_CACHE1 + subchannel * 4));
+        pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH2,
+                     pgraph_reg_r(pg, NV_PGRAPH_CTX_CACHE2 + subchannel * 4));
+        pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH3,
+                     pgraph_reg_r(pg, NV_PGRAPH_CTX_CACHE3 + subchannel * 4));
+        pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH4,
+                     pgraph_reg_r(pg, NV_PGRAPH_CTX_CACHE4 + subchannel * 4));
+        pgraph_reg_w(pg, NV_PGRAPH_CTX_SWITCH5,
+                     pgraph_reg_r(pg, NV_PGRAPH_CTX_CACHE5 + subchannel * 4));
+        pg->last_subchannel = subchannel;
+    }
 
     uint32_t graphics_class = PG_GET_MASK(NV_PGRAPH_CTX_SWITCH1,
                                        NV_PGRAPH_CTX_SWITCH1_GRCLASS);
