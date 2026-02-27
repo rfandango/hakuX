@@ -1180,7 +1180,9 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
     PGRAPHState *pg = &d->pgraph;
 
 #if XEMU_OPT_METHOD_FAST_TABLE
-    if (inc && method >= 0x100) {
+    if (inc && method >= 0x100 &&
+        subchannel == pg->last_subchannel &&
+        pg->cached_graphics_class == NV_KELVIN_PRIMITIVE) {
         unsigned int midx = METHOD_ADDR_TO_INDEX(method);
         const MethodFastPath *fast = &method_fast[midx];
         if (fast->reg) {
