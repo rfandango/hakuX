@@ -893,7 +893,7 @@ MemAccessCallback *mem_access_callback_insert(CPUState *cpu, MemoryRegion *mr,
 
 #ifdef XBOX
     {
-        extern volatile int64_t *xbox_ram_fp_cb_count_ptr;
+        extern volatile int32_t *xbox_ram_fp_cb_count_ptr;
         if (xbox_ram_fp_cb_count_ptr) {
             qatomic_inc(xbox_ram_fp_cb_count_ptr);
         }
@@ -925,9 +925,9 @@ void mem_access_callback_remove_by_ref(CPUState *cpu, MemAccessCallback *cb)
 
 #ifdef XBOX
     {
-        extern volatile int64_t *xbox_ram_fp_cb_count_ptr;
+        extern volatile int32_t *xbox_ram_fp_cb_count_ptr;
         if (xbox_ram_fp_cb_count_ptr) {
-            qatomic_dec(xbox_ram_fp_cb_count_ptr);
+            qatomic_fetch_dec(xbox_ram_fp_cb_count_ptr);
         }
     }
 #endif

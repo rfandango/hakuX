@@ -1678,40 +1678,60 @@ static TCGLabelQemuLdst *prepare_host_addr(TCGContext *s, HostAddress *h,
                 ram_mask &= 0xFFFFFFFFULL;
             }
 
-            tcg_insn_unit *label_cbnz, *label_bne;
+            tcg_insn_unit *label_active_cbz, *label_cb_cbnz, *label_bne;
 
-            /* LDR Xbase, [X27, #0]  — host_base from struct */
-            tcg_out_ld(s, TCG_TYPE_PTR, TCG_REG_TMP0,
+            /* 1. LDR W_TMP2, [X27, #active] — 0 during boot, 1 after */
+            tcg_out_ld(s, TCG_TYPE_I32, TCG_REG_TMP2,
                        TCG_REG_XBOX_RAM_BASE,
-                       offsetof(XboxRamFPState, host_base));
+                       offsetof(XboxRamFPState, active));
 
-            /* LDR Wcnt, [X27, #8]  — cb_count (lower 32 bits) */
+            /* 2. CBZ W_TMP2, →tlb  (not active → full TLB path) */
+            label_active_cbz = s->code_ptr;
+            tcg_out_insn(s, 3201, CBZ, 0, TCG_REG_TMP2, 0);
+
+            /* 3. LDR W_TMP2, [X27, #cb_count] */
             tcg_out_ld(s, TCG_TYPE_I32, TCG_REG_TMP2,
                        TCG_REG_XBOX_RAM_BASE,
                        offsetof(XboxRamFPState, cb_count));
 
-            /* CBNZ Wcnt, →tlb  (mem-access callbacks active → fall back) */
-            label_cbnz = s->code_ptr;
+            /* 4. CBNZ W_TMP2, →tlb  (callbacks active → need TLB) */
+            label_cb_cbnz = s->code_ptr;
             tcg_out_insn(s, 3201, CBNZ, 0, TCG_REG_TMP2, 0);
 
-            /* TST addr, #~(ram_size - 1): zero if addr within RAM */
+            /* 5. TST addr, #~(ram_size-1): zero if addr within RAM */
             tcg_out_logicali(s, I3404_ANDSI, addr_type,
                              TCG_REG_XZR, addr_reg, ram_mask);
 
-            /* B.NE →tlb (addr outside RAM range) */
+            /* 6. B.NE →tlb  (addr outside RAM range) */
             label_bne = s->code_ptr;
             tcg_out_insn(s, 3202, B_C, TCG_COND_NE, 0);
 
-            /* Fast path: TMP1 = host_base loaded from struct */
+            /* 7. LDR X_TMP0, [X27, #host_base] */
+            tcg_out_ld(s, TCG_TYPE_PTR, TCG_REG_TMP0,
+                       TCG_REG_XBOX_RAM_BASE,
+                       offsetof(XboxRamFPState, host_base));
+
+            /* 8. MOV TMP1, TMP0  (base register expected at done) */
             tcg_out_mov(s, TCG_TYPE_PTR, TCG_REG_TMP1, TCG_REG_TMP0);
 
-            /* B →done (skip TLB code) */
+            /* 9. B →done  (skip TLB code) */
             xbox_fast_done = s->code_ptr;
             tcg_out_insn(s, 3206, B, 0);
 
-            /* Patch both branches to land here (TLB code follows) */
-            reloc_pc19(label_cbnz, tcg_splitwx_to_rx(s->code_ptr));
-            reloc_pc19(label_bne, tcg_splitwx_to_rx(s->code_ptr));
+            /* Patch all three fallback branches to TLB start */
+            reloc_pc19(label_active_cbz, tcg_splitwx_to_rx(s->code_ptr));
+            reloc_pc19(label_cb_cbnz,    tcg_splitwx_to_rx(s->code_ptr));
+            reloc_pc19(label_bne,        tcg_splitwx_to_rx(s->code_ptr));
+
+            static int dbg_fp_gen = 0;
+            if (dbg_fp_gen < 3) {
+                error_report("[TLB-FP] #%d active_off=%d cb_off=%d addr_reg=%d",
+                             dbg_fp_gen,
+                             (int)offsetof(XboxRamFPState, active),
+                             (int)offsetof(XboxRamFPState, cb_count),
+                             addr_reg);
+                dbg_fp_gen++;
+            }
         }
 #endif
 
@@ -3545,10 +3565,10 @@ static void tcg_target_qemu_prologue(TCGContext *s)
 
 #ifdef XBOX
     /*
-     * X27 = &xbox_ram_fp (struct address, not the base value).
-     * The fast path dereferences X27 at runtime to get host_base and cb_count.
-     * This avoids the init-order problem: the prologue is generated before
-     * xbox_memory_init() sets host_base, but the struct address is stable.
+     * X27 = &xbox_ram_fp (struct address).
+     * The fast path dereferences X27 at runtime to check active flag,
+     * then loads host_base. Avoids init-order problems since the address
+     * is stable even before xbox_memory_init() runs.
      */
     tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_XBOX_RAM_BASE,
                  (uintptr_t)&xbox_ram_fp);
