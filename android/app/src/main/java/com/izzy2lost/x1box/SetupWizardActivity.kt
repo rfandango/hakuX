@@ -348,22 +348,31 @@ class SetupWizardActivity : AppCompatActivity() {
   }
 
   private fun copyUriToAppStorage(uri: Uri, destName: String): String? {
+    val tag = "xemu-android"
     val base = getExternalFilesDir(null) ?: filesDir
     val dir = File(base, "x1box")
     if (!dir.exists() && !dir.mkdirs()) {
-      Log.e("xemu-android", "Failed to create ${dir.absolutePath}")
+      Log.e(tag, "Failed to create ${dir.absolutePath}")
       return null
     }
     val target = File(dir, destName)
+    Log.i(tag, "copyUriToAppStorage: $uri -> ${target.absolutePath}")
     return try {
-      contentResolver.openInputStream(uri)?.use { input ->
+      val bytesCopied = contentResolver.openInputStream(uri)?.use { input ->
         FileOutputStream(target).use { output ->
           input.copyTo(output)
         }
       } ?: return null
+      Log.i(tag, "copyUriToAppStorage: done  bytes=$bytesCopied  fileSize=${target.length()}")
+      if (bytesCopied == 0L) {
+        Log.e(tag, "copyUriToAppStorage: source was empty or unreadable!")
+        target.delete()
+        return null
+      }
       target.absolutePath
     } catch (e: IOException) {
-      Log.e("xemu-android", "Copy failed for $destName", e)
+      Log.e(tag, "Copy failed for $destName", e)
+      target.delete()
       null
     }
   }

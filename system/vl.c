@@ -3086,7 +3086,7 @@ void qemu_init(int argc, char **argv)
             char *escaped_hdd_path = strdup_double_commas(hdd_path);
             fake_argv[fake_argc++] = g_strdup_printf("index=0,media=disk,file=%s%s",
                 escaped_hdd_path,
-                strlen(escaped_hdd_path) > 0 ? ",locked=on" : "");
+                strlen(escaped_hdd_path) > 0 ? ",locked=on,cache=writethrough" : "");
             free(escaped_hdd_path);
         }
     }

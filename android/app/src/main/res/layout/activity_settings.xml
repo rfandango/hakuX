@@ -210,6 +210,23 @@
             android:text="@string/settings_clear_cache_desc"
             android:textAppearance="@style/TextAppearance.Material3.BodySmall"
             android:textColor="@color/xemu_text_muted" />
+
+          <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_recreate_hdd"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/settings_recreate_hdd" />
+
+          <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="4dp"
+            android:text="@string/settings_recreate_hdd_desc"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            android:textColor="@color/xemu_text_muted" />
         </LinearLayout>
       </com.google.android.material.card.MaterialCardView>
 

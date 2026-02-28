@@ -13,6 +13,8 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.materialswitch.MaterialSwitch
 import android.util.Log
 import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -104,6 +106,10 @@ class SettingsActivity : AppCompatActivity() {
 
     findViewById<MaterialButton>(R.id.btn_clear_shader_cache).setOnClickListener {
       confirmClearShaderCache()
+    }
+
+    findViewById<MaterialButton>(R.id.btn_recreate_hdd).setOnClickListener {
+      confirmRecreateHdd()
     }
 
     setupResolutionScale()
@@ -338,6 +344,62 @@ class SettingsActivity : AppCompatActivity() {
       }
       .setNegativeButton(android.R.string.cancel, null)
       .show()
+  }
+
+  private fun confirmRecreateHdd() {
+    val tag = "XemuHddRecreate"
+    val sourceUriStr = prefs.getString("hddUri", null)
+    if (sourceUriStr.isNullOrEmpty()) {
+      Log.e(tag, "confirmRecreateHdd: no source URI in prefs")
+      Toast.makeText(this, getString(R.string.settings_recreate_hdd_no_source), Toast.LENGTH_LONG).show()
+      return
+    }
+
+    MaterialAlertDialogBuilder(this)
+      .setTitle(R.string.settings_recreate_hdd_confirm_title)
+      .setMessage(R.string.settings_recreate_hdd_confirm_message)
+      .setPositiveButton(R.string.settings_recreate_hdd) { _, _ ->
+        recreateHddFromSource(sourceUriStr, tag)
+      }
+      .setNegativeButton(android.R.string.cancel, null)
+      .show()
+  }
+
+  private fun recreateHddFromSource(sourceUriStr: String, tag: String) {
+    Toast.makeText(this, getString(R.string.settings_recreate_hdd_copying), Toast.LENGTH_SHORT).show()
+
+    Thread {
+      try {
+        val sourceUri = Uri.parse(sourceUriStr)
+        val base = getExternalFilesDir(null) ?: filesDir
+        val dir = File(base, "x1box")
+        if (!dir.exists() && !dir.mkdirs()) {
+          throw IOException("Failed to create directory ${dir.absolutePath}")
+        }
+        val target = File(dir, "hdd.img")
+
+        Log.i(tag, "recreateHdd: source=$sourceUriStr target=${target.absolutePath}")
+
+        contentResolver.openInputStream(sourceUri)?.use { input ->
+          FileOutputStream(target).use { output ->
+            input.copyTo(output)
+          }
+        } ?: throw IOException("Unable to open source HDD image")
+
+        val newPath = target.absolutePath
+        prefs.edit().putString("hddPath", newPath).apply()
+        Log.i(tag, "recreateHdd: done, size=${target.length()}")
+
+        runOnUiThread {
+          Toast.makeText(this, getString(R.string.settings_recreate_hdd_success), Toast.LENGTH_SHORT).show()
+        }
+      } catch (e: Exception) {
+        Log.e(tag, "recreateHdd failed", e)
+        runOnUiThread {
+          Toast.makeText(this, getString(R.string.settings_recreate_hdd_failed, e.message), Toast.LENGTH_LONG).show()
+        }
+      }
+    }.start()
   }
 
   private external fun nativeGetNativeX87(): Boolean

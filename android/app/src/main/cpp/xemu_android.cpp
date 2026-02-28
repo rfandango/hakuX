@@ -11,6 +11,7 @@
 #include <jni.h>
 
 #include <climits>
+#include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -90,6 +91,57 @@ static bool FileExists(const std::string& path) {
   if (path.empty()) return false;
   struct stat st {};
   return stat(path.c_str(), &st) == 0;
+}
+
+static int64_t FileSize(const std::string& path) {
+  if (path.empty()) return -1;
+  struct stat st {};
+  if (stat(path.c_str(), &st) != 0) return -1;
+  return static_cast<int64_t>(st.st_size);
+}
+
+static void LogQcow2Info(const std::string& path) {
+  FILE* f = fopen(path.c_str(), "rb");
+  if (!f) return;
+
+  uint8_t hdr[72];
+  if (fread(hdr, 1, sizeof(hdr), f) < sizeof(hdr)) {
+    fclose(f);
+    return;
+  }
+
+  uint32_t magic = (uint32_t)hdr[0] << 24 | hdr[1] << 16 | hdr[2] << 8 | hdr[3];
+  if (magic != 0x514649fbu) {
+    __android_log_print(ANDROID_LOG_INFO, kLogTag,
+                        "QCOW2 check: %s is raw (magic=0x%08x)", path.c_str(), magic);
+    fclose(f);
+    return;
+  }
+
+  uint64_t backing_offset = 0;
+  uint32_t backing_size = 0;
+  for (int i = 0; i < 8; i++) backing_offset = (backing_offset << 8) | hdr[8 + i];
+  for (int i = 0; i < 4; i++) backing_size   = (backing_size   << 8) | hdr[16 + i];
+
+  uint64_t virtual_size = 0;
+  for (int i = 0; i < 8; i++) virtual_size = (virtual_size << 8) | hdr[24 + i];
+
+  __android_log_print(ANDROID_LOG_INFO, kLogTag,
+                      "QCOW2: %s  virtual_size=%" PRIu64 " (%.1f GB)  file_size=%" PRId64,
+                      path.c_str(), virtual_size,
+                      (double)virtual_size / (1024.0 * 1024.0 * 1024.0),
+                      FileSize(path));
+
+  if (backing_offset != 0 && backing_size != 0 && backing_size < 4096) {
+    std::vector<char> backing(backing_size + 1, '\0');
+    fseek(f, (long)backing_offset, SEEK_SET);
+    fread(backing.data(), 1, backing_size, f);
+    __android_log_print(ANDROID_LOG_WARN, kLogTag,
+                        "QCOW2 WARNING: backing file = '%s'  -- reads of unmodified "
+                        "sectors will FAIL if this file is missing!",
+                        backing.data());
+  }
+  fclose(f);
 }
 
 static bool IsTcgTuningEnabled() {
@@ -248,10 +300,9 @@ static bool ShouldEnableInlineAioWorkaround(const std::string& crash_flag_path) 
   if (HasInlineAioCrashFlag(crash_flag_path)) {
     LogInfoFmt("Inline AIO enabled from crash marker: %s",
                crash_flag_path.c_str());
-    return true;
   }
 
-  return false;
+  return true;
 }
 
 static std::string GetPrefString(JNIEnv* env, jobject activity, const char* key) {
@@ -403,20 +454,31 @@ static bool CopyUriToPath(JNIEnv* env, jobject activity, const std::string& uriS
   jmethodID closeOutput = env->GetMethodID(outputClass, "close", "()V");
   if (!readMethod || !writeMethod) return false;
 
+  bool ok = true;
+  int64_t totalBytes = 0;
   const int kBufferSize = 64 * 1024;
   jbyteArray buffer = env->NewByteArray(kBufferSize);
   while (true) {
     jint read = env->CallIntMethod(inputStream, readMethod, buffer);
-    if (HasException(env, "InputStream.read")) break;
+    if (HasException(env, "InputStream.read")) { ok = false; break; }
     if (read <= 0) break;
     env->CallVoidMethod(outputStream, writeMethod, buffer, 0, read);
-    if (HasException(env, "OutputStream.write")) break;
+    if (HasException(env, "OutputStream.write")) { ok = false; break; }
+    totalBytes += read;
   }
   env->DeleteLocalRef(buffer);
   env->CallVoidMethod(inputStream, closeInput);
   env->CallVoidMethod(outputStream, closeOutput);
   HasException(env, "close streams");
-  return true;
+
+  __android_log_print(ANDROID_LOG_INFO, kLogTag,
+                      "CopyUriToPath: %s -> %s  bytes=%" PRId64 " ok=%d",
+                      uriString.c_str(), path.c_str(), totalBytes, ok);
+  if (ok && totalBytes == 0) {
+    LogError("CopyUriToPath: source was empty or unreadable");
+    ok = false;
+  }
+  return ok;
 }
 
 struct SetupFiles {
@@ -615,6 +677,8 @@ static SetupFiles SyncSetupFiles() {
   }
   if (!hddPath.empty() && FileExists(hddPath)) {
     out.hdd = hddPath;
+    __android_log_print(ANDROID_LOG_INFO, kLogTag,
+                        "HDD from pref: %s  size=%" PRId64, hddPath.c_str(), FileSize(hddPath));
   }
   if (out.hdd.empty() && !hddUri.empty()) {
     out.hdd = base + "/hdd.img";
@@ -624,7 +688,14 @@ static SetupFiles SyncSetupFiles() {
       LogInfo("HDD image synced to app storage");
     } else {
       LogError("Failed to sync HDD image");
+      unlink(out.hdd.c_str());
+      out.hdd.clear();
     }
+  }
+  if (!out.hdd.empty()) {
+    __android_log_print(ANDROID_LOG_INFO, kLogTag,
+                        "HDD resolved: %s  size=%" PRId64, out.hdd.c_str(), FileSize(out.hdd));
+    LogQcow2Info(out.hdd);
   }
 
   if (!dvdPath.empty() && FileExists(dvdPath)) {
@@ -679,6 +750,18 @@ static SetupFiles SyncSetupFiles() {
   LogInfoFmt("Resolved hdd=%s", out.hdd.c_str());
   LogInfoFmt("Resolved dvd=%s", out.dvd.c_str());
   LogInfoFmt("Resolved eeprom=%s", out.eeprom.c_str());
+
+  {
+    FILE *f = fopen(out.config_path.c_str(), "r");
+    if (f) {
+      char buf[4096];
+      size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+      buf[n] = '\0';
+      fclose(f);
+      __android_log_print(ANDROID_LOG_INFO, "xemu-config",
+                          "--- xemu.toml ---\n%s\n--- end ---", buf);
+    }
+  }
   return out;
 }
 }

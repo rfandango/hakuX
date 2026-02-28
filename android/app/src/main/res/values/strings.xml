@@ -102,6 +102,15 @@
   <string name="settings_clear_cache_failed">Failed to clear cache partitions: %1$s</string>
   <string name="settings_clear_cache_no_hdd">No HDD image found. Run the setup wizard first.</string>
 
+  <string name="settings_recreate_hdd">Recreate Hard Disk</string>
+  <string name="settings_recreate_hdd_desc">Re-copy the original HDD image selected during setup, replacing the current one. Use this if save data or partitions have become corrupted.</string>
+  <string name="settings_recreate_hdd_confirm_title">Recreate hard disk?</string>
+  <string name="settings_recreate_hdd_confirm_message">This will overwrite the current Xbox HDD image with a fresh copy from the original file. ALL save games, installed titles, and dashboard data will be permanently lost.\n\nMake sure the emulator is not running.</string>
+  <string name="settings_recreate_hdd_success">Hard disk image recreated successfully.</string>
+  <string name="settings_recreate_hdd_failed">Failed to recreate hard disk: %1$s</string>
+  <string name="settings_recreate_hdd_no_source">No source HDD image configured. Re-run the setup wizard to select one.</string>
+  <string name="settings_recreate_hdd_copying">Copying HDD image… This may take a moment.</string>
+
   <string name="settings_clear_shader_cache">Clear Shader Cache</string>
   <string name="settings_clear_shader_cache_desc">Delete compiled SPIR-V shaders and the Vulkan pipeline cache. They will be rebuilt automatically. Useful after driver updates or if experiencing rendering glitches.</string>
   <string name="settings_clear_shader_cache_confirm_title">Clear shader cache?</string>
