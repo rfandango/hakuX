@@ -499,6 +499,16 @@ extern const void *tcg_code_gen_epilogue;
 extern uintptr_t tcg_splitwx_diff;
 extern TCGv_env tcg_env;
 
+#ifdef XBOX
+typedef struct {
+    uintptr_t host_base;       /* offset 0: host pointer to guest RAM */
+    volatile int64_t cb_count; /* offset 8: >0 when mem-access callbacks active */
+} XboxRamFPState;
+
+extern XboxRamFPState xbox_ram_fp;
+extern uint64_t  xbox_ram_size;
+#endif
+
 bool in_code_gen_buffer(const void *p);
 
 #ifdef CONFIG_DEBUG_TCG

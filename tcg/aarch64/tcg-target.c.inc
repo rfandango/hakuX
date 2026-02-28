@@ -46,7 +46,10 @@ static const char * const tcg_target_reg_names[TCG_TARGET_NB_REGS] = {
 
 static const int tcg_target_reg_alloc_order[] = {
     TCG_REG_X20, TCG_REG_X21, TCG_REG_X22, TCG_REG_X23,
-    TCG_REG_X24, TCG_REG_X25, TCG_REG_X26, TCG_REG_X27,
+    TCG_REG_X24, TCG_REG_X25, TCG_REG_X26,
+#ifndef XBOX
+    TCG_REG_X27, /* reserved for xbox_ram_fp struct pointer when XBOX */
+#endif
     TCG_REG_X28, /* we will reserve this for guest_base if configured */
 
     TCG_REG_X8, TCG_REG_X9, TCG_REG_X10, TCG_REG_X11,
@@ -89,6 +92,10 @@ static TCGReg tcg_target_call_oarg_reg(TCGCallReturnKind kind, int slot)
 #define TCG_VEC_TMP0 TCG_REG_V31
 
 #define TCG_REG_GUEST_BASE TCG_REG_X28
+
+#ifdef XBOX
+#define TCG_REG_XBOX_RAM_BASE TCG_REG_X27
+#endif
 
 static bool reloc_pc26(tcg_insn_unit *src_rw, const tcg_insn_unit *target)
 {
@@ -1662,6 +1669,51 @@ static TCGLabelQemuLdst *prepare_host_addr(TCGContext *s, HostAddress *h,
         unsigned mem_index = get_mmuidx(oi);
         TCGReg addr_adj;
         uint64_t compare_mask;
+#ifdef XBOX
+        tcg_insn_unit *xbox_fast_done = NULL;
+
+        if (is_ld && xbox_ram_size) {
+            uint64_t ram_mask = ~(xbox_ram_size - 1);
+            if (addr_type == TCG_TYPE_I32) {
+                ram_mask &= 0xFFFFFFFFULL;
+            }
+
+            tcg_insn_unit *label_cbnz, *label_bne;
+
+            /* LDR Xbase, [X27, #0]  — host_base from struct */
+            tcg_out_ld(s, TCG_TYPE_PTR, TCG_REG_TMP0,
+                       TCG_REG_XBOX_RAM_BASE,
+                       offsetof(XboxRamFPState, host_base));
+
+            /* LDR Wcnt, [X27, #8]  — cb_count (lower 32 bits) */
+            tcg_out_ld(s, TCG_TYPE_I32, TCG_REG_TMP2,
+                       TCG_REG_XBOX_RAM_BASE,
+                       offsetof(XboxRamFPState, cb_count));
+
+            /* CBNZ Wcnt, →tlb  (mem-access callbacks active → fall back) */
+            label_cbnz = s->code_ptr;
+            tcg_out_insn(s, 3201, CBNZ, 0, TCG_REG_TMP2, 0);
+
+            /* TST addr, #~(ram_size - 1): zero if addr within RAM */
+            tcg_out_logicali(s, I3404_ANDSI, addr_type,
+                             TCG_REG_XZR, addr_reg, ram_mask);
+
+            /* B.NE →tlb (addr outside RAM range) */
+            label_bne = s->code_ptr;
+            tcg_out_insn(s, 3202, B_C, TCG_COND_NE, 0);
+
+            /* Fast path: TMP1 = host_base loaded from struct */
+            tcg_out_mov(s, TCG_TYPE_PTR, TCG_REG_TMP1, TCG_REG_TMP0);
+
+            /* B →done (skip TLB code) */
+            xbox_fast_done = s->code_ptr;
+            tcg_out_insn(s, 3206, B, 0);
+
+            /* Patch both branches to land here (TLB code follows) */
+            reloc_pc19(label_cbnz, tcg_splitwx_to_rx(s->code_ptr));
+            reloc_pc19(label_bne, tcg_splitwx_to_rx(s->code_ptr));
+        }
+#endif
 
         ldst = new_ldst_label(s);
         ldst->is_ld = is_ld;
@@ -1719,6 +1771,12 @@ static TCGLabelQemuLdst *prepare_host_addr(TCGContext *s, HostAddress *h,
         h->base = TCG_REG_TMP1;
         h->index = addr_reg;
         h->index_ext = addr_type;
+
+#ifdef XBOX
+        if (xbox_fast_done) {
+            reloc_pc26(xbox_fast_done, tcg_splitwx_to_rx(s->code_ptr));
+        }
+#endif
     } else {
         if (a_mask) {
             ldst = new_ldst_label(s);
@@ -3484,6 +3542,18 @@ static void tcg_target_qemu_prologue(TCGContext *s)
         tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_GUEST_BASE, guest_base);
         tcg_regset_set_reg(s->reserved_regs, TCG_REG_GUEST_BASE);
     }
+
+#ifdef XBOX
+    /*
+     * X27 = &xbox_ram_fp (struct address, not the base value).
+     * The fast path dereferences X27 at runtime to get host_base and cb_count.
+     * This avoids the init-order problem: the prologue is generated before
+     * xbox_memory_init() sets host_base, but the struct address is stable.
+     */
+    tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_XBOX_RAM_BASE,
+                 (uintptr_t)&xbox_ram_fp);
+    tcg_regset_set_reg(s->reserved_regs, TCG_REG_XBOX_RAM_BASE);
+#endif
 
     tcg_out_mov(s, TCG_TYPE_PTR, TCG_AREG0, tcg_target_call_iarg_regs[0]);
     tcg_out_insn(s, 3207, BR, tcg_target_call_iarg_regs[1]);

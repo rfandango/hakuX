@@ -250,6 +250,12 @@ bool tcg_use_softmmu;
 TCGContext tcg_init_ctx;
 __thread TCGContext *tcg_ctx;
 
+#ifdef XBOX
+XboxRamFPState xbox_ram_fp;
+uint64_t  xbox_ram_size;
+volatile int64_t *xbox_ram_fp_cb_count_ptr = &xbox_ram_fp.cb_count;
+#endif
+
 TCGContext **tcg_ctxs;
 unsigned int tcg_cur_ctxs;
 unsigned int tcg_max_ctxs;
