@@ -1269,9 +1269,16 @@ static void flush_memory_buffer(PGRAPHState *pg, VkCommandBuffer cmd)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
 
+    if (r->vertex_ram_flush_min >= r->vertex_ram_flush_max) {
+        return;
+    }
+
+    VkDeviceSize offset = r->vertex_ram_flush_min;
+    VkDeviceSize size = r->vertex_ram_flush_max - r->vertex_ram_flush_min;
+
     VK_CHECK(vmaFlushAllocation(
-        r->allocator, r->storage_buffers[BUFFER_VERTEX_RAM].allocation, 0,
-        VK_WHOLE_SIZE));
+        r->allocator, r->storage_buffers[BUFFER_VERTEX_RAM].allocation,
+        offset, size));
 
     VkBufferMemoryBarrier barrier = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
@@ -1280,13 +1287,16 @@ static void flush_memory_buffer(PGRAPHState *pg, VkCommandBuffer cmd)
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .buffer = r->storage_buffers[BUFFER_VERTEX_RAM].buffer,
-        .offset = 0,
-        .size = VK_WHOLE_SIZE,
+        .offset = offset,
+        .size = size,
     };
 
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_HOST_BIT,
                          VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 0, 0, NULL, 1,
                          &barrier, 0, NULL);
+
+    r->vertex_ram_flush_min = VK_WHOLE_SIZE;
+    r->vertex_ram_flush_max = 0;
 }
 
 static VkAttachmentLoadOp get_optimal_color_load_op(PGRAPHVkState *r)

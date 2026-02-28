@@ -463,6 +463,9 @@ typedef struct PGRAPHVkState {
     unsigned long *uploaded_bitmap;
     size_t bitmap_size;
 
+    VkDeviceSize vertex_ram_flush_min;
+    VkDeviceSize vertex_ram_flush_max;
+
     VkVertexInputAttributeDescription vertex_attribute_descriptions[NV2A_VERTEXSHADER_ATTRIBUTES];
     int vertex_attribute_to_description_location[NV2A_VERTEXSHADER_ATTRIBUTES];
     int num_active_vertex_attribute_descriptions;

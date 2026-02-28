@@ -63,6 +63,14 @@ void pgraph_vk_update_vertex_ram_buffer(PGRAPHState *pg, hwaddr offset,
     nv2a_profile_inc_counter(NV2A_PROF_GEOM_BUFFER_UPDATE_1);
     memcpy(r->storage_buffers[BUFFER_VERTEX_RAM].mapped + offset, data, size);
 
+    if (offset < r->vertex_ram_flush_min) {
+        r->vertex_ram_flush_min = offset;
+    }
+    VkDeviceSize end = offset + size;
+    if (end > r->vertex_ram_flush_max) {
+        r->vertex_ram_flush_max = end;
+    }
+
     bitmap_set(get_uploaded_bitmap(r), start_bit, nbits);
 }
 

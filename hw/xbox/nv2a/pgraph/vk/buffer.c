@@ -164,6 +164,8 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
         return false;
     }
     bitmap_clear(r->uploaded_bitmap, 0, r->bitmap_size);
+    r->vertex_ram_flush_min = VK_WHOLE_SIZE;
+    r->vertex_ram_flush_max = 0;
 
     r->storage_buffers[BUFFER_VERTEX_INLINE] = (StorageBuffer){
         .alloc_info = device_alloc_create_info,
