@@ -256,6 +256,54 @@ typedef struct VsyncTimingStats {
     float bytes_kb;
 } VsyncTimingStats;
 
+typedef struct SurfTimingWork {
+    int64_t populate_ns;
+    int64_t dirty_ns;
+    int64_t enrp_ns;
+    int64_t lk_hit_ns;
+    int64_t lk_evict_ns;
+    int64_t lk_nosurf_ns;
+    int64_t create_ns;
+    int64_t put_ns;
+    int64_t bind_ns;
+    int64_t upload_ns;
+    int64_t download_ns;
+    int64_t expire_ns;
+    int64_t df_flush_ns;
+    int64_t df_read_ns;
+    uint32_t update_calls;
+    uint32_t create_count;
+    uint32_t hit_count;
+    uint32_t evict_count;
+    uint32_t upload_count;
+    uint32_t download_count;
+    uint32_t miss_count;
+} SurfTimingWork;
+
+typedef struct SurfTimingStats {
+    float populate_ms;
+    float dirty_ms;
+    float enrp_ms;
+    float lk_hit_ms;
+    float lk_evict_ms;
+    float lk_nosurf_ms;
+    float create_ms;
+    float put_ms;
+    float bind_ms;
+    float upload_ms;
+    float download_ms;
+    float expire_ms;
+    float df_flush_ms;
+    float df_read_ms;
+    float update_calls;
+    float create_count;
+    float hit_count;
+    float evict_count;
+    float upload_count;
+    float download_count;
+    float miss_count;
+} SurfTimingStats;
+
 typedef struct NV2AStats {
     int64_t last_flip_time;
     unsigned int frame_count;
@@ -273,6 +321,8 @@ typedef struct NV2AStats {
     CpuTimingStats cpu;
     VsyncTimingWork vsync_working;
     VsyncTimingStats vsync;
+    SurfTimingWork surf_working;
+    SurfTimingStats surf;
 } NV2AStats;
 
 #ifdef __cplusplus
@@ -290,6 +340,7 @@ void nv2a_profile_get_shader_stats_str(char *buf, int bufsize);
 void nv2a_profile_get_phase_timing_str(char *buf, int bufsize);
 void nv2a_profile_get_cpu_timing_str(char *buf, int bufsize);
 void nv2a_profile_get_vsync_timing_str(char *buf, int bufsize);
+void nv2a_profile_get_surf_timing_str(char *buf, int bufsize);
 
 static inline void nv2a_profile_inc_counter(enum NV2A_PROF_COUNTERS_ENUM cnt)
 {

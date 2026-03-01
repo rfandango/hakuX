@@ -180,7 +180,25 @@ typedef struct SurfaceBinding {
     VmaAllocation allocation_scratch;
 
     bool initialized;
+    int invalidation_frame;
 } SurfaceBinding;
+
+#define MAX_DEFERRED_DOWNLOADS 16
+
+typedef struct DeferredSurfaceDownload {
+    VkDeviceSize staging_offset;
+    size_t download_size;
+    uint8_t *dest_ptr;
+    unsigned int width;
+    unsigned int height;
+    unsigned int pitch;
+    int bytes_per_pixel;
+    bool swizzle;
+    bool color;
+    SurfaceFormatInfo host_fmt;
+    BasicSurfaceFormatInfo fmt;
+    bool use_compute_to_swizzle;
+} DeferredSurfaceDownload;
 
 typedef struct ShaderModuleInfo {
     int refcnt;
@@ -489,6 +507,10 @@ typedef struct PGRAPHVkState {
     QemuEvent downloads_complete;
     bool download_dirty_surfaces_pending;
     QemuEvent dirty_surfaces_download_complete; // common
+
+    DeferredSurfaceDownload deferred_downloads[MAX_DEFERRED_DOWNLOADS];
+    int num_deferred_downloads;
+    VkDeviceSize staging_dst_offset;
 
     Lru texture_cache;
     TextureBinding *texture_cache_entries;

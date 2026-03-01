@@ -168,6 +168,45 @@ static void snapshot_vsync_timing(void)
     memset(w, 0, sizeof(*w));
 }
 
+static void snapshot_surf_timing(void)
+{
+    SurfTimingWork *w = &g_nv2a_stats.surf_working;
+    SurfTimingStats *p = &g_nv2a_stats.surf;
+    const float alpha = 0.2f;
+
+#define SMOOTH_MS(dst, src_ns) \
+    (dst) = (dst) * (1.0f - alpha) + ((float)(src_ns) / 1e6f) * alpha
+#define SMOOTH_CNT(dst, src) \
+    (dst) = (dst) * (1.0f - alpha) + (float)(src) * alpha
+
+    SMOOTH_MS(p->populate_ms, w->populate_ns);
+    SMOOTH_MS(p->dirty_ms, w->dirty_ns);
+    SMOOTH_MS(p->enrp_ms, w->enrp_ns);
+    SMOOTH_MS(p->lk_hit_ms, w->lk_hit_ns);
+    SMOOTH_MS(p->lk_evict_ms, w->lk_evict_ns);
+    SMOOTH_MS(p->lk_nosurf_ms, w->lk_nosurf_ns);
+    SMOOTH_MS(p->create_ms, w->create_ns);
+    SMOOTH_MS(p->put_ms, w->put_ns);
+    SMOOTH_MS(p->bind_ms, w->bind_ns);
+    SMOOTH_MS(p->upload_ms, w->upload_ns);
+    SMOOTH_MS(p->download_ms, w->download_ns);
+    SMOOTH_MS(p->expire_ms, w->expire_ns);
+    SMOOTH_MS(p->df_flush_ms, w->df_flush_ns);
+    SMOOTH_MS(p->df_read_ms, w->df_read_ns);
+    SMOOTH_CNT(p->update_calls, w->update_calls);
+    SMOOTH_CNT(p->create_count, w->create_count);
+    SMOOTH_CNT(p->hit_count, w->hit_count);
+    SMOOTH_CNT(p->evict_count, w->evict_count);
+    SMOOTH_CNT(p->upload_count, w->upload_count);
+    SMOOTH_CNT(p->download_count, w->download_count);
+    SMOOTH_CNT(p->miss_count, w->miss_count);
+
+#undef SMOOTH_MS
+#undef SMOOTH_CNT
+
+    memset(w, 0, sizeof(*w));
+}
+
 void nv2a_profile_flip_stall(void)
 {
     int64_t now = qemu_clock_get_us(QEMU_CLOCK_REALTIME);
@@ -184,6 +223,7 @@ void nv2a_profile_flip_stall(void)
     snapshot_phase_timing();
     snapshot_cpu_timing();
     snapshot_vsync_timing();
+    snapshot_surf_timing();
 
     g_nv2a_stats.phase_working.post_flip = true;
 
@@ -209,6 +249,8 @@ void nv2a_profile_flip_stall(void)
         __android_log_print(ANDROID_LOG_INFO, "xemu-cpu", "%s", buf);
         nv2a_profile_get_vsync_timing_str(buf, sizeof(buf));
         __android_log_print(ANDROID_LOG_INFO, "xemu-vsync", "%s", buf);
+        nv2a_profile_get_surf_timing_str(buf, sizeof(buf));
+        __android_log_print(ANDROID_LOG_INFO, "xemu-surf", "%s", buf);
         nv2a_profile_get_pacing_str(buf, sizeof(buf));
         __android_log_print(ANDROID_LOG_INFO, "xemu-pace", "%s", buf);
     }
@@ -304,6 +346,31 @@ void nv2a_profile_get_vsync_timing_str(char *buf, int bufsize)
     snprintf(buf, bufsize,
              "Vsyn: C:%.0f R:%.0f M:%.0f D:%.0f %.0fKB",
              p->calls, p->reqs, p->merged, p->dirty_count, p->bytes_kb);
+}
+
+extern uint32_t g_defer_reject_ds, g_defer_reject_slots, g_defer_reject_space;
+extern uint32_t g_defer_reject_empty, g_defer_ok, g_defer_skip_clean;
+
+void nv2a_profile_get_surf_timing_str(char *buf, int bufsize)
+{
+    SurfTimingStats *p = &g_nv2a_stats.surf;
+    snprintf(buf, bufsize,
+             "Srf: C:%.0f pop:%.1f drty:%.1f enrp:%.1f "
+             "lkH:%.1f lkE:%.1f lkN:%.1f "
+             "cr:%.1f put:%.1f bnd:%.1f upl:%.1f dl:%.1f exp:%.1f "
+             "dfF:%.1f dfR:%.1f "
+             "| #cr:%.0f #hit:%.0f #ev:%.0f #upl:%.0f #dl:%.0f #miss:%.0f "
+             "| dfOk:%u dfDS:%u dfSlot:%u dfSpc:%u dfEmp:%u dfCln:%u",
+             p->update_calls,
+             p->populate_ms, p->dirty_ms, p->enrp_ms,
+             p->lk_hit_ms, p->lk_evict_ms, p->lk_nosurf_ms,
+             p->create_ms, p->put_ms, p->bind_ms,
+             p->upload_ms, p->download_ms, p->expire_ms,
+             p->df_flush_ms, p->df_read_ms,
+             p->create_count, p->hit_count, p->evict_count,
+             p->upload_count, p->download_count, p->miss_count,
+             g_defer_ok, g_defer_reject_ds, g_defer_reject_slots,
+             g_defer_reject_space, g_defer_reject_empty, g_defer_skip_clean);
 }
 
 void nv2a_profile_get_shader_stats_str(char *buf, int bufsize)

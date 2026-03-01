@@ -148,11 +148,358 @@ bool pgraph_vk_download_surfaces_in_range_if_dirty(PGRAPHState *pg,
     return found_overlap;
 }
 
+uint32_t g_defer_reject_ds, g_defer_reject_slots, g_defer_reject_space;
+uint32_t g_defer_reject_empty, g_defer_ok, g_defer_skip_clean;
+
+static bool download_surface_record_deferred(NV2AState *d,
+                                             SurfaceBinding *surface,
+                                             uint8_t *pixels)
+{
+    PGRAPHState *pg = &d->pgraph;
+    PGRAPHVkState *r = pg->vk_renderer_state;
+
+    if (!surface->width || !surface->height) {
+        g_defer_reject_empty++;
+        return true;
+    }
+
+    bool is_ds =
+        surface->host_fmt.vk_format == VK_FORMAT_D24_UNORM_S8_UINT ||
+        surface->host_fmt.vk_format == VK_FORMAT_D32_SFLOAT_S8_UINT;
+
+    bool downscale = (pg->surface_scale_factor != 1);
+
+    if (r->num_deferred_downloads >= MAX_DEFERRED_DOWNLOADS) {
+        g_defer_reject_slots++;
+        return false;
+    }
+
+    size_t staging_size = is_ds
+        ? (4 * surface->width * surface->height)
+        : (surface->host_fmt.host_bytes_per_pixel *
+           surface->width * surface->height);
+
+    VkDeviceSize aligned_offset = ROUND_UP(r->staging_dst_offset, 16);
+    if (aligned_offset + staging_size >
+        r->storage_buffers[BUFFER_STAGING_DST].buffer_size) {
+        g_defer_reject_space++;
+        return false;
+    }
+
+    g_defer_ok++;
+    nv2a_profile_inc_counter(NV2A_PROF_SURF_DOWNLOAD);
+
+    unsigned int scaled_width = surface->width,
+                 scaled_height = surface->height;
+    pgraph_apply_scaling_factor(pg, &scaled_width, &scaled_height);
+
+    VkCommandBuffer cmd = pgraph_vk_begin_nondraw_commands(pg);
+    pgraph_vk_begin_debug_marker(r, cmd, RGBA_RED,
+                                 "download_surface_deferred");
+
+    pgraph_vk_transition_image_layout(
+        pg, cmd, surface->image, surface->host_fmt.vk_format,
+        surface->color ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL :
+                         VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
+    VkBuffer staging_buffer = r->storage_buffers[BUFFER_STAGING_DST].buffer;
+
+    if (is_ds) {
+        VkBuffer compute_dst = r->storage_buffers[BUFFER_COMPUTE_DST].buffer;
+        VkBuffer compute_src = r->storage_buffers[BUFFER_COMPUTE_SRC].buffer;
+        size_t compute_dst_size =
+            r->storage_buffers[BUFFER_COMPUTE_DST].buffer_size;
+
+        int num_copy_regions = 1;
+        VkBufferImageCopy copy_regions[2];
+        copy_regions[0] = (VkBufferImageCopy){
+            .bufferOffset = 0,
+            .imageSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+            .imageSubresource.layerCount = 1,
+            .imageExtent = (VkExtent3D){ scaled_width, scaled_height, 1 },
+        };
+
+        if (surface->host_fmt.aspect & VK_IMAGE_ASPECT_STENCIL_BIT) {
+            size_t depth_size = scaled_width * scaled_height * 4;
+            copy_regions[num_copy_regions++] = (VkBufferImageCopy){
+                .bufferOffset = ROUND_UP(depth_size,
+                    r->device_props.limits.minStorageBufferOffsetAlignment),
+                .imageSubresource.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT,
+                .imageSubresource.layerCount = 1,
+                .imageExtent = (VkExtent3D){ scaled_width, scaled_height, 1 },
+            };
+        }
+
+        VkBufferMemoryBarrier pre_img_barrier = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+            .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer = compute_dst,
+            .size = compute_dst_size,
+        };
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 1,
+                             &pre_img_barrier, 0, NULL);
+
+        vkCmdCopyImageToBuffer(cmd, surface->image,
+                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               compute_dst, num_copy_regions, copy_regions);
+
+        VkBufferMemoryBarrier post_img_barrier = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer = compute_dst,
+            .size = compute_dst_size,
+        };
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, NULL,
+                             1, &post_img_barrier, 0, NULL);
+
+        VkBufferMemoryBarrier pre_pack_barrier = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+            .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer = compute_src,
+            .size = staging_size,
+        };
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, NULL,
+                             1, &pre_pack_barrier, 0, NULL);
+
+        pgraph_vk_pack_depth_stencil(pg, surface, cmd,
+                                     compute_dst, compute_src, downscale);
+
+        VkBufferMemoryBarrier post_pack_barrier = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer = compute_src,
+            .size = staging_size,
+        };
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 1,
+                             &post_pack_barrier, 0, NULL);
+
+        VkBufferMemoryBarrier pre_staging_barrier = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+            .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer = staging_buffer,
+            .offset = aligned_offset,
+            .size = staging_size,
+        };
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 1,
+                             &pre_staging_barrier, 0, NULL);
+
+        VkBufferCopy buf_copy = {
+            .srcOffset = 0,
+            .dstOffset = aligned_offset,
+            .size = staging_size,
+        };
+        vkCmdCopyBuffer(cmd, compute_src, staging_buffer, 1, &buf_copy);
+
+        VkBufferMemoryBarrier post_staging_barrier = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer = staging_buffer,
+            .offset = aligned_offset,
+            .size = staging_size,
+        };
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_HOST_BIT, 0, 0, NULL, 1,
+                             &post_staging_barrier, 0, NULL);
+    } else {
+        int num_copy_regions = 1;
+        VkBufferImageCopy copy_regions[2];
+        copy_regions[0] = (VkBufferImageCopy){
+            .bufferOffset = aligned_offset,
+            .imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .imageSubresource.layerCount = 1,
+        };
+
+        VkImage surface_image_loc;
+        if (downscale) {
+            copy_regions[0].imageExtent =
+                (VkExtent3D){ surface->width, surface->height, 1 };
+
+            if (surface->image_scratch_current_layout !=
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+                pgraph_vk_transition_image_layout(
+                    pg, cmd, surface->image_scratch,
+                    surface->host_fmt.vk_format,
+                    surface->image_scratch_current_layout,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+                surface->image_scratch_current_layout =
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            }
+
+            VkImageBlit blit_region = {
+                .srcSubresource.aspectMask = surface->host_fmt.aspect,
+                .srcSubresource.mipLevel = 0,
+                .srcSubresource.baseArrayLayer = 0,
+                .srcSubresource.layerCount = 1,
+                .srcOffsets[0] = (VkOffset3D){0, 0, 0},
+                .srcOffsets[1] =
+                    (VkOffset3D){scaled_width, scaled_height, 1},
+                .dstSubresource.aspectMask = surface->host_fmt.aspect,
+                .dstSubresource.mipLevel = 0,
+                .dstSubresource.baseArrayLayer = 0,
+                .dstSubresource.layerCount = 1,
+                .dstOffsets[0] = (VkOffset3D){0, 0, 0},
+                .dstOffsets[1] =
+                    (VkOffset3D){surface->width, surface->height, 1},
+            };
+
+            vkCmdBlitImage(
+                cmd, surface->image,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                surface->image_scratch,
+                surface->image_scratch_current_layout, 1, &blit_region,
+                VK_FILTER_LINEAR);
+
+            pgraph_vk_transition_image_layout(
+                pg, cmd, surface->image_scratch,
+                surface->host_fmt.vk_format,
+                surface->image_scratch_current_layout,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+            surface->image_scratch_current_layout =
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            surface_image_loc = surface->image_scratch;
+        } else {
+            copy_regions[0].imageExtent =
+                (VkExtent3D){ scaled_width, scaled_height, 1 };
+            surface_image_loc = surface->image;
+        }
+
+        VkBufferMemoryBarrier pre_copy_barrier = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+            .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer = staging_buffer,
+            .offset = aligned_offset,
+            .size = staging_size,
+        };
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 1,
+                             &pre_copy_barrier, 0, NULL);
+
+        vkCmdCopyImageToBuffer(cmd, surface_image_loc,
+                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               staging_buffer,
+                               num_copy_regions, copy_regions);
+
+        VkBufferMemoryBarrier post_copy_barrier = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer = staging_buffer,
+            .offset = aligned_offset,
+            .size = staging_size,
+        };
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_HOST_BIT, 0, 0, NULL, 1,
+                             &post_copy_barrier, 0, NULL);
+    }
+
+    pgraph_vk_transition_image_layout(
+        pg, cmd, surface->image, surface->host_fmt.vk_format,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        surface->color ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL :
+                         VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+
+    pgraph_vk_end_debug_marker(r, cmd);
+    pgraph_vk_end_nondraw_commands(pg, cmd);
+
+    DeferredSurfaceDownload *dl =
+        &r->deferred_downloads[r->num_deferred_downloads++];
+    dl->staging_offset = aligned_offset;
+    dl->download_size = staging_size;
+    dl->dest_ptr = pixels;
+    dl->width = surface->width;
+    dl->height = surface->height;
+    dl->pitch = surface->pitch;
+    dl->bytes_per_pixel = surface->fmt.bytes_per_pixel;
+    dl->swizzle = surface->swizzle;
+    dl->color = surface->color;
+    dl->host_fmt = surface->host_fmt;
+    dl->fmt = surface->fmt;
+    dl->use_compute_to_swizzle = false;
+
+    r->staging_dst_offset = aligned_offset + staging_size;
+    return true;
+}
+
+static void download_surface_complete_deferred(NV2AState *d)
+{
+    PGRAPHState *pg = &d->pgraph;
+    PGRAPHVkState *r = pg->vk_renderer_state;
+
+    if (r->num_deferred_downloads == 0) {
+        return;
+    }
+
+    int64_t _t0 = nv2a_clock_ns();
+    pgraph_vk_finish(pg, VK_FINISH_REASON_SURFACE_DOWN);
+    int64_t _t1 = nv2a_clock_ns();
+
+    StorageBuffer *staging = &r->storage_buffers[BUFFER_STAGING_DST];
+
+    for (int i = 0; i < r->num_deferred_downloads; i++) {
+        DeferredSurfaceDownload *dl = &r->deferred_downloads[i];
+
+        vmaInvalidateAllocation(r->allocator, staging->allocation,
+                                dl->staging_offset, dl->download_size);
+
+        void *src = staging->mapped + dl->staging_offset;
+
+        if (dl->swizzle) {
+            g_autofree uint8_t *swizzle_buf =
+                (uint8_t *)g_malloc(dl->pitch * dl->height);
+            memcpy_image(swizzle_buf, src, dl->pitch,
+                         dl->width * dl->bytes_per_pixel, dl->height);
+            swizzle_rect(swizzle_buf, dl->width, dl->height, dl->dest_ptr,
+                         dl->pitch, dl->bytes_per_pixel);
+            nv2a_profile_inc_counter(NV2A_PROF_SURF_SWIZZLE);
+        } else {
+            memcpy_image(dl->dest_ptr, src, dl->pitch,
+                         dl->width * dl->bytes_per_pixel, dl->height);
+        }
+    }
+
+    g_nv2a_stats.surf_working.df_flush_ns += _t1 - _t0;
+    g_nv2a_stats.surf_working.df_read_ns += nv2a_clock_ns() - _t1;
+
+    r->num_deferred_downloads = 0;
+    r->staging_dst_offset = 0;
+}
+
 static void download_surface_to_buffer(NV2AState *d, SurfaceBinding *surface,
                                        uint8_t *pixels)
 {
     PGRAPHState *pg = &d->pgraph;
     PGRAPHVkState *r = pg->vk_renderer_state;
+
+    download_surface_complete_deferred(d);
 
     VK_LOG("download_surface: %s addr=0x%x %ux%u pitch=%d bpp=%d swizzle=%d",
            surface->color ? "COLOR" : "ZETA", surface->vram_addr,
@@ -761,12 +1108,10 @@ static void invalidate_surface(NV2AState *d, SurfaceBinding *surface)
 
     if (r->in_command_buffer &&
         surface->draw_time >= r->command_buffer_start_time) {
-        pgraph_vk_finish(&d->pgraph, VK_FINISH_REASON_SURFACE_DOWN);
+        surface->invalidation_frame = r->current_frame;
+    } else {
+        surface->invalidation_frame = -1;
     }
-
-    assert((!r->in_command_buffer ||
-            surface->draw_time < r->command_buffer_start_time) &&
-           "Surface evicted while in use!");
 
     if (surface == r->color_binding) {
         assert(d->pgraph.surface_color.buffer_dirty);
@@ -1004,11 +1349,20 @@ static bool check_invalid_surface_is_compatibile(SurfaceBinding *surface,
            surface->host_fmt.usage == target->host_fmt.usage;
 }
 
+static bool surface_in_flight(PGRAPHVkState *r, SurfaceBinding *surface)
+{
+    int f = surface->invalidation_frame;
+    return f >= 0 && (f == r->current_frame || r->frame_submitted[f]);
+}
+
 static SurfaceBinding *
 get_any_compatible_invalid_surface(PGRAPHVkState *r, SurfaceBinding *target)
 {
     SurfaceBinding *surface, *next;
     QTAILQ_FOREACH_SAFE(surface, &r->invalid_surfaces, entry, next) {
+        if (surface_in_flight(r, surface)) {
+            continue;
+        }
         if (check_invalid_surface_is_compatibile(surface, target)) {
             QTAILQ_REMOVE(&r->invalid_surfaces, surface, entry);
             return surface;
@@ -1026,6 +1380,9 @@ static void prune_invalid_surfaces(PGRAPHVkState *r, int keep)
     QTAILQ_FOREACH_SAFE(surface, &r->invalid_surfaces, entry, next) {
         num_surfaces += 1;
         if (num_surfaces > keep) {
+            if (surface_in_flight(r, surface)) {
+                continue;
+            }
             QTAILQ_REMOVE(&r->invalid_surfaces, surface, entry);
             destroy_surface_image(r, surface);
             g_free(surface);
@@ -1642,27 +1999,55 @@ static void update_surface_part(NV2AState *d, bool upload, bool color)
     PGRAPHState *pg = &d->pgraph;
     PGRAPHVkState *r = pg->vk_renderer_state;
 
+    g_nv2a_stats.surf_working.update_calls++;
+
+    int64_t _st0 = nv2a_clock_ns();
     SurfaceBinding target;
     memset(&target, 0, sizeof(target));
+    target.invalidation_frame = -1;
     populate_surface_binding_target(d, color, &target);
+    g_nv2a_stats.surf_working.populate_ns += nv2a_clock_ns() - _st0;
 
     Surface *pg_surface = color ? &pg->surface_color : &pg->surface_zeta;
 
-    bool mem_dirty = !tcg_enabled() && memory_region_test_and_clear_dirty(
-                                           d->vram, target.vram_addr,
-                                           target.size, DIRTY_MEMORY_NV2A);
+    int64_t _st1 = nv2a_clock_ns();
+    bool mem_dirty = false;
+    if (!tcg_enabled()) {
+        ram_addr_t start = r->vram_ram_addr + target.vram_addr;
+        unsigned long page = start >> TARGET_PAGE_BITS;
+        unsigned long end_page =
+            TARGET_PAGE_ALIGN(start + target.size) >> TARGET_PAGE_BITS;
+
+        RCU_READ_LOCK_GUARD();
+        DirtyMemoryBlocks *blocks =
+            qatomic_rcu_read(&ram_list.dirty_memory[DIRTY_MEMORY_NV2A]);
+
+        while (page < end_page) {
+            unsigned long idx = page / DIRTY_MEMORY_BLOCK_SIZE;
+            unsigned long ofs = page % DIRTY_MEMORY_BLOCK_SIZE;
+            unsigned long num = MIN(end_page - page,
+                                    DIRTY_MEMORY_BLOCK_SIZE - ofs);
+            mem_dirty |= bitmap_test_and_clear_atomic(
+                blocks->blocks[idx], ofs, num);
+            page += num;
+        }
+    }
+    g_nv2a_stats.surf_working.dirty_ns += nv2a_clock_ns() - _st1;
 
     SurfaceBinding *current_binding = color ? r->color_binding
                                             : r->zeta_binding;
 
     if (!current_binding ||
         (upload && (pg_surface->buffer_dirty || mem_dirty))) {
+        int64_t _gt0 = nv2a_clock_ns();
         // FIXME: We don't need to be so aggressive flushing the command list
         // pgraph_vk_finish(pg, VK_FINISH_REASON_SURFACE_CREATE);
         pgraph_vk_ensure_not_in_render_pass(pg);
 
         unbind_surface(d, color);
+        g_nv2a_stats.surf_working.enrp_ns += nv2a_clock_ns() - _gt0;
 
+        int64_t _gt1 = nv2a_clock_ns();
         SurfaceBinding *surface = pgraph_vk_surface_get(d, target.vram_addr);
         if (surface != NULL) {
             // FIXME: Support same color/zeta surface target? In the mean time,
@@ -1749,16 +2134,41 @@ static void update_surface_part(NV2AState *d, bool upload, bool color)
                 surface->upload_pending |= mem_dirty;
                 pg->surface_zeta.buffer_dirty |= color;
                 should_create = false;
+                g_nv2a_stats.surf_working.lk_hit_ns += nv2a_clock_ns() - _gt1;
             } else {
                 trace_nv2a_pgraph_surface_evict_reason(
                     "incompatible", surface->vram_addr);
                 compare_surfaces(surface, &target);
-                pgraph_vk_surface_download_if_dirty(d, surface);
+                if (surface->draw_dirty) {
+                    if (!download_surface_record_deferred(
+                            d, surface,
+                            d->vram_ptr + surface->vram_addr)) {
+                        pgraph_vk_surface_download_if_dirty(d, surface);
+                    } else {
+                        memory_region_set_client_dirty(
+                            d->vram, surface->vram_addr,
+                            surface->pitch * surface->height,
+                            DIRTY_MEMORY_VGA);
+                        memory_region_set_client_dirty(
+                            d->vram, surface->vram_addr,
+                            surface->pitch * surface->height,
+                            DIRTY_MEMORY_NV2A_TEX);
+                        surface->download_pending = false;
+                        surface->draw_dirty = false;
+                    }
+                } else {
+                    g_defer_skip_clean++;
+                }
                 invalidate_surface(d, surface);
+                g_nv2a_stats.surf_working.lk_evict_ns += nv2a_clock_ns() - _gt1;
+                g_nv2a_stats.surf_working.evict_count++;
             }
+        } else {
+            g_nv2a_stats.surf_working.lk_nosurf_ns += nv2a_clock_ns() - _gt1;
         }
 
         if (should_create) {
+            int64_t _gt2 = nv2a_clock_ns();
             surface = get_any_compatible_invalid_surface(r, &target);
             if (surface) {
                 migrate_surface_image(&target, surface);
@@ -1766,10 +2176,14 @@ static void update_surface_part(NV2AState *d, bool upload, bool color)
                 surface = g_malloc(sizeof(SurfaceBinding));
                 create_surface_image(pg, &target);
             }
+            g_nv2a_stats.surf_working.create_ns += nv2a_clock_ns() - _gt2;
 
             *surface = target;
             set_surface_label(pg, surface);
+
+            int64_t _gt3 = nv2a_clock_ns();
             surface_put(d, surface);
+            g_nv2a_stats.surf_working.put_ns += nv2a_clock_ns() - _gt3;
 
             // FIXME: Refactor
             pg->surface_binding_dim.width = target.width;
@@ -1799,11 +2213,22 @@ static void update_surface_part(NV2AState *d, bool upload, bool color)
                  surface->shape.clip_x, surface->shape.clip_width,
                  surface->shape.clip_y, surface->shape.clip_height, surface->pitch);
 
+        int64_t _gt4 = nv2a_clock_ns();
         bind_surface(r, surface);
+        g_nv2a_stats.surf_working.bind_ns += nv2a_clock_ns() - _gt4;
+
         pg_surface->buffer_dirty = false;
+        if (should_create) {
+            g_nv2a_stats.surf_working.create_count++;
+        } else {
+            g_nv2a_stats.surf_working.hit_count++;
+        }
+    } else {
+        g_nv2a_stats.surf_working.miss_count++;
     }
 
     if (!upload && pg_surface->draw_dirty) {
+        int64_t _st3 = nv2a_clock_ns();
         if (!tcg_enabled()) {
             // FIXME: Cannot monitor for reads/writes; flush now
             download_surface(d, color ? r->color_binding : r->zeta_binding,
@@ -1812,6 +2237,8 @@ static void update_surface_part(NV2AState *d, bool upload, bool color)
 
         pg_surface->write_enabled_cache = false;
         pg_surface->draw_dirty = false;
+        g_nv2a_stats.surf_working.download_ns += nv2a_clock_ns() - _st3;
+        g_nv2a_stats.surf_working.download_count++;
     }
 }
 
@@ -1869,28 +2296,36 @@ void pgraph_vk_surface_update(NV2AState *d, bool upload, bool color_write,
         }
     }
 
+    download_surface_complete_deferred(d);
+
     if (upload) {
         pg->draw_time++;
     }
 
     bool swizzle = (pg->surface_type == NV097_SET_SURFACE_FORMAT_TYPE_SWIZZLE);
 
-    if (r->color_binding) {
-        r->color_binding->frame_time = pg->frame_time;
-        if (upload) {
-            pgraph_vk_upload_surface_data(d, r->color_binding, false);
-            r->color_binding->draw_time = pg->draw_time;
-            r->color_binding->swizzle = swizzle;
+    {
+        int64_t _su0 = nv2a_clock_ns();
+        if (r->color_binding) {
+            r->color_binding->frame_time = pg->frame_time;
+            if (upload) {
+                pgraph_vk_upload_surface_data(d, r->color_binding, false);
+                r->color_binding->draw_time = pg->draw_time;
+                r->color_binding->swizzle = swizzle;
+                g_nv2a_stats.surf_working.upload_count++;
+            }
         }
-    }
 
-    if (r->zeta_binding) {
-        r->zeta_binding->frame_time = pg->frame_time;
-        if (upload) {
-            pgraph_vk_upload_surface_data(d, r->zeta_binding, false);
-            r->zeta_binding->draw_time = pg->draw_time;
-            r->zeta_binding->swizzle = swizzle;
+        if (r->zeta_binding) {
+            r->zeta_binding->frame_time = pg->frame_time;
+            if (upload) {
+                pgraph_vk_upload_surface_data(d, r->zeta_binding, false);
+                r->zeta_binding->draw_time = pg->draw_time;
+                r->zeta_binding->swizzle = swizzle;
+                g_nv2a_stats.surf_working.upload_count++;
+            }
         }
+        g_nv2a_stats.surf_working.upload_ns += nv2a_clock_ns() - _su0;
     }
 
     // Sanity check color and zeta dimensions match
@@ -1899,8 +2334,12 @@ void pgraph_vk_surface_update(NV2AState *d, bool upload, bool color_write,
         assert(r->color_binding->height == r->zeta_binding->height);
     }
 
-    expire_old_surfaces(d);
-    prune_invalid_surfaces(r, num_invalid_surfaces_to_keep);
+    {
+        int64_t _se0 = nv2a_clock_ns();
+        expire_old_surfaces(d);
+        prune_invalid_surfaces(r, num_invalid_surfaces_to_keep);
+        g_nv2a_stats.surf_working.expire_ns += nv2a_clock_ns() - _se0;
+    }
     NV2A_PHASE_TIMER_END(surface_update);
 }
 
