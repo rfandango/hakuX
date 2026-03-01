@@ -460,7 +460,11 @@ static inline bool fast_entry_apply(PGRAPHState *pg,
 {
     if (f->xlat >= XLAT_TEX_DIRTY_0 && f->xlat <= XLAT_TEX_DIRTY_3) {
         int slot = f->xlat - XLAT_TEX_DIRTY_0;
-        pg->texture_dirty[slot] |= (p != pgraph_reg_r(pg, f->reg));
+        bool changed = (p != pgraph_reg_r(pg, f->reg));
+        pg->texture_dirty[slot] |= changed;
+        if (changed) {
+            pg->texture_state_gen++;
+        }
         pgraph_reg_w(pg, f->reg, p);
         return true;
     }
@@ -3202,7 +3206,9 @@ DEF_METHOD(NV097, SET_TEXTURE_OFFSET)
 {
     int slot = (method - NV097_SET_TEXTURE_OFFSET) / 64;
     unsigned int reg = NV_PGRAPH_TEXOFFSET0 + slot * 4;
-    pg->texture_dirty[slot] |= (parameter != pgraph_reg_r(pg, reg));
+    bool changed = (parameter != pgraph_reg_r(pg, reg));
+    pg->texture_dirty[slot] |= changed;
+    if (changed) { pg->texture_state_gen++; }
     pgraph_reg_w(pg, reg, parameter);
 }
 
@@ -3241,14 +3247,18 @@ DEF_METHOD(NV097, SET_TEXTURE_FORMAT)
     PG_SET_MASK(reg, NV_PGRAPH_TEXFMT0_BASE_SIZE_V, log_height);
     PG_SET_MASK(reg, NV_PGRAPH_TEXFMT0_BASE_SIZE_P, log_depth);
 
-    pg->texture_dirty[slot] |= (pgraph_reg_r(pg, reg) != prev);
+    bool fmt_changed = (pgraph_reg_r(pg, reg) != prev);
+    pg->texture_dirty[slot] |= fmt_changed;
+    if (fmt_changed) { pg->texture_state_gen++; }
 }
 
 DEF_METHOD(NV097, SET_TEXTURE_CONTROL0)
 {
     int slot = (method - NV097_SET_TEXTURE_CONTROL0) / 64;
     unsigned int reg = NV_PGRAPH_TEXCTL0_0 + slot * 4;
-    pg->texture_dirty[slot] |= (parameter != pgraph_reg_r(pg, reg));
+    bool changed = (parameter != pgraph_reg_r(pg, reg));
+    pg->texture_dirty[slot] |= changed;
+    if (changed) { pg->texture_state_gen++; }
     pgraph_reg_w(pg, reg, parameter);
 }
 
@@ -3256,7 +3266,9 @@ DEF_METHOD(NV097, SET_TEXTURE_CONTROL1)
 {
     int slot = (method - NV097_SET_TEXTURE_CONTROL1) / 64;
     unsigned int reg = NV_PGRAPH_TEXCTL1_0 + slot * 4;
-    pg->texture_dirty[slot] |= (parameter != pgraph_reg_r(pg, reg));
+    bool changed = (parameter != pgraph_reg_r(pg, reg));
+    pg->texture_dirty[slot] |= changed;
+    if (changed) { pg->texture_state_gen++; }
     pgraph_reg_w(pg, reg, parameter);
 }
 
@@ -3264,7 +3276,9 @@ DEF_METHOD(NV097, SET_TEXTURE_FILTER)
 {
     int slot = (method - NV097_SET_TEXTURE_FILTER) / 64;
     unsigned int reg = NV_PGRAPH_TEXFILTER0 + slot * 4;
-    pg->texture_dirty[slot] |= (parameter != pgraph_reg_r(pg, reg));
+    bool changed = (parameter != pgraph_reg_r(pg, reg));
+    pg->texture_dirty[slot] |= changed;
+    if (changed) { pg->texture_state_gen++; }
     pgraph_reg_w(pg, reg, parameter);
 }
 
@@ -3272,7 +3286,9 @@ DEF_METHOD(NV097, SET_TEXTURE_IMAGE_RECT)
 {
     int slot = (method - NV097_SET_TEXTURE_IMAGE_RECT) / 64;
     unsigned int reg = NV_PGRAPH_TEXIMAGERECT0 + slot * 4;
-    pg->texture_dirty[slot] |= (parameter != pgraph_reg_r(pg, reg));
+    bool changed = (parameter != pgraph_reg_r(pg, reg));
+    pg->texture_dirty[slot] |= changed;
+    if (changed) { pg->texture_state_gen++; }
     pgraph_reg_w(pg, reg, parameter);
 }
 
@@ -3293,7 +3309,9 @@ DEF_METHOD(NV097, SET_TEXTURE_PALETTE)
     PG_SET_MASK(reg, NV_PGRAPH_TEXPALETTE0_LENGTH, length);
     PG_SET_MASK(reg, NV_PGRAPH_TEXPALETTE0_OFFSET, offset);
 
-    pg->texture_dirty[slot] |= (pgraph_reg_r(pg, reg) != prev);
+    bool pal_changed = (pgraph_reg_r(pg, reg) != prev);
+    pg->texture_dirty[slot] |= pal_changed;
+    if (pal_changed) { pg->texture_state_gen++; }
 }
 
 DEF_METHOD(NV097, SET_TEXTURE_BORDER_COLOR)

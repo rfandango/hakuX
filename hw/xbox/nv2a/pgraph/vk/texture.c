@@ -30,6 +30,69 @@
 #include "qemu/lru.h"
 #include "renderer.h"
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#include <time.h>
+
+static struct {
+    int bind_calls;
+    int bind_early_skip;
+    int create_calls;
+    int enter_tex_dirty;
+    int enter_possibly_dirty;
+    int enter_no_binding;
+    int surface_to_tex;
+    int possibly_dirty;
+    int hash_computed;
+    int hash_mismatch;
+    int skip_not_dirty;
+    int slot_cache_hit;
+    int lru_lookup;
+    size_t bytes_hashed;
+    int dirty_check_calls;
+    int dirty_check_true;
+    int64_t t_key_ns;
+    int64_t t_surf_ns;
+    int64_t t_lookup_ns;
+    int64_t t_dirty_ns;
+    int64_t t_hash_ns;
+    int64_t t_rest_ns;
+    int64_t last_log_ns;
+} tex_dbg;
+
+static int64_t tex_dbg_now_ns(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+static void tex_dbg_maybe_log(void)
+{
+    int64_t now = tex_dbg_now_ns();
+    if (now - tex_dbg.last_log_ns < 3000000000LL) return;
+    tex_dbg.last_log_ns = now;
+    __android_log_print(ANDROID_LOG_INFO, "xemu-tex-dbg",
+        "create:%d notD:%d slotH:%d lru:%d | "
+        "key:%.1f surf:%.1f look:%.1f dirty:%.1f hash:%.1f rest:%.1f ms",
+        tex_dbg.create_calls,
+        tex_dbg.skip_not_dirty, tex_dbg.slot_cache_hit,
+        tex_dbg.lru_lookup,
+        tex_dbg.t_key_ns / 1e6, tex_dbg.t_surf_ns / 1e6,
+        tex_dbg.t_lookup_ns / 1e6, tex_dbg.t_dirty_ns / 1e6,
+        tex_dbg.t_hash_ns / 1e6, tex_dbg.t_rest_ns / 1e6);
+    memset(&tex_dbg, 0, sizeof(tex_dbg));
+    tex_dbg.last_log_ns = now;
+}
+#define TEX_DBG_INC(field) (tex_dbg.field++)
+#define TEX_DBG_ADD(field, v) (tex_dbg.field += (v))
+#define TEX_DBG_LOG() tex_dbg_maybe_log()
+#else
+#define TEX_DBG_INC(field) ((void)0)
+#define TEX_DBG_ADD(field, v) ((void)0)
+#define TEX_DBG_LOG() ((void)0)
+#endif
+
 static void texture_cache_release_node_resources(PGRAPHVkState *r, TextureBinding *snode);
 
 static const VkImageType dimensionality_to_vk_image_type[] = {
@@ -400,47 +463,32 @@ static TextureLayout *get_texture_layout(PGRAPHState *pg, int texture_idx)
     return layout;
 }
 
-struct pgraph_texture_possibly_dirty_struct {
-    hwaddr addr, end;
-};
-
-static void mark_textures_possibly_dirty_visitor(Lru *lru, LruNode *node, void *opaque)
-{
-    struct pgraph_texture_possibly_dirty_struct *test = opaque;
-
-    TextureBinding *tnode = container_of(node, TextureBinding, node);
-    if (tnode->possibly_dirty) {
-        return;
-    }
-
-    uintptr_t k_tex_addr = tnode->key.texture_vram_offset;
-    uintptr_t k_tex_end = k_tex_addr + tnode->key.texture_length - 1;
-    bool overlapping = !(test->addr > k_tex_end || k_tex_addr > test->end);
-
-    if (tnode->key.palette_length > 0) {
-        uintptr_t k_pal_addr = tnode->key.palette_vram_offset;
-        uintptr_t k_pal_end = k_pal_addr + tnode->key.palette_length - 1;
-        overlapping |= !(test->addr > k_pal_end || k_pal_addr > test->end);
-    }
-
-    tnode->possibly_dirty |= overlapping;
-}
-
 void pgraph_vk_mark_textures_possibly_dirty(NV2AState *d,
     hwaddr addr, hwaddr size)
 {
+    PGRAPHVkState *r = d->pgraph.vk_renderer_state;
     hwaddr end = TARGET_PAGE_ALIGN(addr + size) - 1;
     addr &= TARGET_PAGE_MASK;
     assert(end <= memory_region_size(d->vram));
 
-    struct pgraph_texture_possibly_dirty_struct test = {
-        .addr = addr,
-        .end = end,
-    };
+    TextureBinding *tnode;
+    QTAILQ_FOREACH(tnode, &r->texture_active_list, active_entry) {
+        if (tnode->possibly_dirty) {
+            continue;
+        }
 
-    lru_visit_active(&d->pgraph.vk_renderer_state->texture_cache,
-                     mark_textures_possibly_dirty_visitor,
-                     &test);
+        uintptr_t k_tex_addr = tnode->key.texture_vram_offset;
+        uintptr_t k_tex_end = k_tex_addr + tnode->key.texture_length - 1;
+        bool overlapping = !(addr > k_tex_end || k_tex_addr > end);
+
+        if (tnode->key.palette_length > 0) {
+            uintptr_t k_pal_addr = tnode->key.palette_vram_offset;
+            uintptr_t k_pal_end = k_pal_addr + tnode->key.palette_length - 1;
+            overlapping |= !(addr > k_pal_end || k_pal_addr > end);
+        }
+
+        tnode->possibly_dirty |= overlapping;
+    }
 }
 
 static bool check_texture_dirty(NV2AState *d, hwaddr addr, hwaddr size)
@@ -452,26 +500,6 @@ static bool check_texture_dirty(NV2AState *d, hwaddr addr, hwaddr size)
                                               DIRTY_MEMORY_NV2A_TEX);
 }
 
-// Check if any of the pages spanned by the a texture are dirty.
-static bool check_texture_possibly_dirty(NV2AState *d,
-                                         hwaddr texture_vram_offset,
-                                         unsigned int length,
-                                         hwaddr palette_vram_offset,
-                                         unsigned int palette_length)
-{
-    bool possibly_dirty = false;
-    if (check_texture_dirty(d, texture_vram_offset, length)) {
-        possibly_dirty = true;
-        pgraph_vk_mark_textures_possibly_dirty(d, texture_vram_offset, length);
-    }
-    if (palette_length && check_texture_dirty(d, palette_vram_offset,
-                                                     palette_length)) {
-        possibly_dirty = true;
-        pgraph_vk_mark_textures_possibly_dirty(d, palette_vram_offset,
-                                            palette_length);
-    }
-    return possibly_dirty;
-}
 
 // FIXME: Make sure we update sampler when data matches. Should we add filtering
 // options to the textureshape?
@@ -648,8 +676,12 @@ static void copy_zeta_surface_to_texture(PGRAPHState *pg, SurfaceBinding *surfac
     trace_nv2a_pgraph_surface_render_to_texture(
         surface->vram_addr, surface->width, surface->height);
 
+#if OPT_SURF_TO_TEX_INLINE
+    VkCommandBuffer cmd = pgraph_vk_begin_nondraw_commands(pg);
+#else
     pgraph_vk_finish(pg, VK_FINISH_REASON_SURFACE_DOWN);
     VkCommandBuffer cmd = pgraph_vk_begin_single_time_commands(pg);
+#endif
     pgraph_vk_begin_debug_marker(r, cmd, RGBA_GREEN, __func__);
 
     unsigned int scaled_width = surface->width,
@@ -833,7 +865,11 @@ static void copy_zeta_surface_to_texture(PGRAPHState *pg, SurfaceBinding *surfac
     texture->current_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     pgraph_vk_end_debug_marker(r, cmd);
+#if OPT_SURF_TO_TEX_INLINE
+    pgraph_vk_end_nondraw_commands(pg, cmd);
+#else
     pgraph_vk_end_single_time_commands(pg, cmd);
+#endif
 
     texture->draw_time = surface->draw_time;
 }
@@ -856,8 +892,12 @@ static void copy_surface_to_texture(PGRAPHState *pg, SurfaceBinding *surface,
     trace_nv2a_pgraph_surface_render_to_texture(
         surface->vram_addr, surface->width, surface->height);
 
+#if OPT_SURF_TO_TEX_INLINE
+    VkCommandBuffer cmd = pgraph_vk_begin_nondraw_commands(pg);
+#else
     pgraph_vk_finish(pg, VK_FINISH_REASON_SURFACE_DOWN);
     VkCommandBuffer cmd = pgraph_vk_begin_single_time_commands(pg);
+#endif
     pgraph_vk_begin_debug_marker(r, cmd, RGBA_GREEN, __func__);
 
     pgraph_vk_transition_image_layout(
@@ -898,7 +938,11 @@ static void copy_surface_to_texture(PGRAPHState *pg, SurfaceBinding *surface,
     texture->current_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     pgraph_vk_end_debug_marker(r, cmd);
+#if OPT_SURF_TO_TEX_INLINE
+    pgraph_vk_end_nondraw_commands(pg, cmd);
+#else
     pgraph_vk_end_single_time_commands(pg, cmd);
+#endif
 
     texture->draw_time = surface->draw_time;
 }
@@ -1102,10 +1146,13 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
 {
     VK_LOG("create_texture: idx=%d", texture_idx);
     NV2A_VK_DGROUP_BEGIN("Creating texture %d", texture_idx);
+    TEX_DBG_INC(create_calls);
+
+    int64_t _t0 = tex_dbg_now_ns();
 
     NV2AState *d = container_of(pg, NV2AState, pgraph);
     PGRAPHVkState *r = pg->vk_renderer_state;
-    TextureShape state = pgraph_get_texture_shape(pg, texture_idx); // FIXME: Check for pad issues
+    TextureShape state = pgraph_get_texture_shape(pg, texture_idx);
     BasicColorFormatInfo f_basic = kelvin_color_format_info_map[state.color_format];
 
     const hwaddr texture_vram_offset = pgraph_get_texture_phys_addr(pg, texture_idx);
@@ -1139,17 +1186,18 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
     }
     key.scale = 1;
 
-    // FIXME: Separate sampler from texture
     key.filter = filter;
     key.address = address;
     key.border_color = border_color_pack32;
     key.max_anisotropy = max_anisotropy;
 
+    int64_t _t1 = tex_dbg_now_ns();
+    tex_dbg.t_key_ns += _t1 - _t0;
+
     bool possibly_dirty = false;
     bool possibly_dirty_checked = false;
     bool surface_to_texture = false;
 
-    // Check active surfaces to see if this texture was a render target
     SurfaceBinding *surface = pgraph_vk_surface_get(d, texture_vram_offset);
     if (surface && state.levels == 1) {
         surface_to_texture =
@@ -1167,21 +1215,52 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
     }
 
     if (!surface_to_texture) {
-        // FIXME: Restructure to support rendering surfaces to cubemap faces
+        bool skip_surf_scan = false;
+        if (r->tex_surf_range_cache[texture_idx].vram_addr == texture_vram_offset &&
+            r->tex_surf_range_cache[texture_idx].length == texture_length &&
+            !r->tex_surf_range_cache[texture_idx].had_overlap &&
+            r->tex_surf_range_cache[texture_idx].surface_list_gen == r->surface_list_gen) {
+            skip_surf_scan = true;
+        }
 
-        // Writeback any surfaces which this texture may index
-        pgraph_vk_download_surfaces_in_range_if_dirty(
-            pg, texture_vram_offset, texture_length);
+        if (!skip_surf_scan) {
+            bool had_overlap = pgraph_vk_download_surfaces_in_range_if_dirty(
+                pg, texture_vram_offset, texture_length);
+            r->tex_surf_range_cache[texture_idx].vram_addr = texture_vram_offset;
+            r->tex_surf_range_cache[texture_idx].length = texture_length;
+            r->tex_surf_range_cache[texture_idx].had_overlap = had_overlap;
+            r->tex_surf_range_cache[texture_idx].surface_list_gen = r->surface_list_gen;
+        }
     }
+
+    int64_t _t2 = tex_dbg_now_ns();
+    tex_dbg.t_surf_ns += _t2 - _t1;
 
     if (surface_to_texture && pg->surface_scale_factor > 1) {
         key.scale = pg->surface_scale_factor;
     }
 
     uint64_t key_hash = fast_hash((void*)&key, sizeof(key));
-    LruNode *node = lru_lookup(&r->texture_cache, key_hash, &key);
-    TextureBinding *snode = container_of(node, TextureBinding, node);
-    bool binding_found = snode->image != VK_NULL_HANDLE;
+    TextureBinding *snode;
+    bool binding_found;
+
+    if (r->tex_binding_cache[texture_idx].key_hash == key_hash &&
+        r->tex_binding_cache[texture_idx].binding &&
+        r->tex_binding_cache[texture_idx].binding->image != VK_NULL_HANDLE) {
+        snode = r->tex_binding_cache[texture_idx].binding;
+        binding_found = true;
+        TEX_DBG_INC(slot_cache_hit);
+    } else {
+        LruNode *node = lru_lookup(&r->texture_cache, key_hash, &key);
+        snode = container_of(node, TextureBinding, node);
+        binding_found = snode->image != VK_NULL_HANDLE;
+        r->tex_binding_cache[texture_idx].key_hash = key_hash;
+        r->tex_binding_cache[texture_idx].binding = binding_found ? snode : NULL;
+        TEX_DBG_INC(lru_lookup);
+    }
+
+    int64_t _t3 = tex_dbg_now_ns();
+    tex_dbg.t_lookup_ns += _t3 - _t2;
 
     if (binding_found) {
         NV2A_VK_DPRINTF("Cache hit");
@@ -1191,27 +1270,60 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
         possibly_dirty = true;
     }
 
+    int64_t _t4 = tex_dbg_now_ns();
+
     if (!surface_to_texture && !possibly_dirty_checked) {
-        possibly_dirty |= check_texture_possibly_dirty(
-            d, texture_vram_offset, texture_length, texture_palette_vram_offset,
-            texture_palette_data_size);
+        TEX_DBG_INC(dirty_check_calls);
+        bool skip_dirty_check = binding_found &&
+            snode->dirty_check_frame == pg->frame_time &&
+            !snode->dirty_check_result;
+        if (skip_dirty_check) {
+            TEX_DBG_INC(skip_not_dirty);
+        } else {
+            bool vram_dirty = check_texture_dirty(
+                d, texture_vram_offset, texture_length);
+            if (texture_palette_data_size) {
+                vram_dirty |= check_texture_dirty(
+                    d, texture_palette_vram_offset, texture_palette_data_size);
+            }
+            if (vram_dirty) {
+                possibly_dirty = true;
+                TEX_DBG_INC(dirty_check_true);
+            }
+            if (binding_found) {
+                snode->dirty_check_frame = pg->frame_time;
+                snode->dirty_check_result = vram_dirty;
+            }
+        }
     }
 
-    // Calculate hash of texture data, if necessary
+    int64_t _t5 = tex_dbg_now_ns();
+    tex_dbg.t_dirty_ns += _t5 - _t4;
+
+    if (surface_to_texture) {
+        TEX_DBG_INC(surface_to_tex);
+    }
+
     void *texture_data = (char*)d->vram_ptr + texture_vram_offset;
     void *palette_data = (char*)d->vram_ptr + texture_palette_vram_offset;
 
     uint64_t content_hash = 0;
     if (!surface_to_texture && possibly_dirty) {
+        TEX_DBG_INC(possibly_dirty);
+        TEX_DBG_INC(hash_computed);
+        TEX_DBG_ADD(bytes_hashed, texture_length);
         content_hash = fast_hash(texture_data, texture_length);
         if (is_indexed) {
+            TEX_DBG_ADD(bytes_hashed, texture_palette_data_size);
             content_hash ^= fast_hash(palette_data, texture_palette_data_size);
         }
     }
 
+    int64_t _t6 = tex_dbg_now_ns();
+    tex_dbg.t_hash_ns += _t6 - _t5;
+
     if (binding_found) {
         if (surface_to_texture) {
-            // FIXME: Add draw time tracking
             if (surface->draw_time != snode->draw_time) {
 #if OPT_ALWAYS_DEFERRED_FENCES
                 if (snode->submit_time + NUM_SUBMIT_FRAMES > r->submit_count) {
@@ -1222,6 +1334,7 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
             }
         } else {
             if (possibly_dirty && content_hash != snode->hash) {
+                TEX_DBG_INC(hash_mismatch);
 #if OPT_ALWAYS_DEFERRED_FENCES
                 if (snode->submit_time + NUM_SUBMIT_FRAMES > r->submit_count) {
                     pgraph_vk_flush_all_frames(pg);
@@ -1230,8 +1343,11 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
                 upload_texture_image(pg, texture_idx, snode);
                 snode->hash = content_hash;
             }
+            snode->possibly_dirty = false;
         }
 
+        int64_t _t7 = tex_dbg_now_ns();
+        tex_dbg.t_rest_ns += _t7 - _t6;
         NV2A_VK_DGROUP_END();
         return;
     }
@@ -1449,6 +1565,20 @@ static void update_timestamps(PGRAPHVkState *r)
     }
 }
 
+bool pgraph_vk_check_textures_fast_skip(PGRAPHState *pg)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+
+    for (int i = 0; i < NV2A_MAX_TEXTURES; i++) {
+        if (!r->texture_bindings[i] || pg->texture_dirty[i] ||
+            (r->texture_bindings[i] != &r->dummy_texture &&
+             r->texture_bindings[i]->possibly_dirty)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void pgraph_vk_bind_textures(NV2AState *d)
 {
     NV2A_VK_DGROUP_BEGIN("%s", __func__);
@@ -1456,15 +1586,15 @@ void pgraph_vk_bind_textures(NV2AState *d)
     PGRAPHState *pg = &d->pgraph;
     PGRAPHVkState *r = pg->vk_renderer_state;
 
-    // FIXME: Check for modifications on bind fastpath (CPU hook)
-    // FIXME: Mark textures that are sourced from surfaces so we can track them
-
     r->texture_bindings_changed = false;
+
+    TEX_DBG_INC(bind_calls);
 
     if (!check_textures_dirty(pg)) {
         NV2A_VK_DPRINTF("Not dirty");
         NV2A_VK_DGROUP_END();
         update_timestamps(r);
+        TEX_DBG_INC(bind_early_skip);
         return;
     }
 
@@ -1484,8 +1614,54 @@ void pgraph_vk_bind_textures(NV2AState *d)
             continue;
         }
 
+        if (pg->texture_dirty[i] && r->tex_reg_cache[i].valid &&
+            r->texture_bindings[i] &&
+            r->texture_bindings[i] != &r->dummy_texture &&
+            r->texture_bindings[i]->dirty_check_frame == pg->frame_time &&
+            !r->texture_bindings[i]->dirty_check_result &&
+            !r->texture_bindings[i]->possibly_dirty) {
+            uint32_t cur[8] = {
+                pgraph_reg_r(pg, NV_PGRAPH_TEXOFFSET0 + i * 4),
+                pgraph_reg_r(pg, NV_PGRAPH_TEXFMT0 + i * 4),
+                pgraph_reg_r(pg, NV_PGRAPH_TEXCTL0_0 + i * 4),
+                pgraph_reg_r(pg, NV_PGRAPH_TEXCTL1_0 + i * 4),
+                pgraph_reg_r(pg, NV_PGRAPH_TEXFILTER0 + i * 4),
+                pgraph_reg_r(pg, NV_PGRAPH_TEXADDRESS0 + i * 4),
+                pgraph_reg_r(pg, NV_PGRAPH_BORDERCOLOR0 + i * 4),
+                pgraph_reg_r(pg, NV_PGRAPH_TEXIMAGERECT0 + i * 4),
+            };
+            uint32_t sp = (pgraph_reg_r(pg, NV_PGRAPH_SHADERPROG) >> (i * 5)) & 0x1F;
+            if (memcmp(cur, r->tex_reg_cache[i].regs, sizeof(cur)) == 0 &&
+                sp == r->tex_reg_cache[i].shaderprog_bits) {
+                pg->texture_dirty[i] = false;
+                TEX_DBG_INC(skip_not_dirty);
+                continue;
+            }
+        }
+
+        if (pg->texture_dirty[i]) {
+            TEX_DBG_INC(enter_tex_dirty);
+        } else if (!r->texture_bindings[i] || r->texture_bindings[i] == &r->dummy_texture) {
+            TEX_DBG_INC(enter_no_binding);
+        } else {
+            TEX_DBG_INC(enter_possibly_dirty);
+        }
+
         TextureBinding *prev_binding = r->texture_bindings[i];
         create_texture(pg, i);
+
+        r->tex_reg_cache[i].regs[0] = pgraph_reg_r(pg, NV_PGRAPH_TEXOFFSET0 + i * 4);
+        r->tex_reg_cache[i].regs[1] = pgraph_reg_r(pg, NV_PGRAPH_TEXFMT0 + i * 4);
+        r->tex_reg_cache[i].regs[2] = pgraph_reg_r(pg, NV_PGRAPH_TEXCTL0_0 + i * 4);
+        r->tex_reg_cache[i].regs[3] = pgraph_reg_r(pg, NV_PGRAPH_TEXCTL1_0 + i * 4);
+        r->tex_reg_cache[i].regs[4] = pgraph_reg_r(pg, NV_PGRAPH_TEXFILTER0 + i * 4);
+        r->tex_reg_cache[i].regs[5] = pgraph_reg_r(pg, NV_PGRAPH_TEXADDRESS0 + i * 4);
+        r->tex_reg_cache[i].regs[6] = pgraph_reg_r(pg, NV_PGRAPH_BORDERCOLOR0 + i * 4);
+        r->tex_reg_cache[i].regs[7] = pgraph_reg_r(pg, NV_PGRAPH_TEXIMAGERECT0 + i * 4);
+        r->tex_reg_cache[i].shaderprog_bits =
+            (pgraph_reg_r(pg, NV_PGRAPH_SHADERPROG) >> (i * 5)) & 0x1F;
+        r->tex_reg_cache[i].valid = true;
+
         if (r->texture_bindings[i] != prev_binding) {
             r->texture_bindings_changed = true;
         }
@@ -1497,11 +1673,13 @@ void pgraph_vk_bind_textures(NV2AState *d)
         r->pipeline_state_dirty = true;
     }
     update_timestamps(r);
+    TEX_DBG_LOG();
     NV2A_VK_DGROUP_END();
 }
 
 static void texture_cache_entry_init(Lru *lru, LruNode *node, const void *state)
 {
+    PGRAPHVkState *r = container_of(lru, PGRAPHVkState, texture_cache);
     TextureBinding *snode = container_of(node, TextureBinding, node);
 
     snode->image = VK_NULL_HANDLE;
@@ -1509,6 +1687,13 @@ static void texture_cache_entry_init(Lru *lru, LruNode *node, const void *state)
     snode->image_view = VK_NULL_HANDLE;
     snode->sampler = VK_NULL_HANDLE;
     snode->submit_time = 0;
+    snode->dirty_check_frame = 0;
+    snode->dirty_check_result = false;
+
+    if (!snode->in_active_list) {
+        QTAILQ_INSERT_HEAD(&r->texture_active_list, snode, active_entry);
+        snode->in_active_list = true;
+    }
 }
 
 static void texture_cache_release_node_resources(PGRAPHVkState *r, TextureBinding *snode)
@@ -1560,6 +1745,15 @@ static void texture_cache_entry_post_evict(Lru *lru, LruNode *node)
                      snode->submit_time, r->submit_count);
     }
 #endif
+    if (snode->in_active_list) {
+        QTAILQ_REMOVE(&r->texture_active_list, snode, active_entry);
+        snode->in_active_list = false;
+    }
+    for (int i = 0; i < NV2A_MAX_TEXTURES; i++) {
+        if (r->tex_binding_cache[i].binding == snode) {
+            r->tex_binding_cache[i].binding = NULL;
+        }
+    }
     texture_cache_release_node_resources(r, snode);
 }
 
@@ -1574,9 +1768,11 @@ static void texture_cache_init(PGRAPHVkState *r)
 {
     const size_t texture_cache_size = 1024;
     lru_init(&r->texture_cache);
+    QTAILQ_INIT(&r->texture_active_list);
     r->texture_cache_entries = g_malloc_n(texture_cache_size, sizeof(TextureBinding));
     assert(r->texture_cache_entries != NULL);
     for (int i = 0; i < texture_cache_size; i++) {
+        r->texture_cache_entries[i].in_active_list = false;
         lru_add_free(&r->texture_cache, &r->texture_cache_entries[i].node);
     }
     r->texture_cache.init_node = texture_cache_entry_init;

@@ -60,6 +60,7 @@
 #define OPT_LARGER_POOLS        1
 #define OPT_ALWAYS_DEFERRED_FENCES 1
 #define OPT_PRECISE_BARRIERS    1
+#define OPT_SURF_TO_TEX_INLINE  1
 
 #if OPT_ALWAYS_DEFERRED_FENCES
 _Static_assert(OPT_TRIPLE_BUFFERING && OPT_N_BUFFERED_SUBMIT && OPT_DEFERRED_FENCES,
@@ -247,6 +248,8 @@ typedef struct TextureKey {
 
 typedef struct TextureBinding {
     LruNode node;
+    QTAILQ_ENTRY(TextureBinding) active_entry;
+    bool in_active_list;
     TextureKey key;
     VkImage image;
     VkImageLayout current_layout;
@@ -257,6 +260,8 @@ typedef struct TextureBinding {
     uint64_t hash;
     unsigned int draw_time;
     uint32_t submit_time;
+    unsigned int dirty_check_frame;
+    bool dirty_check_result;
 } TextureBinding;
 
 typedef struct QueryReport {
@@ -476,6 +481,8 @@ typedef struct PGRAPHVkState {
 
     QTAILQ_HEAD(, SurfaceBinding) surfaces;
     QTAILQ_HEAD(, SurfaceBinding) invalid_surfaces;
+    GHashTable *surface_addr_map;
+    uint32_t surface_list_gen;
     SurfaceBinding *color_binding, *zeta_binding;
     bool downloads_pending;
     QemuEvent downloads_complete;
@@ -484,9 +491,29 @@ typedef struct PGRAPHVkState {
 
     Lru texture_cache;
     TextureBinding *texture_cache_entries;
+    QTAILQ_HEAD(, TextureBinding) texture_active_list;
     TextureBinding *texture_bindings[NV2A_MAX_TEXTURES];
     TextureBinding dummy_texture;
     bool texture_bindings_changed;
+    uint32_t last_texture_state_gen;
+
+    struct {
+        uint32_t surface_list_gen;
+        hwaddr vram_addr;
+        hwaddr length;
+        bool had_overlap;
+    } tex_surf_range_cache[NV2A_MAX_TEXTURES];
+
+    struct {
+        uint64_t key_hash;
+        TextureBinding *binding;
+    } tex_binding_cache[NV2A_MAX_TEXTURES];
+
+    struct {
+        uint32_t regs[8];
+        uint32_t shaderprog_bits;
+        bool valid;
+    } tex_reg_cache[NV2A_MAX_TEXTURES];
     VkFormatProperties *texture_format_properties;
 
     Lru shader_cache;
@@ -657,7 +684,7 @@ void pgraph_vk_surface_download_if_dirty(NV2AState *d, SurfaceBinding *surface);
 SurfaceBinding *pgraph_vk_surface_get_within(NV2AState *d, hwaddr addr);
 void pgraph_vk_wait_for_surface_download(SurfaceBinding *e);
 void pgraph_vk_download_dirty_surfaces(NV2AState *d);
-void pgraph_vk_download_surfaces_in_range_if_dirty(PGRAPHState *pg, hwaddr start, hwaddr size);
+bool pgraph_vk_download_surfaces_in_range_if_dirty(PGRAPHState *pg, hwaddr start, hwaddr size);
 void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
                                    bool force);
 void pgraph_vk_surface_update(NV2AState *d, bool upload, bool color_write,
@@ -696,6 +723,7 @@ void pgraph_vk_gl_make_context_current(void);
 void pgraph_vk_init_textures(PGRAPHState *pg);
 void pgraph_vk_finalize_textures(PGRAPHState *pg);
 void pgraph_vk_bind_textures(NV2AState *d);
+bool pgraph_vk_check_textures_fast_skip(PGRAPHState *pg);
 void pgraph_vk_mark_textures_possibly_dirty(NV2AState *d, hwaddr addr,
                                             hwaddr size);
 void pgraph_vk_trim_texture_cache(PGRAPHState *pg);

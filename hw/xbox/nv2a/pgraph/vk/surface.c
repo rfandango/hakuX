@@ -130,18 +130,22 @@ static bool check_surface_overlaps_range(const SurfaceBinding *surface,
     return !(surface->vram_addr >= range_end || range_start >= surface_end);
 }
 
-void pgraph_vk_download_surfaces_in_range_if_dirty(PGRAPHState *pg,
+bool pgraph_vk_download_surfaces_in_range_if_dirty(PGRAPHState *pg,
                                                    hwaddr start, hwaddr size)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
     SurfaceBinding *surface;
+    bool found_overlap = false;
 
     QTAILQ_FOREACH(surface, &r->surfaces, entry) {
         if (check_surface_overlaps_range(surface, start, size)) {
+            found_overlap = true;
             pgraph_vk_surface_download_if_dirty(
                 container_of(pg, NV2AState, pgraph), surface);
         }
     }
+
+    return found_overlap;
 }
 
 static void download_surface_to_buffer(NV2AState *d, SurfaceBinding *surface,
@@ -755,8 +759,11 @@ static void invalidate_surface(NV2AState *d, SurfaceBinding *surface)
 
     unregister_cpu_access_callback(d, surface);
 
+    g_hash_table_remove(r->surface_addr_map,
+                        (gpointer)(uintptr_t)surface->vram_addr);
     QTAILQ_REMOVE(&r->surfaces, surface, entry);
     QTAILQ_INSERT_HEAD(&r->invalid_surfaces, surface, entry);
+    r->surface_list_gen++;
 }
 
 static bool check_surfaces_overlap(const SurfaceBinding *surface,
@@ -792,21 +799,16 @@ static void surface_put(NV2AState *d, SurfaceBinding *surface)
     invalidate_overlapping_surfaces(d, surface);
     register_cpu_access_callback(d, surface);
 
+    g_hash_table_insert(r->surface_addr_map,
+                        (gpointer)(uintptr_t)surface->vram_addr, surface);
     QTAILQ_INSERT_HEAD(&r->surfaces, surface, entry);
+    r->surface_list_gen++;
 }
 
 SurfaceBinding *pgraph_vk_surface_get(NV2AState *d, hwaddr addr)
 {
     PGRAPHVkState *r = d->pgraph.vk_renderer_state;
-
-    SurfaceBinding *surface;
-    QTAILQ_FOREACH (surface, &r->surfaces, entry) {
-        if (surface->vram_addr == addr) {
-            return surface;
-        }
-    }
-
-    return NULL;
+    return g_hash_table_lookup(r->surface_addr_map, (gpointer)(uintptr_t)addr);
 }
 
 SurfaceBinding *pgraph_vk_surface_get_within(NV2AState *d, hwaddr addr)
@@ -1950,6 +1952,8 @@ void pgraph_vk_init_surfaces(PGRAPHState *pg)
 
     QTAILQ_INIT(&r->surfaces);
     QTAILQ_INIT(&r->invalid_surfaces);
+    r->surface_addr_map = g_hash_table_new(g_direct_hash, g_direct_equal);
+    r->surface_list_gen = 0;
 
     r->downloads_pending = false;
     qemu_event_init(&r->downloads_complete, false);
@@ -1964,7 +1968,12 @@ void pgraph_vk_init_surfaces(PGRAPHState *pg)
 
 void pgraph_vk_finalize_surfaces(PGRAPHState *pg)
 {
+    PGRAPHVkState *r = pg->vk_renderer_state;
     pgraph_vk_surface_flush(container_of(pg, NV2AState, pgraph));
+    if (r->surface_addr_map) {
+        g_hash_table_destroy(r->surface_addr_map);
+        r->surface_addr_map = NULL;
+    }
 }
 
 void pgraph_vk_surface_flush(NV2AState *d)

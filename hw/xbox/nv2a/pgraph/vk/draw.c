@@ -790,7 +790,11 @@ static void create_pipeline(PGRAPHState *pg)
     PGRAPHVkState *r = pg->vk_renderer_state;
 
     NV2A_PHASE_TIMER_BEGIN(pipe_bind_tex);
-    pgraph_vk_bind_textures(d);
+    if (pg->texture_state_gen != r->last_texture_state_gen ||
+        !pgraph_vk_check_textures_fast_skip(pg)) {
+        pgraph_vk_bind_textures(d);
+        r->last_texture_state_gen = pg->texture_state_gen;
+    }
     NV2A_PHASE_TIMER_END(pipe_bind_tex);
 
     NV2A_PHASE_TIMER_BEGIN(pipe_bind_shd);

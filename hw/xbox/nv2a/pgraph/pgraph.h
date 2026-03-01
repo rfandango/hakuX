@@ -158,6 +158,7 @@ typedef struct PGRAPHState {
 
     hwaddr dma_a, dma_b;
     bool texture_dirty[NV2A_MAX_TEXTURES];
+    uint32_t texture_state_gen;
 
     bool texture_matrix_enable[NV2A_MAX_TEXTURES];
 
