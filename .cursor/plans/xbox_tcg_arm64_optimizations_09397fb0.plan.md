@@ -23,7 +23,6 @@ todos:
   - id: inline-vec-ops
     content: Emit TCG vector ops directly for simple SIMD operations (PAND/POR/PXOR/PADDB) in emit.c.inc instead of calling helpers
     status: completed
-isProject: false
 ---
 
 # Xbox Pentium III TCG ARM64 Optimization Plan
@@ -215,20 +214,29 @@ For addresses above the RAM region (NV2A registers at `0xFD000000`, PCI config s
 
 ## 5. Implementation Order and Estimates
 
-
 | Phase | Task                      | Est. Impact                   | Est. Effort |
-| ----- | ------------------------- | ----------------------------- | ----------- |
-| 0     | Profiling plugin          | Enables data-driven decisions | 1-2 days    |
-| 1a    | setcond+brcond fusion     | 5-10% overall                 | 2-3 days    |
-| 1b    | Dead CC store elimination | 3-5% overall                  | 3-5 days    |
-| 2a    | ARM64 hard FPU enable     | 10-20% in FPU-heavy scenes    | 2-3 days    |
-| 3a    | NEON MMX/SSE helpers      | 5-15% in SIMD-heavy code      | 5-7 days    |
-| 4a    | Direct RAM mapping        | 10-20% overall                | 3-5 days    |
-| 1c    | ARM64 CMP+branch fusion   | 3-5% overall                  | 3-5 days    |
-| 2b    | ARM64 hard FPU wrappers   | Part of 2a                    | Included    |
-| 3b    | Inline TCG vector ops     | 2-5% in SIMD code             | 3-5 days    |
-| 4b    | TLB tuning for MMIO       | 1-3% in MMIO-heavy scenes     | 1-2 days    |
 
+| ----- | ------------------------- | ----------------------------- | ----------- |
+
+| 0     | Profiling plugin          | Enables data-driven decisions | 1-2 days    |
+
+| 1a    | setcond+brcond fusion     | 5-10% overall                 | 2-3 days    |
+
+| 1b    | Dead CC store elimination | 3-5% overall                  | 3-5 days    |
+
+| 2a    | ARM64 hard FPU enable     | 10-20% in FPU-heavy scenes    | 2-3 days    |
+
+| 3a    | NEON MMX/SSE helpers      | 5-15% in SIMD-heavy code      | 5-7 days    |
+
+| 4a    | Direct RAM mapping        | 10-20% overall                | 3-5 days    |
+
+| 1c    | ARM64 CMP+branch fusion   | 3-5% overall                  | 3-5 days    |
+
+| 2b    | ARM64 hard FPU wrappers   | Part of 2a                    | Included    |
+
+| 3b    | Inline TCG vector ops     | 2-5% in SIMD code             | 3-5 days    |
+
+| 4b    | TLB tuning for MMIO       | 1-3% in MMIO-heavy scenes     | 1-2 days    |
 
 **Recommended order:** 0 -> 4a -> 2a -> 1a -> 3a -> 1b -> 1c -> 3b -> 4b
 

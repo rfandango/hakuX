@@ -18,8 +18,15 @@
  */
 
 #include "renderer.h"
+#include "qemu/error-report.h"
 #include <EGL/egl.h>
 #include <math.h>
+#ifdef __ANDROID__
+#include <android/log.h>
+#define DBG_LOG(...) __android_log_print(ANDROID_LOG_INFO, "xemu-vk-dbg", __VA_ARGS__)
+#else
+#define DBG_LOG(...) fprintf(stderr, __VA_ARGS__)
+#endif
 
 #if HAVE_EXTERNAL_MEMORY
 #ifdef __ANDROID__
@@ -1378,6 +1385,17 @@ static void render_display(PGRAPHState *pg, SurfaceBinding *surface)
         return;
     }
 
+    {
+        static int dbg_render = 0;
+        if (dbg_render < 30) {
+            DBG_LOG("[DISP] render_display: in_cb=%d draw_time=%lu cb_start=%lu",
+                    r->in_command_buffer,
+                    (unsigned long)surface->draw_time,
+                    (unsigned long)r->command_buffer_start_time);
+            dbg_render++;
+        }
+    }
+
     if (r->in_command_buffer &&
         surface->draw_time >= r->command_buffer_start_time) {
         pgraph_vk_finish(pg, VK_FINISH_REASON_PRESENTING);
@@ -1576,6 +1594,11 @@ void pgraph_vk_render_display(PGRAPHState *pg)
         d, d->pcrtc.start + vga_display_params.line_offset);
     if (surface == NULL || !surface->color || !surface->width ||
         !surface->height) {
+        static int dbg_no_surf = 0;
+        if (dbg_no_surf < 30) {
+            DBG_LOG("[DISP] no valid surface (surface=%p)", surface);
+            dbg_no_surf++;
+        }
         return;
     }
 

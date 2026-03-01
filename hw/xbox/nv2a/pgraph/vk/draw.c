@@ -19,10 +19,17 @@
 
 #include "qemu/osdep.h"
 #include "qemu/fast-hash.h"
+#include "qemu/error-report.h"
 #include "renderer.h"
 #include "ui/xemu-settings.h"
 #include "hw/xbox/nv2a/pgraph/prim_rewrite.h"
 #include <math.h>
+#ifdef __ANDROID__
+#include <android/log.h>
+#define DBG_LOG(...) __android_log_print(ANDROID_LOG_INFO, "xemu-vk-dbg", __VA_ARGS__)
+#else
+#define DBG_LOG(...) fprintf(stderr, __VA_ARGS__)
+#endif
 
 void pgraph_vk_draw_begin(NV2AState *d)
 {
@@ -1419,6 +1426,15 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
     NV2A_PHASE_TIMER_BEGIN(finish);
     PGRAPHVkState *r = pg->vk_renderer_state;
 
+    {
+        static int dbg_entry = 0;
+        if (dbg_entry < 100) {
+            DBG_LOG("[FIN-ENTRY] reason=%d in_cb=%d frame=%d",
+                    finish_reason, r->in_command_buffer, r->current_frame);
+            dbg_entry++;
+        }
+    }
+
     assert(!r->in_draw);
     assert(r->debug_depth == 0);
 
@@ -1495,10 +1511,20 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
         NV2A_PHASE_TIMER_BEGIN(finish_fence);
 
 #if OPT_ALWAYS_DEFERRED_FENCES
-        if (finish_reason != VK_FINISH_REASON_FLIP_STALL &&
-            finish_reason != VK_FINISH_REASON_PRESENTING) {
-            VK_CHECK(vkWaitForFences(r->device, 1, &r->command_buffer_fence,
-                                     VK_TRUE, UINT64_MAX));
+        {
+            static int dbg_finish_count = 0;
+            bool deferred = (finish_reason == VK_FINISH_REASON_FLIP_STALL ||
+                             finish_reason == VK_FINISH_REASON_PRESENTING);
+            if (dbg_finish_count < 200) {
+                DBG_LOG("[FIN] reason=%d deferred=%d frame=%d submit=%d",
+                        finish_reason, deferred, r->current_frame,
+                        (int)r->submit_count);
+                dbg_finish_count++;
+            }
+            if (!deferred) {
+                VK_CHECK(vkWaitForFences(r->device, 1, &r->command_buffer_fence,
+                                         VK_TRUE, UINT64_MAX));
+            }
         }
 #endif
 
@@ -1528,6 +1554,16 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
             r->framebuffer_index = 0;
 
             int next_frame = (r->current_frame + 1) % NUM_SUBMIT_FRAMES;
+
+            {
+                static int dbg_advance_count = 0;
+                if (dbg_advance_count < 200) {
+                    DBG_LOG("[FIN] advance %d->%d next_submitted=%d reason=%d",
+                            r->current_frame, next_frame,
+                            r->frame_submitted[next_frame], finish_reason);
+                    dbg_advance_count++;
+                }
+            }
 
             if (r->frame_submitted[next_frame]) {
                 VK_CHECK(vkWaitForFences(r->device, 1,
@@ -1615,6 +1651,15 @@ void pgraph_vk_begin_command_buffer(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
     assert(!r->in_command_buffer);
+
+    {
+        static int dbg_begin = 0;
+        if (dbg_begin < 50) {
+            DBG_LOG("[CB-BEGIN] frame=%d draw_time=%lu",
+                    r->current_frame, (unsigned long)pg->draw_time);
+            dbg_begin++;
+        }
+    }
 
     VkCommandBufferBeginInfo command_buffer_begin_info = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
