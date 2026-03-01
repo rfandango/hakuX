@@ -205,6 +205,8 @@ static void pgraph_vk_init(NV2AState *d, Error **errp)
     VK_LOG_ERROR("init: display");
     pgraph_vk_init_display(pg);
 
+    pg->vk_renderer_state->vram_ram_addr = memory_region_get_ram_addr(d->vram);
+
     pgraph_vk_update_vertex_ram_buffer(&d->pgraph, 0, d->vram_ptr,
                                    memory_region_size(d->vram));
 

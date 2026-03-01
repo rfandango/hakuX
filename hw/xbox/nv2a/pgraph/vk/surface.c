@@ -184,6 +184,15 @@ static void download_surface_to_buffer(NV2AState *d, SurfaceBinding *surface,
         ((use_compute_to_convert_depth_stencil_format || use_compute_to_swizzle)
          && pgraph_vk_compute_needs_finish(r));
 
+#if OPT_SURF_TO_TEX_INLINE
+    if (compute_needs_finish) {
+        pgraph_vk_finish(pg, VK_FINISH_REASON_NEED_BUFFER_SPACE);
+#if OPT_ALWAYS_DEFERRED_FENCES
+        pgraph_vk_flush_all_frames(pg);
+        r->compute.descriptor_set_index = 0;
+#endif
+    }
+#else
     if (r->in_command_buffer &&
         surface->draw_time >= r->command_buffer_start_time) {
         pgraph_vk_finish(pg, VK_FINISH_REASON_SURFACE_DOWN);
@@ -194,6 +203,7 @@ static void download_surface_to_buffer(NV2AState *d, SurfaceBinding *surface,
         r->compute.descriptor_set_index = 0;
 #endif
     }
+#endif
 
     bool downscale = (pg->surface_scale_factor != 1);
 
@@ -217,7 +227,11 @@ static void download_surface_to_buffer(NV2AState *d, SurfaceBinding *surface,
                  scaled_height = surface->height;
     pgraph_apply_scaling_factor(pg, &scaled_width, &scaled_height);
 
+#if OPT_SURF_TO_TEX_INLINE
+    VkCommandBuffer cmd = pgraph_vk_begin_nondraw_commands(pg);
+#else
     VkCommandBuffer cmd = pgraph_vk_begin_single_time_commands(pg);
+#endif
     pgraph_vk_begin_debug_marker(r, cmd, RGBA_RED, __func__);
 
     pgraph_vk_transition_image_layout(
@@ -533,7 +547,12 @@ static void download_surface_to_buffer(NV2AState *d, SurfaceBinding *surface,
 
     nv2a_profile_inc_counter(NV2A_PROF_QUEUE_SUBMIT_1);
     pgraph_vk_end_debug_marker(r, cmd);
+#if OPT_SURF_TO_TEX_INLINE
+    pgraph_vk_end_nondraw_commands(pg, cmd);
+    pgraph_vk_finish(pg, VK_FINISH_REASON_SURFACE_DOWN);
+#else
     pgraph_vk_end_single_time_commands(pg, cmd);
+#endif
 
     void *mapped_memory_ptr = r->storage_buffers[BUFFER_STAGING_DST].mapped;
 
@@ -740,9 +759,10 @@ static void invalidate_surface(NV2AState *d, SurfaceBinding *surface)
 
     trace_nv2a_pgraph_surface_invalidated(surface->vram_addr);
 
-    // FIXME: We may be reading from the surface in the current command buffer!
-    // Add a detection to handle it. For now, finish to be safe.
-    pgraph_vk_finish(&d->pgraph, VK_FINISH_REASON_SURFACE_DOWN);
+    if (r->in_command_buffer &&
+        surface->draw_time >= r->command_buffer_start_time) {
+        pgraph_vk_finish(&d->pgraph, VK_FINISH_REASON_SURFACE_DOWN);
+    }
 
     assert((!r->in_command_buffer ||
             surface->draw_time < r->command_buffer_start_time) &&

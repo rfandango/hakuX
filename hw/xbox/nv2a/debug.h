@@ -211,6 +211,9 @@ typedef struct CpuTimingWork {
     int64_t lock_wait_ns;
     int64_t pusher_run_ns;
     int64_t method_exec_ns;
+    int64_t puller_total_ns;
+    int64_t puller_lock_ns;
+    int64_t puller_method_ns;
     uint32_t kick_count;
     uint32_t kick_count_spun;
     uint32_t pusher_words;
@@ -225,6 +228,9 @@ typedef struct CpuTimingStats {
     float lock_wait_ms;
     float pusher_run_ms;
     float method_exec_ms;
+    float puller_total_ms;
+    float puller_lock_ms;
+    float puller_method_ms;
     float kick_count;
     float kick_count_spun;
     float pusher_words;
@@ -233,6 +239,22 @@ typedef struct CpuTimingStats {
     float method_noninc_words;
     float tb_hit_pct;
 } CpuTimingStats;
+
+typedef struct VsyncTimingWork {
+    uint32_t calls;
+    uint32_t reqs;
+    uint32_t merged;
+    uint32_t dirty_count;
+    uint64_t bytes_copied;
+} VsyncTimingWork;
+
+typedef struct VsyncTimingStats {
+    float calls;
+    float reqs;
+    float merged;
+    float dirty_count;
+    float bytes_kb;
+} VsyncTimingStats;
 
 typedef struct NV2AStats {
     int64_t last_flip_time;
@@ -249,6 +271,8 @@ typedef struct NV2AStats {
     FramePhaseTimingStats phase;
     CpuTimingWork cpu_working;
     CpuTimingStats cpu;
+    VsyncTimingWork vsync_working;
+    VsyncTimingStats vsync;
 } NV2AStats;
 
 #ifdef __cplusplus
@@ -265,6 +289,7 @@ void nv2a_profile_get_pacing_str(char *buf, int bufsize);
 void nv2a_profile_get_shader_stats_str(char *buf, int bufsize);
 void nv2a_profile_get_phase_timing_str(char *buf, int bufsize);
 void nv2a_profile_get_cpu_timing_str(char *buf, int bufsize);
+void nv2a_profile_get_vsync_timing_str(char *buf, int bufsize);
 
 static inline void nv2a_profile_inc_counter(enum NV2A_PROF_COUNTERS_ENUM cnt)
 {
@@ -272,16 +297,34 @@ static inline void nv2a_profile_inc_counter(enum NV2A_PROF_COUNTERS_ENUM cnt)
 }
 
 /*
- * Lightweight per-frame phase timing. The macros assume qemu_clock_get_ns
- * and QEMU_CLOCK_REALTIME are available at the call site (true for all
- * NV2A .c files that include nv2a_int.h or renderer.h).
+ * Fast nanosecond clock for per-frame phase timing.
+ * On ARM64, reads the generic timer directly (~10ns) instead of going
+ * through clock_gettime (~100ns+).  The frequency is read once and cached.
  */
+#ifdef __aarch64__
+static inline int64_t nv2a_clock_ns(void)
+{
+    static uint64_t freq;
+    if (__builtin_expect(!freq, 0)) {
+        asm volatile("mrs %0, cntfrq_el0" : "=r"(freq));
+    }
+    uint64_t cnt;
+    asm volatile("mrs %0, cntvct_el0" : "=r"(cnt));
+    return (int64_t)(cnt * 1000000000ULL / freq);
+}
+#else
+static inline int64_t nv2a_clock_ns(void)
+{
+    return qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+}
+#endif
+
 #define NV2A_PHASE_TIMER_BEGIN(phase) \
-    int64_t _phase_t0_##phase = qemu_clock_get_ns(QEMU_CLOCK_REALTIME)
+    int64_t _phase_t0_##phase = nv2a_clock_ns()
 
 #define NV2A_PHASE_TIMER_END(phase) do { \
     g_nv2a_stats.phase_working.phase##_ns += \
-        qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - _phase_t0_##phase; \
+        nv2a_clock_ns() - _phase_t0_##phase; \
 } while (0)
 
 void nv2a_dbg_renderdoc_init(void);

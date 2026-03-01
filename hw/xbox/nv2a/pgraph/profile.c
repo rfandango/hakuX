@@ -101,6 +101,9 @@ static void snapshot_cpu_timing(void)
     SMOOTH_MS(p->lock_wait_ms, w->lock_wait_ns);
     SMOOTH_MS(p->pusher_run_ms, w->pusher_run_ns);
     SMOOTH_MS(p->method_exec_ms, w->method_exec_ns);
+    SMOOTH_MS(p->puller_total_ms, w->puller_total_ns);
+    SMOOTH_MS(p->puller_lock_ms, w->puller_lock_ns);
+    SMOOTH_MS(p->puller_method_ms, w->puller_method_ns);
 
 #undef SMOOTH_MS
 
@@ -134,12 +137,35 @@ static void snapshot_cpu_timing(void)
     w->lock_wait_ns      = 0;
     w->pusher_run_ns     = 0;
     w->method_exec_ns    = 0;
+    w->puller_total_ns   = 0;
+    w->puller_lock_ns    = 0;
+    w->puller_method_ns  = 0;
     w->kick_count        = 0;
     w->kick_count_spun   = 0;
     w->pusher_words      = 0;
     w->method_count      = 0;
     w->method_fast_hit   = 0;
     w->method_noninc_words = 0;
+}
+
+static void snapshot_vsync_timing(void)
+{
+    VsyncTimingWork *w = &g_nv2a_stats.vsync_working;
+    VsyncTimingStats *p = &g_nv2a_stats.vsync;
+    const float alpha = 0.2f;
+
+#define SMOOTH_CNT(dst, src) \
+    (dst) = (dst) * (1.0f - alpha) + (float)(src) * alpha
+
+    SMOOTH_CNT(p->calls, w->calls);
+    SMOOTH_CNT(p->reqs, w->reqs);
+    SMOOTH_CNT(p->merged, w->merged);
+    SMOOTH_CNT(p->dirty_count, w->dirty_count);
+    SMOOTH_CNT(p->bytes_kb, w->bytes_copied / 1024.0f);
+
+#undef SMOOTH_CNT
+
+    memset(w, 0, sizeof(*w));
 }
 
 void nv2a_profile_flip_stall(void)
@@ -157,6 +183,7 @@ void nv2a_profile_flip_stall(void)
 
     snapshot_phase_timing();
     snapshot_cpu_timing();
+    snapshot_vsync_timing();
 
     g_nv2a_stats.phase_working.post_flip = true;
 
@@ -180,6 +207,8 @@ void nv2a_profile_flip_stall(void)
         __android_log_print(ANDROID_LOG_INFO, "xemu-phase", "%s", buf);
         nv2a_profile_get_cpu_timing_str(buf, sizeof(buf));
         __android_log_print(ANDROID_LOG_INFO, "xemu-cpu", "%s", buf);
+        nv2a_profile_get_vsync_timing_str(buf, sizeof(buf));
+        __android_log_print(ANDROID_LOG_INFO, "xemu-vsync", "%s", buf);
         nv2a_profile_get_pacing_str(buf, sizeof(buf));
         __android_log_print(ANDROID_LOG_INFO, "xemu-pace", "%s", buf);
     }
@@ -215,13 +244,16 @@ void nv2a_profile_get_phase_timing_str(char *buf, int bufsize)
     FramePhaseTimingStats *p = &g_nv2a_stats.phase;
     snprintf(buf, bufsize,
              "Surf:%.1f Tex:%.1f Shd:%.1f Draw:%.1f "
-             "[Pipe:%.1f(Tx:%.1f Sh:%.1f Lu:%.1f) "
+             "[Vtx:%.1f Syn:%.1f Prw:%.1f Pipe:%.1f(Tx:%.1f Sh:%.1f Lu:%.1f) "
              "Desc:%.1f Setup:%.1f Cmd:%.1f] "
              "Fin:%.1f(Sub:%.1f Fen:%.1f) Flip:%.1f Idle:%.1f(Fr:%.1f St:%.1f) | Tot:%.1f ms",
              p->surface_update_ms,
              p->texture_upload_ms,
              p->shader_compile_ms,
              p->draw_dispatch_ms,
+             p->draw_vtx_attr_ms,
+             p->draw_vtx_sync_ms,
+             p->draw_prim_rw_ms,
              p->draw_pipeline_ms,
              p->pipe_bind_tex_ms,
              p->pipe_bind_shd_ms,
@@ -245,9 +277,12 @@ void nv2a_profile_get_cpu_timing_str(char *buf, int bufsize)
     float spin_pct = p->kick_count > 0
                      ? p->kick_count_spun / p->kick_count * 100.0f
                      : 0.0f;
+    float parse_ms = p->pusher_run_ms - p->puller_total_ms;
     snprintf(buf, bufsize,
              "CPU: K:%.0f W:%.1fK M:%.0f(Fh:%.0f Ni:%.0f) "
-             "Lock:%.1fms Push:%.1fms SpH:%.0f%% TbH:%.1f%%",
+             "Lock:%.1fms Push:%.1fms "
+             "[Prs:%.1f Plr:%.1f(Lk:%.1f Mth:%.1f)] "
+             "SpH:%.0f%% TbH:%.1f%%",
              p->kick_count,
              p->pusher_words / 1000.0f,
              p->method_count,
@@ -255,8 +290,20 @@ void nv2a_profile_get_cpu_timing_str(char *buf, int bufsize)
              p->method_noninc_words,
              p->lock_wait_ms,
              p->pusher_run_ms,
+             parse_ms,
+             p->puller_total_ms,
+             p->puller_lock_ms,
+             p->puller_method_ms,
              spin_pct,
              p->tb_hit_pct);
+}
+
+void nv2a_profile_get_vsync_timing_str(char *buf, int bufsize)
+{
+    VsyncTimingStats *p = &g_nv2a_stats.vsync;
+    snprintf(buf, bufsize,
+             "Vsyn: C:%.0f R:%.0f M:%.0f D:%.0f %.0fKB",
+             p->calls, p->reqs, p->merged, p->dirty_count, p->bytes_kb);
 }
 
 void nv2a_profile_get_shader_stats_str(char *buf, int bufsize)

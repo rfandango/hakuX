@@ -468,6 +468,7 @@ typedef struct PGRAPHVkState {
     unsigned long *uploaded_bitmap;
     size_t bitmap_size;
 
+    ram_addr_t vram_ram_addr;
     VkDeviceSize vertex_ram_flush_min;
     VkDeviceSize vertex_ram_flush_max;
 

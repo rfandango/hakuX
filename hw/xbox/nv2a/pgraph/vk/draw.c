@@ -1960,12 +1960,15 @@ static void sync_vertex_ram_buffer(PGRAPHState *pg)
 {
     NV2AState *d = container_of(pg, NV2AState, pgraph);
     PGRAPHVkState *r = pg->vk_renderer_state;
+    VsyncTimingWork *vw = &g_nv2a_stats.vsync_working;
 
     if (r->num_vertex_ram_buffer_syncs == 0) {
         return;
     }
 
-    // Align sync requirements to page boundaries
+    vw->calls++;
+    vw->reqs += r->num_vertex_ram_buffer_syncs;
+
     NV2A_VK_DGROUP_BEGIN("Sync vertex RAM buffer");
 
     for (int i = 0; i < r->num_vertex_ram_buffer_syncs; i++) {
@@ -1990,12 +1993,10 @@ static void sync_vertex_ram_buffer(PGRAPHState *pg)
         r->vertex_ram_buffer_syncs[i].size = end_addr - start_addr;
     }
 
-    // Sort the requirements in increasing order of addresses
     qsort(r->vertex_ram_buffer_syncs, r->num_vertex_ram_buffer_syncs,
           sizeof(MemorySyncRequirement),
           compare_memory_sync_requirement_by_addr);
 
-    // Merge overlapping/adjacent requests to minimize number of tests
     MemorySyncRequirement merged[16];
     int num_syncs = 1;
 
@@ -2006,7 +2007,6 @@ static void sync_vertex_ram_buffer(PGRAPHState *pg)
         MemorySyncRequirement *t = &r->vertex_ram_buffer_syncs[i];
 
         if (t->addr <= (p->addr + p->size)) {
-            // Merge with previous
             hwaddr p_end_addr = p->addr + p->size;
             hwaddr t_end_addr = t->addr + t->size;
             hwaddr new_end_addr = MAX(p_end_addr, t_end_addr);
@@ -2020,17 +2020,43 @@ static void sync_vertex_ram_buffer(PGRAPHState *pg)
         NV2A_VK_DPRINTF("Reduced to %d sync checks", num_syncs);
     }
 
-    for (int i = 0; i < num_syncs; i++) {
-        hwaddr addr = merged[i].addr;
-        VkDeviceSize size = merged[i].size;
+    vw->merged += num_syncs;
 
-        NV2A_VK_DPRINTF("- %d: %08"HWADDR_PRIx" %zd bytes", i, addr, size);
+    {
+        ram_addr_t ram_base = r->vram_ram_addr;
 
-        if (memory_region_test_and_clear_dirty(d->vram, addr, size,
-                                               DIRTY_MEMORY_NV2A)) {
-            NV2A_VK_DPRINTF("Memory dirty. Synchronizing...");
-            pgraph_vk_update_vertex_ram_buffer(pg, addr, d->vram_ptr + addr,
-                                               size);
+        RCU_READ_LOCK_GUARD();
+        DirtyMemoryBlocks *blocks =
+            qatomic_rcu_read(&ram_list.dirty_memory[DIRTY_MEMORY_NV2A]);
+
+        for (int i = 0; i < num_syncs; i++) {
+            hwaddr addr = merged[i].addr;
+            VkDeviceSize size = merged[i].size;
+
+            NV2A_VK_DPRINTF("- %d: %08"HWADDR_PRIx" %zd bytes", i, addr, size);
+
+            ram_addr_t start = ram_base + addr;
+            unsigned long page = start >> TARGET_PAGE_BITS;
+            unsigned long end_page = (start + size) >> TARGET_PAGE_BITS;
+            bool dirty = false;
+
+            while (page < end_page) {
+                unsigned long idx = page / DIRTY_MEMORY_BLOCK_SIZE;
+                unsigned long ofs = page % DIRTY_MEMORY_BLOCK_SIZE;
+                unsigned long num = MIN(end_page - page,
+                                        DIRTY_MEMORY_BLOCK_SIZE - ofs);
+                dirty |= bitmap_test_and_clear_atomic(
+                    blocks->blocks[idx], ofs, num);
+                page += num;
+            }
+
+            if (dirty) {
+                NV2A_VK_DPRINTF("Memory dirty. Synchronizing...");
+                vw->dirty_count++;
+                vw->bytes_copied += size;
+                pgraph_vk_update_vertex_ram_buffer(pg, addr,
+                                                   d->vram_ptr + addr, size);
+            }
         }
     }
 
