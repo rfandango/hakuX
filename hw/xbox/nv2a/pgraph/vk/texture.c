@@ -1145,6 +1145,27 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
         }
     }
 
+    /*
+     * If no active surface matched, check the shelf for a compatible
+     * draw-dirty surface at the same address.  This allows textures to
+     * read directly from a shelved surface's VkImage instead of from
+     * stale VRAM data.
+     */
+    if (!surface_to_texture && state.levels == 1) {
+        SurfaceBinding *shelved;
+        QTAILQ_FOREACH(shelved, &r->shelved_surfaces, entry) {
+            if (shelved->vram_addr == texture_vram_offset) {
+                bool compat = check_surface_to_texture_compatiblity(
+                    shelved, &state);
+                if (shelved->draw_dirty && compat) {
+                    surface = shelved;
+                    surface_to_texture = true;
+                    break;
+                }
+            }
+        }
+    }
+
     if (!surface_to_texture) {
         bool skip_surf_scan = false;
         if (r->tex_surf_range_cache[texture_idx].vram_addr == texture_vram_offset &&
