@@ -37,7 +37,7 @@ static void create_descriptor_pool(PGRAPHState *pg)
 
     VkDescriptorPoolSize pool_sizes[] = {
         {
-            .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
             .descriptorCount = 2 * num_sets,
         },
         {
@@ -74,13 +74,13 @@ static void create_descriptor_set_layout(PGRAPHState *pg)
     bindings[0] = (VkDescriptorSetLayoutBinding){
         .binding = VSH_UBO_BINDING,
         .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
     };
     bindings[1] = (VkDescriptorSetLayoutBinding){
         .binding = PSH_UBO_BINDING,
         .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
         .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
     };
     for (int i = 0; i < NV2A_MAX_TEXTURES; i++) {
@@ -142,52 +142,23 @@ void pgraph_vk_update_descriptor_sets(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
 
-    VK_LOG("update_descriptor_sets: ds_idx=%d shader_changed=%d tex_changed=%d",
-           r->descriptor_set_index, r->shader_bindings_changed,
-           r->texture_bindings_changed);
-
-    bool need_uniform_write =
-        r->uniforms_changed ||
-        !get_staging_buffer(r, BUFFER_UNIFORM_STAGING)->buffer_offset;
-
-    if (!(r->shader_bindings_changed || r->texture_bindings_changed ||
-          r->need_descriptor_rebind || need_uniform_write)) {
-        return; // Nothing changed
-    }
-
     ShaderBinding *binding = r->shader_binding;
     ShaderUniformLayout *layouts[] = { &binding->vsh.module_info->uniforms,
                                        &binding->psh.module_info->uniforms };
-    VkDeviceSize ubo_buffer_total_size = 0;
-    for (int i = 0; i < ARRAY_SIZE(layouts); i++) {
-        ubo_buffer_total_size += layouts[i]->total_size;
-    }
-    bool need_ubo_staging_buffer_reset =
-        r->uniforms_changed &&
-        !pgraph_vk_buffer_has_space_for(pg, BUFFER_UNIFORM_STAGING,
-                                        ubo_buffer_total_size,
-                                        r->device_props.limits.minUniformBufferOffsetAlignment);
 
-    bool need_descriptor_write_reset =
-        (r->descriptor_set_index >= ARRAY_SIZE(r->descriptor_sets));
+    /* --- Uniform data upload (dynamic offset, no descriptor set needed) --- */
+    if (r->uniforms_changed) {
+        VkDeviceSize ubo_buffer_total_size = 0;
+        for (int i = 0; i < ARRAY_SIZE(layouts); i++) {
+            ubo_buffer_total_size += layouts[i]->total_size;
+        }
 
-    if (need_descriptor_write_reset) {
-        pgraph_vk_finish(pg, VK_FINISH_REASON_NEED_BUFFER_SPACE);
-#if OPT_ALWAYS_DEFERRED_FENCES
-        pgraph_vk_flush_all_frames(pg);
-#endif
-        r->descriptor_set_index = 0;
-        need_uniform_write = true;
-    } else if (need_ubo_staging_buffer_reset) {
-        pgraph_vk_finish(pg, VK_FINISH_REASON_NEED_BUFFER_SPACE);
-        need_uniform_write = true;
-    }
+        if (!pgraph_vk_buffer_has_space_for(
+                pg, BUFFER_UNIFORM_STAGING, ubo_buffer_total_size,
+                r->device_props.limits.minUniformBufferOffsetAlignment)) {
+            pgraph_vk_finish(pg, VK_FINISH_REASON_NEED_BUFFER_SPACE);
+        }
 
-    VkWriteDescriptorSet descriptor_writes[2 + NV2A_MAX_TEXTURES];
-
-    assert(r->descriptor_set_index < ARRAY_SIZE(r->descriptor_sets));
-
-    if (need_uniform_write) {
         for (int i = 0; i < ARRAY_SIZE(layouts); i++) {
             void *data = layouts[i]->allocation;
             VkDeviceSize size = layouts[i]->total_size;
@@ -199,11 +170,38 @@ void pgraph_vk_update_descriptor_sets(PGRAPHState *pg)
         r->uniforms_changed = false;
     }
 
+    /* --- Descriptor set write (only when bindings actually change) --- */
+    bool need_new_descriptor_set =
+        r->shader_bindings_changed || r->texture_bindings_changed ||
+        r->need_descriptor_rebind ||
+        !r->descriptor_set_index; /* first draw after reset */
+
+    if (!need_new_descriptor_set) {
+        return;
+    }
+
+    if (r->descriptor_set_index >= ARRAY_SIZE(r->descriptor_sets)) {
+        pgraph_vk_finish(pg, VK_FINISH_REASON_NEED_BUFFER_SPACE);
+#if OPT_ALWAYS_DEFERRED_FENCES
+        pgraph_vk_flush_all_frames(pg);
+#endif
+        r->descriptor_set_index = 0;
+    }
+
+    assert(r->descriptor_set_index < ARRAY_SIZE(r->descriptor_sets));
+
+    VkWriteDescriptorSet descriptor_writes[2 + NV2A_MAX_TEXTURES];
+
+    /*
+     * With VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC the base offset in the
+     * descriptor is 0; the actual per-draw offset is supplied via the dynamic
+     * offset parameter to vkCmdBindDescriptorSets in bind_descriptor_sets().
+     */
     VkDescriptorBufferInfo ubo_buffer_infos[2];
     for (int i = 0; i < ARRAY_SIZE(layouts); i++) {
         ubo_buffer_infos[i] = (VkDescriptorBufferInfo){
             .buffer = r->storage_buffers[BUFFER_UNIFORM].buffer,
-            .offset = r->uniform_buffer_offsets[i],
+            .offset = 0,
             .range = layouts[i]->total_size,
         };
         descriptor_writes[i] = (VkWriteDescriptorSet){
@@ -211,7 +209,7 @@ void pgraph_vk_update_descriptor_sets(PGRAPHState *pg)
             .dstSet = r->descriptor_sets[r->descriptor_set_index],
             .dstBinding = i == 0 ? VSH_UBO_BINDING : PSH_UBO_BINDING,
             .dstArrayElement = 0,
-            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
             .descriptorCount = 1,
             .pBufferInfo = &ubo_buffer_infos[i],
         };
