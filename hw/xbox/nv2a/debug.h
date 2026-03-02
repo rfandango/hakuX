@@ -352,7 +352,7 @@ static inline void nv2a_profile_inc_counter(enum NV2A_PROF_COUNTERS_ENUM cnt)
  * On ARM64, reads the generic timer directly (~10ns) instead of going
  * through clock_gettime (~100ns+).  The frequency is read once and cached.
  */
-#ifdef __aarch64__
+#if defined(__aarch64__)
 static inline int64_t nv2a_clock_ns(void)
 {
     static uint64_t freq;

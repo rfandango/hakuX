@@ -21,6 +21,7 @@
 #include "qemu/fast-hash.h"
 #include "qemu/error-report.h"
 #include "renderer.h"
+#include "system/physmem.h"
 #include "ui/xemu-settings.h"
 #include "hw/xbox/nv2a/pgraph/prim_rewrite.h"
 #include <math.h>
@@ -2052,6 +2053,13 @@ static void sync_vertex_ram_buffer(PGRAPHState *pg)
 
             if (dirty) {
                 NV2A_VK_DPRINTF("Memory dirty. Synchronizing...");
+                /*
+                 * Notify the TLB that dirty bits were cleared. Without this,
+                 * the TLB keeps VRAM pages writable and future CPU writes
+                 * bypass the notdirty handler, so dirty bits never get re-set.
+                 * This causes stale vertex data (wrong UI/2D textures).
+                 */
+                physical_memory_dirty_bits_cleared(start, size);
                 vw->dirty_count++;
                 vw->bytes_copied += size;
                 pgraph_vk_update_vertex_ram_buffer(pg, addr,
