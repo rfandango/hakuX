@@ -32,6 +32,8 @@
 const int num_invalid_surfaces_to_keep = 10;  // FIXME: Make automatic
 const int max_surface_frame_time_delta = 5;
 
+static void destroy_surface_image(PGRAPHVkState *r, SurfaceBinding *surface);
+
 void pgraph_vk_set_surface_scale_factor(NV2AState *d, unsigned int scale)
 {
     g_config.display.quality.surface_scale = scale < 1 ? 1 : scale;
@@ -148,8 +150,6 @@ bool pgraph_vk_download_surfaces_in_range_if_dirty(PGRAPHState *pg,
     return found_overlap;
 }
 
-uint32_t g_defer_reject_ds, g_defer_reject_slots, g_defer_reject_space;
-uint32_t g_defer_reject_empty, g_defer_ok, g_defer_skip_clean;
 
 static bool download_surface_record_deferred(NV2AState *d,
                                              SurfaceBinding *surface,
@@ -159,7 +159,6 @@ static bool download_surface_record_deferred(NV2AState *d,
     PGRAPHVkState *r = pg->vk_renderer_state;
 
     if (!surface->width || !surface->height) {
-        g_defer_reject_empty++;
         return true;
     }
 
@@ -170,7 +169,6 @@ static bool download_surface_record_deferred(NV2AState *d,
     bool downscale = (pg->surface_scale_factor != 1);
 
     if (r->num_deferred_downloads >= MAX_DEFERRED_DOWNLOADS) {
-        g_defer_reject_slots++;
         return false;
     }
 
@@ -182,11 +180,9 @@ static bool download_surface_record_deferred(NV2AState *d,
     VkDeviceSize aligned_offset = ROUND_UP(r->staging_dst_offset, 16);
     if (aligned_offset + staging_size >
         r->storage_buffers[BUFFER_STAGING_DST].buffer_size) {
-        g_defer_reject_space++;
         return false;
     }
 
-    g_defer_ok++;
     nv2a_profile_inc_counter(NV2A_PROF_SURF_DOWNLOAD);
 
     unsigned int scaled_width = surface->width,
@@ -1131,6 +1127,60 @@ static void invalidate_surface(NV2AState *d, SurfaceBinding *surface)
     r->surface_list_gen++;
 }
 
+/*
+ * Move a surface from the active list to the shelf.
+ *
+ * Shelving preserves the VkImage and its GPU-side allocation so that if
+ * the same VRAM address is later re-bound with an identical format,
+ * the image can be re-used without recreation or re-upload (see
+ * get_shelved_surface).  The surface is unbound, its CPU access
+ * callback is unregistered, and it is removed from the address map.
+ */
+static void shelve_surface(NV2AState *d, SurfaceBinding *surface)
+{
+    PGRAPHVkState *r = d->pgraph.vk_renderer_state;
+
+    if (surface == r->color_binding) {
+        unbind_surface(d, true);
+    }
+    if (surface == r->zeta_binding) {
+        unbind_surface(d, false);
+    }
+
+    unregister_cpu_access_callback(d, surface);
+
+    g_hash_table_remove(r->surface_addr_map,
+                        (gpointer)(uintptr_t)surface->vram_addr);
+    QTAILQ_REMOVE(&r->surfaces, surface, entry);
+    QTAILQ_INSERT_HEAD(&r->shelved_surfaces, surface, entry);
+    r->surface_list_gen++;
+}
+
+/*
+ * Look up and reclaim a shelved surface whose format, dimensions, and
+ * pitch exactly match the target.  Returns NULL on miss.  On hit the
+ * surface is removed from the shelf and its VkImage can be reused
+ * directly, avoiding the cost of image creation and VRAM upload.
+ */
+static SurfaceBinding *get_shelved_surface(PGRAPHVkState *r,
+                                           hwaddr vram_addr,
+                                           SurfaceBinding *target)
+{
+    SurfaceBinding *surface, *next;
+    QTAILQ_FOREACH_SAFE(surface, &r->shelved_surfaces, entry, next) {
+        if (surface->vram_addr == vram_addr &&
+            surface->host_fmt.vk_format == target->host_fmt.vk_format &&
+            surface->color == target->color &&
+            surface->width == target->width &&
+            surface->height == target->height &&
+            surface->pitch == target->pitch) {
+            QTAILQ_REMOVE(&r->shelved_surfaces, surface, entry);
+            return surface;
+        }
+    }
+    return NULL;
+}
+
 static bool check_surfaces_overlap(const SurfaceBinding *surface,
                                    const SurfaceBinding *other_surface)
 {
@@ -1151,6 +1201,19 @@ static void invalidate_overlapping_surfaces(NV2AState *d,
                 other_surface->height, other_surface->pitch);
             pgraph_vk_surface_download_if_dirty(d, other_surface);
             invalidate_surface(d, other_surface);
+        }
+    }
+
+    QTAILQ_FOREACH_SAFE (other_surface, &r->shelved_surfaces, entry,
+                          next_surface) {
+        if (other_surface->vram_addr == surface->vram_addr) {
+            continue;
+        }
+        if (check_surfaces_overlap(surface, other_surface)) {
+            pgraph_vk_surface_download_if_dirty(d, other_surface);
+            QTAILQ_REMOVE(&r->shelved_surfaces, other_surface, entry);
+            destroy_surface_image(r, other_surface);
+            g_free(other_surface);
         }
     }
 }
@@ -1390,6 +1453,8 @@ static void prune_invalid_surfaces(PGRAPHVkState *r, int keep)
     }
 }
 
+static const int max_shelved_surfaces = 20;
+
 static void expire_old_surfaces(NV2AState *d)
 {
     PGRAPHVkState *r = d->pgraph.vk_renderer_state;
@@ -1401,6 +1466,20 @@ static void expire_old_surfaces(NV2AState *d)
             trace_nv2a_pgraph_surface_evict_reason("old", s->vram_addr);
             pgraph_vk_surface_download_if_dirty(d, s);
             invalidate_surface(d, s);
+        }
+    }
+
+    int shelved_count = 0;
+    QTAILQ_FOREACH_SAFE(s, &r->shelved_surfaces, entry, next) {
+        int last_used = d->pgraph.frame_time - s->frame_time;
+        if (last_used >= max_surface_frame_time_delta ||
+            shelved_count >= max_shelved_surfaces) {
+            pgraph_vk_surface_download_if_dirty(d, s);
+            QTAILQ_REMOVE(&r->shelved_surfaces, s, entry);
+            destroy_surface_image(r, s);
+            g_free(s);
+        } else {
+            shelved_count++;
         }
     }
 }
@@ -2140,26 +2219,37 @@ static void update_surface_part(NV2AState *d, bool upload, bool color)
                     "incompatible", surface->vram_addr);
                 compare_surfaces(surface, &target);
                 if (surface->draw_dirty) {
-                    if (!download_surface_record_deferred(
-                            d, surface,
-                            d->vram_ptr + surface->vram_addr)) {
-                        pgraph_vk_surface_download_if_dirty(d, surface);
-                    } else {
-                        memory_region_set_client_dirty(
-                            d->vram, surface->vram_addr,
-                            surface->pitch * surface->height,
-                            DIRTY_MEMORY_VGA);
-                        memory_region_set_client_dirty(
-                            d->vram, surface->vram_addr,
-                            surface->pitch * surface->height,
-                            DIRTY_MEMORY_NV2A_TEX);
-                        surface->download_pending = false;
-                        surface->draw_dirty = false;
-                    }
-                } else {
-                    g_defer_skip_clean++;
+                    pgraph_vk_finish(pg, VK_FINISH_REASON_SURFACE_DOWN);
+
+                    /*
+                     * When a draw-dirty surface is shelved without a
+                     * full download, the VRAM at its address still
+                     * contains stale data (typically zeros).  If a new
+                     * surface (or texture) is later bound at the same
+                     * address, the upload path reads from VRAM and the
+                     * stale zeros are interpreted as e.g. depth=0.0,
+                     * causing everything to fail the depth test (all-
+                     * white rendering).
+                     *
+                     * To avoid this, fill the VRAM region with 0xFF
+                     * which encodes as depth ≈ 1.0 (D24S8) or opaque
+                     * white (color), ensuring that any subsequent
+                     * texture or surface upload from this region gets
+                     * safe initial values.  The dirty bits are set so
+                     * the texture cache knows to re-hash and re-upload.
+                     */
+                    size_t region =
+                        (size_t)surface->pitch * surface->height;
+                    memset(d->vram_ptr + surface->vram_addr, 0xFF,
+                           region);
+                    memory_region_set_client_dirty(
+                        d->vram, surface->vram_addr, region,
+                        DIRTY_MEMORY_NV2A_TEX);
+                    memory_region_set_client_dirty(
+                        d->vram, surface->vram_addr, region,
+                        DIRTY_MEMORY_VGA);
                 }
-                invalidate_surface(d, surface);
+                shelve_surface(d, surface);
                 g_nv2a_stats.surf_working.lk_evict_ns += nv2a_clock_ns() - _gt1;
                 g_nv2a_stats.surf_working.evict_count++;
             }
@@ -2169,17 +2259,34 @@ static void update_surface_part(NV2AState *d, bool upload, bool color)
 
         if (should_create) {
             int64_t _gt2 = nv2a_clock_ns();
-            surface = get_any_compatible_invalid_surface(r, &target);
+            bool unshelved = false;
+            surface = get_shelved_surface(r, target.vram_addr, &target);
             if (surface) {
                 migrate_surface_image(&target, surface);
+                unshelved = true;
             } else {
-                surface = g_malloc(sizeof(SurfaceBinding));
-                create_surface_image(pg, &target);
+                surface = get_any_compatible_invalid_surface(r, &target);
+                if (surface) {
+                    migrate_surface_image(&target, surface);
+                } else {
+                    surface = g_malloc(sizeof(SurfaceBinding));
+                    create_surface_image(pg, &target);
+                }
             }
             g_nv2a_stats.surf_working.create_ns += nv2a_clock_ns() - _gt2;
 
             *surface = target;
             set_surface_label(pg, surface);
+
+            if (unshelved) {
+                /*
+                 * The VkImage already contains valid data from the
+                 * previous binding, so skip the VRAM upload and mark
+                 * the surface as initialized.
+                 */
+                surface->upload_pending = false;
+                surface->initialized = true;
+            }
 
             int64_t _gt3 = nv2a_clock_ns();
             surface_put(d, surface);
@@ -2340,6 +2447,7 @@ void pgraph_vk_surface_update(NV2AState *d, bool upload, bool color_write,
         prune_invalid_surfaces(r, num_invalid_surfaces_to_keep);
         g_nv2a_stats.surf_working.expire_ns += nv2a_clock_ns() - _se0;
     }
+
     NV2A_PHASE_TIMER_END(surface_update);
 }
 
@@ -2411,6 +2519,7 @@ void pgraph_vk_init_surfaces(PGRAPHState *pg)
 
     QTAILQ_INIT(&r->surfaces);
     QTAILQ_INIT(&r->invalid_surfaces);
+    QTAILQ_INIT(&r->shelved_surfaces);
     r->surface_addr_map = g_hash_table_new(g_direct_hash, g_direct_equal);
     r->surface_list_gen = 0;
 
@@ -2454,6 +2563,14 @@ void pgraph_vk_surface_flush(NV2AState *d)
         pgraph_vk_surface_download_if_dirty(d, s);
         invalidate_surface(d, s);
     }
+
+    QTAILQ_FOREACH_SAFE(s, &r->shelved_surfaces, entry, next) {
+        pgraph_vk_surface_download_if_dirty(d, s);
+        QTAILQ_REMOVE(&r->shelved_surfaces, s, entry);
+        destroy_surface_image(r, s);
+        g_free(s);
+    }
+
     prune_invalid_surfaces(r, 0);
 
     pgraph_vk_reload_surface_scale_factor(pg);

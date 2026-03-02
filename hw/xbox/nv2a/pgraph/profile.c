@@ -348,9 +348,6 @@ void nv2a_profile_get_vsync_timing_str(char *buf, int bufsize)
              p->calls, p->reqs, p->merged, p->dirty_count, p->bytes_kb);
 }
 
-extern uint32_t g_defer_reject_ds, g_defer_reject_slots, g_defer_reject_space;
-extern uint32_t g_defer_reject_empty, g_defer_ok, g_defer_skip_clean;
-
 void nv2a_profile_get_surf_timing_str(char *buf, int bufsize)
 {
     SurfTimingStats *p = &g_nv2a_stats.surf;
@@ -359,8 +356,7 @@ void nv2a_profile_get_surf_timing_str(char *buf, int bufsize)
              "lkH:%.1f lkE:%.1f lkN:%.1f "
              "cr:%.1f put:%.1f bnd:%.1f upl:%.1f dl:%.1f exp:%.1f "
              "dfF:%.1f dfR:%.1f "
-             "| #cr:%.0f #hit:%.0f #ev:%.0f #upl:%.0f #dl:%.0f #miss:%.0f "
-             "| dfOk:%u dfDS:%u dfSlot:%u dfSpc:%u dfEmp:%u dfCln:%u",
+             "| #cr:%.0f #hit:%.0f #ev:%.0f #upl:%.0f #dl:%.0f #miss:%.0f",
              p->update_calls,
              p->populate_ms, p->dirty_ms, p->enrp_ms,
              p->lk_hit_ms, p->lk_evict_ms, p->lk_nosurf_ms,
@@ -368,9 +364,7 @@ void nv2a_profile_get_surf_timing_str(char *buf, int bufsize)
              p->upload_ms, p->download_ms, p->expire_ms,
              p->df_flush_ms, p->df_read_ms,
              p->create_count, p->hit_count, p->evict_count,
-             p->upload_count, p->download_count, p->miss_count,
-             g_defer_ok, g_defer_reject_ds, g_defer_reject_slots,
-             g_defer_reject_space, g_defer_reject_empty, g_defer_skip_clean);
+             p->upload_count, p->download_count, p->miss_count);
 }
 
 void nv2a_profile_get_shader_stats_str(char *buf, int bufsize)
