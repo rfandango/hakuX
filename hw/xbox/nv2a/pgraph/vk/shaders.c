@@ -146,13 +146,31 @@ void pgraph_vk_update_descriptor_sets(PGRAPHState *pg)
     ShaderUniformLayout *layouts[] = { &binding->vsh.module_info->uniforms,
                                        &binding->psh.module_info->uniforms };
 
-    /* --- Uniform data upload (dynamic offset, no descriptor set needed) --- */
-    if (r->uniforms_changed) {
-        VkDeviceSize ubo_buffer_total_size = 0;
-        for (int i = 0; i < ARRAY_SIZE(layouts); i++) {
-            ubo_buffer_total_size += layouts[i]->total_size;
-        }
+    VkDeviceSize ubo_buffer_total_size = 0;
+    for (int i = 0; i < ARRAY_SIZE(layouts); i++) {
+        ubo_buffer_total_size += layouts[i]->total_size;
+    }
 
+    bool need_new_descriptor_set =
+        r->shader_bindings_changed || r->texture_bindings_changed ||
+        r->need_descriptor_rebind ||
+        !r->descriptor_set_index;
+
+    /*
+     * Handle DS pool exhaustion and staging overflow BEFORE uploading
+     * uniforms, so the upload always targets the post-finish staging buffer
+     * and offsets remain valid for the entire submission.
+     */
+    if (need_new_descriptor_set &&
+        r->descriptor_set_index >= ARRAY_SIZE(r->descriptor_sets)) {
+        pgraph_vk_finish(pg, VK_FINISH_REASON_NEED_BUFFER_SPACE);
+#if OPT_ALWAYS_DEFERRED_FENCES
+        pgraph_vk_flush_all_frames(pg);
+#endif
+        r->descriptor_set_index = 0;
+    }
+
+    if (r->uniforms_changed) {
         if (!pgraph_vk_buffer_has_space_for(
                 pg, BUFFER_UNIFORM_STAGING, ubo_buffer_total_size,
                 r->device_props.limits.minUniformBufferOffsetAlignment)) {
@@ -170,11 +188,15 @@ void pgraph_vk_update_descriptor_sets(PGRAPHState *pg)
         r->uniforms_changed = false;
     }
 
-    /* --- Descriptor set write (only when bindings actually change) --- */
-    bool need_new_descriptor_set =
+    /*
+     * Re-evaluate: a staging overflow finish above may have set
+     * need_descriptor_rebind, requiring a new DS even if the original
+     * check said otherwise.
+     */
+    need_new_descriptor_set =
         r->shader_bindings_changed || r->texture_bindings_changed ||
         r->need_descriptor_rebind ||
-        !r->descriptor_set_index; /* first draw after reset */
+        !r->descriptor_set_index;
 
     if (!need_new_descriptor_set) {
         return;
