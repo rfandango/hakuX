@@ -341,6 +341,7 @@ void nv2a_profile_get_phase_timing_str(char *buf, int bufsize);
 void nv2a_profile_get_cpu_timing_str(char *buf, int bufsize);
 void nv2a_profile_get_vsync_timing_str(char *buf, int bufsize);
 void nv2a_profile_get_surf_timing_str(char *buf, int bufsize);
+void nv2a_profile_get_workload_str(char *buf, int bufsize);
 
 static inline void nv2a_profile_inc_counter(enum NV2A_PROF_COUNTERS_ENUM cnt)
 {

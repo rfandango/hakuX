@@ -543,10 +543,22 @@ static void update_shader_uniforms(PGRAPHState *pg)
     assert(r->shader_binding);
     ShaderBinding *binding = r->shader_binding;
 
+    ShaderUniformLayout *vsh_layout = &binding->vsh.module_info->uniforms;
+    ShaderUniformLayout *psh_layout = &binding->psh.module_info->uniforms;
+
+#if OPT_UNIFORM_SKIP
+    uint8_t ubo_snap[8192];
+    size_t vsh_sz = MIN(vsh_layout->total_size, sizeof(ubo_snap));
+    size_t psh_sz = MIN(psh_layout->total_size,
+                        sizeof(ubo_snap) - vsh_sz);
+    memcpy(ubo_snap, vsh_layout->allocation, vsh_sz);
+    memcpy(ubo_snap + vsh_sz, psh_layout->allocation, psh_sz);
+#endif
+
     VshUniformValues vsh_values;
     pgraph_glsl_set_vsh_uniform_values(pg, &binding->state.vsh,
                                   binding->vsh.uniform_locs, &vsh_values);
-    apply_uniform_updates(&binding->vsh.module_info->uniforms, VshUniformInfo,
+    apply_uniform_updates(vsh_layout, VshUniformInfo,
                           binding->vsh.uniform_locs, &vsh_values,
                           VshUniform__COUNT);
 
@@ -567,11 +579,18 @@ static void update_shader_uniforms(PGRAPHState *pg)
 
         psh_values.texScale[i] = scale;
     }
-    apply_uniform_updates(&binding->psh.module_info->uniforms, PshUniformInfo,
+    apply_uniform_updates(psh_layout, PshUniformInfo,
                           binding->psh.uniform_locs, &psh_values,
                           PshUniform__COUNT);
 
+#if OPT_UNIFORM_SKIP
+    if (memcmp(ubo_snap, vsh_layout->allocation, vsh_sz) ||
+        memcmp(ubo_snap + vsh_sz, psh_layout->allocation, psh_sz)) {
+        r->uniforms_changed = true;
+    }
+#else
     r->uniforms_changed = true;
+#endif
 
     NV2A_VK_DGROUP_END();
 }

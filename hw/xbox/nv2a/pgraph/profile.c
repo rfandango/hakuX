@@ -242,7 +242,7 @@ void nv2a_profile_flip_stall(void)
 
 #ifdef __ANDROID__
     if ((g_nv2a_stats.frame_count % 60) == 0) {
-        char buf[256];
+        char buf[512];
         nv2a_profile_get_phase_timing_str(buf, sizeof(buf));
         __android_log_print(ANDROID_LOG_INFO, "xemu-phase", "%s", buf);
         nv2a_profile_get_cpu_timing_str(buf, sizeof(buf));
@@ -253,6 +253,8 @@ void nv2a_profile_flip_stall(void)
         __android_log_print(ANDROID_LOG_INFO, "xemu-surf", "%s", buf);
         nv2a_profile_get_pacing_str(buf, sizeof(buf));
         __android_log_print(ANDROID_LOG_INFO, "xemu-pace", "%s", buf);
+        nv2a_profile_get_workload_str(buf, sizeof(buf));
+        __android_log_print(ANDROID_LOG_INFO, "xemu-work", "%s", buf);
     }
 #endif
 }
@@ -380,6 +382,51 @@ void nv2a_profile_get_shader_stats_str(char *buf, int bufsize)
              s->spv_cache_hits + s->spv_cache_misses,
              s->pipeline_cache_disk_loaded ? "Y" : "N",
              s->pipeline_cache_disk_saved);
+}
+
+void nv2a_profile_get_workload_str(char *buf, int bufsize)
+{
+    unsigned int idx = (g_nv2a_stats.frame_ptr + NV2A_PROF_NUM_FRAMES - 1) %
+                       NV2A_PROF_NUM_FRAMES;
+    int *c = g_nv2a_stats.frame_history[idx].counters;
+    snprintf(buf, bufsize,
+             "BE:%d DA:%d IE:%d IB:%d IA:%d Clr:%d "
+             "QS:%d/%d PGen:%d PBnd:%d PNd:%d RP:%d "
+             "SGen:%d SBnd:%d SNd:%d UBOd:%d UBOn:%d "
+             "TexU:%d GBU:%d/%d/%d/%d/%d "
+             "Fin:Vbd%d Sc%d Sd%d Bs%d Fbd%d Pr%d Fl%d Flu%d St%d",
+             c[NV2A_PROF_BEGIN_ENDS],
+             c[NV2A_PROF_DRAW_ARRAYS],
+             c[NV2A_PROF_INLINE_ELEMENTS],
+             c[NV2A_PROF_INLINE_BUFFERS],
+             c[NV2A_PROF_INLINE_ARRAYS],
+             c[NV2A_PROF_CLEAR],
+             c[NV2A_PROF_QUEUE_SUBMIT],
+             c[NV2A_PROF_QUEUE_SUBMIT_AUX],
+             c[NV2A_PROF_PIPELINE_GEN],
+             c[NV2A_PROF_PIPELINE_BIND],
+             c[NV2A_PROF_PIPELINE_NOTDIRTY],
+             c[NV2A_PROF_PIPELINE_RENDERPASSES],
+             c[NV2A_PROF_SHADER_GEN],
+             c[NV2A_PROF_SHADER_BIND],
+             c[NV2A_PROF_SHADER_BIND_NOTDIRTY],
+             c[NV2A_PROF_SHADER_UBO_DIRTY],
+             c[NV2A_PROF_SHADER_UBO_NOTDIRTY],
+             c[NV2A_PROF_TEX_UPLOAD],
+             c[NV2A_PROF_GEOM_BUFFER_UPDATE_1],
+             c[NV2A_PROF_GEOM_BUFFER_UPDATE_2],
+             c[NV2A_PROF_GEOM_BUFFER_UPDATE_3],
+             c[NV2A_PROF_GEOM_BUFFER_UPDATE_4],
+             c[NV2A_PROF_GEOM_BUFFER_UPDATE_4_NOTDIRTY],
+             c[NV2A_PROF_FINISH_VERTEX_BUFFER_DIRTY],
+             c[NV2A_PROF_FINISH_SURFACE_CREATE],
+             c[NV2A_PROF_FINISH_SURFACE_DOWN],
+             c[NV2A_PROF_FINISH_NEED_BUFFER_SPACE],
+             c[NV2A_PROF_FINISH_FRAMEBUFFER_DIRTY],
+             c[NV2A_PROF_FINISH_PRESENTING],
+             c[NV2A_PROF_FINISH_FLIP_STALL],
+             c[NV2A_PROF_FINISH_FLUSH],
+             c[NV2A_PROF_FINISH_STALLED]);
 }
 
 const char *nv2a_profile_get_counter_name(unsigned int cnt)

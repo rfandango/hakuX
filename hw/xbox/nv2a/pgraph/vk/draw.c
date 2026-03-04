@@ -777,6 +777,9 @@ static void init_pipeline_key(PGRAPHState *pg, PipelineKey *key)
         key->regs[i] = pgraph_reg_r(pg, regs[i]);
     }
 #if OPT_DYNAMIC_STATES
+    key->regs[4] &= ~(NV_PGRAPH_SETUPRASTER_CULLENABLE |
+                       NV_PGRAPH_SETUPRASTER_CULLCTRL |
+                       NV_PGRAPH_SETUPRASTER_FRONTFACE);
     key->regs[5] &= ~(NV_PGRAPH_CONTROL_1_STENCIL_REF |
                        NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ |
                        NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE);
@@ -923,14 +926,21 @@ static void create_pipeline(PGRAPHState *pg)
         .rasterizerDiscardEnable = VK_FALSE,
         .polygonMode = polygon_mode,
         .lineWidth = 1.0f,
-        .frontFace = (pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER) &
-                      NV_PGRAPH_SETUPRASTER_FRONTFACE) ?
-                          VK_FRONT_FACE_COUNTER_CLOCKWISE :
-                          VK_FRONT_FACE_CLOCKWISE,
+        .frontFace =
+#if OPT_DYNAMIC_STATES
+            VK_FRONT_FACE_COUNTER_CLOCKWISE,
+        .cullMode = VK_CULL_MODE_NONE,
+#else
+            (pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER) &
+             NV_PGRAPH_SETUPRASTER_FRONTFACE) ?
+                 VK_FRONT_FACE_COUNTER_CLOCKWISE :
+                 VK_FRONT_FACE_CLOCKWISE,
+#endif
         .depthBiasEnable = VK_FALSE,
         .pNext = rasterizer_next_struct,
     };
 
+#if !OPT_DYNAMIC_STATES
     if (pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER) & NV_PGRAPH_SETUPRASTER_CULLENABLE) {
         uint32_t cull_face = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
                                       NV_PGRAPH_SETUPRASTER_CULLCTRL);
@@ -939,6 +949,7 @@ static void create_pipeline(PGRAPHState *pg)
     } else {
         rasterizer.cullMode = VK_CULL_MODE_NONE;
     }
+#endif
 
     VkPipelineMultisampleStateCreateInfo multisampling = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
@@ -1051,7 +1062,7 @@ static void create_pipeline(PGRAPHState *pg)
         .blendConstants[3] = blend_constant[3],
     };
 
-    VkDynamicState dynamic_states[8] = {
+    VkDynamicState dynamic_states[10] = {
         VK_DYNAMIC_STATE_VIEWPORT,
         VK_DYNAMIC_STATE_SCISSOR,
 #if OPT_DYNAMIC_STATES
@@ -1059,9 +1070,11 @@ static void create_pipeline(PGRAPHState *pg)
         VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK,
         VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
         VK_DYNAMIC_STATE_STENCIL_REFERENCE,
+        VK_DYNAMIC_STATE_CULL_MODE,
+        VK_DYNAMIC_STATE_FRONT_FACE,
 #endif
     };
-    int num_dynamic_states = OPT_DYNAMIC_STATES ? 6 : 2;
+    int num_dynamic_states = OPT_DYNAMIC_STATES ? 8 : 2;
 
     snode->has_dynamic_line_width =
         (r->enabled_physical_device_features.wideLines == VK_TRUE) &&
@@ -1824,6 +1837,7 @@ static void begin_draw(PGRAPHState *pg)
         nv2a_profile_inc_counter(NV2A_PROF_PIPELINE_BIND);
         vkCmdBindPipeline(r->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                           r->pipeline_binding->pipeline);
+        r->pipeline_binding_changed = false;
         r->pipeline_binding->draw_time = pg->draw_time;
 
         unsigned int vp_width = pg->surface_binding_dim.width,
@@ -1869,6 +1883,22 @@ static void begin_draw(PGRAPHState *pg)
 
     if (!pg->clearing) {
 #if OPT_DYNAMIC_STATES
+        {
+            uint32_t setupraster = pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER);
+            VkCullModeFlags cull = VK_CULL_MODE_NONE;
+            if (setupraster & NV_PGRAPH_SETUPRASTER_CULLENABLE) {
+                uint32_t cull_face = GET_MASK(setupraster,
+                                              NV_PGRAPH_SETUPRASTER_CULLCTRL);
+                assert(cull_face < ARRAY_SIZE(pgraph_cull_face_vk_map));
+                cull = pgraph_cull_face_vk_map[cull_face];
+            }
+            vkCmdSetCullMode(r->command_buffer, cull);
+            vkCmdSetFrontFace(r->command_buffer,
+                              (setupraster & NV_PGRAPH_SETUPRASTER_FRONTFACE)
+                                  ? VK_FRONT_FACE_COUNTER_CLOCKWISE
+                                  : VK_FRONT_FACE_CLOCKWISE);
+        }
+
         float blend_constant[4] = { 0, 0, 0, 0 };
         uint32_t blend_color = pgraph_reg_r(pg, NV_PGRAPH_BLENDCOLOR);
         pgraph_argb_pack32_to_rgba_float(blend_color, blend_constant);
@@ -1971,6 +2001,34 @@ static void sync_vertex_ram_buffer(PGRAPHState *pg)
     if (r->num_vertex_ram_buffer_syncs == 0) {
         return;
     }
+
+#if OPT_SYNC_EARLY_EXIT
+    /*
+     * Fast path: if every page in the requested regions is already in the
+     * uploaded_bitmap, the data was synced earlier in this command buffer
+     * and the dirty bits were cleared at that time.  Skip the expensive
+     * sort / merge / RCU dirty-bit walk entirely.
+     */
+    {
+        unsigned long *bmp = get_uploaded_bitmap(r);
+        bool all_uploaded = true;
+        for (int i = 0; i < r->num_vertex_ram_buffer_syncs && all_uploaded; i++) {
+            hwaddr addr = r->vertex_ram_buffer_syncs[i].addr;
+            hwaddr size = r->vertex_ram_buffer_syncs[i].size;
+            hwaddr start = addr & TARGET_PAGE_MASK;
+            hwaddr end = ROUND_UP(addr + size, TARGET_PAGE_SIZE);
+            size_t start_bit = start / TARGET_PAGE_SIZE;
+            size_t end_bit = end / TARGET_PAGE_SIZE;
+            if (find_next_zero_bit(bmp, end_bit, start_bit) < end_bit) {
+                all_uploaded = false;
+            }
+        }
+        if (all_uploaded) {
+            r->num_vertex_ram_buffer_syncs = 0;
+            return;
+        }
+    }
+#endif
 
     vw->calls++;
     vw->reqs += r->num_vertex_ram_buffer_syncs;
@@ -2554,6 +2612,8 @@ void pgraph_vk_flush_draw(NV2AState *d)
         pgraph_vk_end_debug_marker(r, r->command_buffer);
         NV2A_PHASE_TIMER_END(draw_vk_cmd);
 
+        nv2a_diag_log_draw_call(d, pg, "draw_arrays", max_element);
+
         NV2A_VK_DGROUP_END();
     } else if (pg->inline_elements_length) {
         NV2A_VK_DGROUP_BEGIN("Inline Elements");
@@ -2613,6 +2673,8 @@ void pgraph_vk_flush_draw(NV2AState *d)
         end_draw(pg);
         pgraph_vk_end_debug_marker(r, r->command_buffer);
         NV2A_PHASE_TIMER_END(draw_vk_cmd);
+
+        nv2a_diag_log_draw_call(d, pg, "inline_elements", draw_index_count);
 
         NV2A_VK_DGROUP_END();
     } else if (pg->inline_buffer_length) {
@@ -2679,6 +2741,9 @@ void pgraph_vk_flush_draw(NV2AState *d)
         end_draw(pg);
         pgraph_vk_end_debug_marker(r, r->command_buffer);
         NV2A_PHASE_TIMER_END(draw_vk_cmd);
+
+        nv2a_diag_log_draw_call(d, pg, "inline_buffer",
+                                pg->inline_buffer_length);
 
         NV2A_VK_DGROUP_END();
     } else if (pg->inline_array_length) {
@@ -2752,6 +2817,9 @@ void pgraph_vk_flush_draw(NV2AState *d)
         end_draw(pg);
         pgraph_vk_end_debug_marker(r, r->command_buffer);
         NV2A_PHASE_TIMER_END(draw_vk_cmd);
+
+        nv2a_diag_log_draw_call(d, pg, "inline_array", index_count);
+
         NV2A_VK_DGROUP_END();
     } else {
         NV2A_VK_DPRINTF("EMPTY NV097_SET_BEGIN_END");
