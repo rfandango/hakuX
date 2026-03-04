@@ -131,6 +131,28 @@ void pgraph_vk_bind_vertex_attributes(NV2AState *d, unsigned int min_element,
 
     unsigned int num_elements = max_element - min_element + 1;
 
+#if OPT_VTX_ATTR_CACHE
+    if (!inline_data &&
+        pg->vertex_attr_gen == r->last_vertex_attr_gen &&
+        r->cached_num_active_bindings > 0) {
+        r->num_active_vertex_attribute_descriptions = r->cached_num_active_attrs;
+        r->num_active_vertex_binding_descriptions = r->cached_num_active_bindings;
+        for (int i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
+            VertexAttribute *attr = &pg->vertex_attributes[i];
+            if (!attr->count || !attr->stride) {
+                continue;
+            }
+            if (r->cached_attr_layout[i].stride) {
+                hwaddr start = r->cached_attr_layout[i].base_addr +
+                               min_element * r->cached_attr_layout[i].stride;
+                update_memory_buffer(d, start,
+                                     num_elements * r->cached_attr_layout[i].stride);
+            }
+        }
+        return;
+    }
+#endif
+
     if (inline_data) {
         NV2A_VK_DGROUP_BEGIN("%s (num_elements: %d inline stride: %d)",
                              __func__, num_elements, inline_stride);
@@ -146,6 +168,8 @@ void pgraph_vk_bind_vertex_attributes(NV2AState *d, unsigned int min_element,
     r->num_active_vertex_binding_descriptions = 0;
 
     for (int i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
+        r->cached_attr_layout[i].stride = 0;
+        r->cached_attr_layout[i].base_addr = 0;
         VertexAttribute *attr = &pg->vertex_attributes[i];
         NV2A_VK_DGROUP_BEGIN("[attr %02d] format=%s, count=%d, stride=%d", i,
                              vertex_data_array_format_to_str[attr->format],
@@ -266,6 +290,11 @@ void pgraph_vk_bind_vertex_attributes(NV2AState *d, unsigned int min_element,
 
         r->vertex_attribute_offsets[i] = attrib_data_addr;
 
+        if (!inline_data) {
+            r->cached_attr_layout[i].base_addr = attrib_data_addr;
+            r->cached_attr_layout[i].stride = stride;
+        }
+
         if (needs_conversion) {
             pg->compressed_attrs |= (1 << i);
         }
@@ -274,6 +303,12 @@ void pgraph_vk_bind_vertex_attributes(NV2AState *d, unsigned int min_element,
         }
 
         NV2A_VK_DGROUP_END();
+    }
+
+    if (!inline_data) {
+        r->last_vertex_attr_gen = pg->vertex_attr_gen;
+        r->cached_num_active_bindings = r->num_active_vertex_binding_descriptions;
+        r->cached_num_active_attrs = r->num_active_vertex_attribute_descriptions;
     }
 
     NV2A_VK_DGROUP_END();

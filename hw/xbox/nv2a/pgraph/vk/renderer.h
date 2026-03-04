@@ -62,6 +62,11 @@
 #define OPT_PRECISE_BARRIERS    1
 #define OPT_SYNC_EARLY_EXIT     1
 #define OPT_UNIFORM_SKIP        0
+#define OPT_MULTI_DRAW          1
+#define OPT_SUPER_FAST_PATH     1
+#define OPT_LARGER_STAGING      1
+#define OPT_VTX_ATTR_CACHE      1
+#define OPT_DYNAMIC_DEPTH_STENCIL 1
 #define OPT_SURF_TO_TEX_INLINE  1
 
 #if OPT_ALWAYS_DEFERRED_FENCES
@@ -465,6 +470,18 @@ typedef struct PGRAPHVkState {
     PipelineBinding *pipeline_binding;
     bool pipeline_binding_changed;
     bool pipeline_state_dirty;
+    bool pre_draw_skipped;
+
+#if OPT_DYNAMIC_STATES
+    struct {
+        uint32_t setupraster;
+        uint32_t blendcolor;
+        uint32_t control_0;
+        uint32_t control_1;
+        uint32_t control_2;
+        bool valid;
+    } dyn_state;
+#endif
 
     VkDescriptorPool descriptor_pool;
     VkDescriptorSetLayout descriptor_set_layout;
@@ -487,6 +504,14 @@ typedef struct PGRAPHVkState {
     size_t num_vertex_ram_buffer_syncs;
     unsigned long *uploaded_bitmap;
     size_t bitmap_size;
+
+    uint32_t last_vertex_attr_gen;
+    int cached_num_active_bindings;
+    int cached_num_active_attrs;
+    struct {
+        hwaddr base_addr;
+        size_t stride;
+    } cached_attr_layout[NV2A_VERTEXSHADER_ATTRIBUTES];
 
     ram_addr_t vram_ram_addr;
     VkDeviceSize vertex_ram_flush_min;

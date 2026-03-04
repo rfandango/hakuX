@@ -708,7 +708,6 @@ static bool check_pipeline_dirty(PGRAPHState *pg)
     const unsigned int regs[] = {
         NV_PGRAPH_BLEND,     NV_PGRAPH_CONTROL_0,
         NV_PGRAPH_CONTROL_2, NV_PGRAPH_CONTROL_3,
-        NV_PGRAPH_SETUPRASTER, NV_PGRAPH_CONTROL_1,
     };
 #else
     const unsigned int regs[] = {
@@ -725,6 +724,55 @@ static bool check_pipeline_dirty(PGRAPHState *pg)
             return true;
         }
     }
+
+#if OPT_DYNAMIC_STATES
+#if OPT_DYNAMIC_DEPTH_STENCIL
+    if (pgraph_is_reg_dirty(pg, NV_PGRAPH_CONTROL_0)) {
+        uint32_t c0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
+        uint32_t c0_mask = ~(NV_PGRAPH_CONTROL_0_ZENABLE |
+                             NV_PGRAPH_CONTROL_0_ZWRITEENABLE |
+                             NV_PGRAPH_CONTROL_0_ZFUNC);
+        if ((c0 & c0_mask) != (r->pipeline_binding->key.regs[1] & c0_mask)) {
+            return true;
+        }
+    }
+    if (pgraph_is_reg_dirty(pg, NV_PGRAPH_CONTROL_2)) {
+        uint32_t c2 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_2);
+        uint32_t c2_mask = ~(NV_PGRAPH_CONTROL_2_STENCIL_OP_FAIL |
+                             NV_PGRAPH_CONTROL_2_STENCIL_OP_ZFAIL |
+                             NV_PGRAPH_CONTROL_2_STENCIL_OP_ZPASS);
+        if ((c2 & c2_mask) != (r->pipeline_binding->key.regs[2] & c2_mask)) {
+            return true;
+        }
+    }
+#endif
+    if (pgraph_is_reg_dirty(pg, NV_PGRAPH_SETUPRASTER)) {
+        uint32_t sr = pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER);
+        uint32_t sr_mask = ~(NV_PGRAPH_SETUPRASTER_CULLENABLE |
+                             NV_PGRAPH_SETUPRASTER_CULLCTRL |
+                             NV_PGRAPH_SETUPRASTER_FRONTFACE);
+        if ((sr & sr_mask) != (r->pipeline_binding->key.regs[4] & sr_mask)) {
+            return true;
+        }
+    }
+    if (pgraph_is_reg_dirty(pg, NV_PGRAPH_CONTROL_1)) {
+        uint32_t c1 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1);
+#if OPT_DYNAMIC_DEPTH_STENCIL
+        uint32_t c1_mask = ~(NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE |
+                             NV_PGRAPH_CONTROL_1_STENCIL_FUNC |
+                             NV_PGRAPH_CONTROL_1_STENCIL_REF |
+                             NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ |
+                             NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE);
+#else
+        uint32_t c1_mask = ~(NV_PGRAPH_CONTROL_1_STENCIL_REF |
+                             NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ |
+                             NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE);
+#endif
+        if ((c1 & c1_mask) != (r->pipeline_binding->key.regs[5] & c1_mask)) {
+            return true;
+        }
+    }
+#endif
 
     // FIXME: Use dirty bits instead
     if (memcmp(r->vertex_attribute_descriptions,
@@ -777,12 +825,28 @@ static void init_pipeline_key(PGRAPHState *pg, PipelineKey *key)
         key->regs[i] = pgraph_reg_r(pg, regs[i]);
     }
 #if OPT_DYNAMIC_STATES
+#if OPT_DYNAMIC_DEPTH_STENCIL
+    key->regs[1] &= ~(NV_PGRAPH_CONTROL_0_ZENABLE |
+                       NV_PGRAPH_CONTROL_0_ZWRITEENABLE |
+                       NV_PGRAPH_CONTROL_0_ZFUNC);
+    key->regs[2] &= ~(NV_PGRAPH_CONTROL_2_STENCIL_OP_FAIL |
+                       NV_PGRAPH_CONTROL_2_STENCIL_OP_ZFAIL |
+                       NV_PGRAPH_CONTROL_2_STENCIL_OP_ZPASS);
+#endif
     key->regs[4] &= ~(NV_PGRAPH_SETUPRASTER_CULLENABLE |
                        NV_PGRAPH_SETUPRASTER_CULLCTRL |
                        NV_PGRAPH_SETUPRASTER_FRONTFACE);
+#if OPT_DYNAMIC_DEPTH_STENCIL
+    key->regs[5] &= ~(NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE |
+                       NV_PGRAPH_CONTROL_1_STENCIL_FUNC |
+                       NV_PGRAPH_CONTROL_1_STENCIL_REF |
+                       NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ |
+                       NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE);
+#else
     key->regs[5] &= ~(NV_PGRAPH_CONTROL_1_STENCIL_REF |
                        NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ |
                        NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE);
+#endif
 #endif
 }
 
@@ -792,6 +856,17 @@ static void create_pipeline(PGRAPHState *pg)
 
     NV2AState *d = container_of(pg, NV2AState, pgraph);
     PGRAPHVkState *r = pg->vk_renderer_state;
+
+    if (r->pipeline_binding &&
+        !r->shader_bindings_changed &&
+        !r->pipeline_state_dirty &&
+        pg->texture_state_gen == r->last_texture_state_gen &&
+        pgraph_vk_check_textures_fast_skip(pg) &&
+        !check_render_pass_dirty(pg) &&
+        !pgraph_has_dirty_regs(pg)) {
+        NV2A_VK_DGROUP_END();
+        return;
+    }
 
     NV2A_PHASE_TIMER_BEGIN(pipe_bind_tex);
     if (pg->texture_state_gen != r->last_texture_state_gen ||
@@ -855,10 +930,12 @@ static void create_pipeline(PGRAPHState *pg)
     memcpy(&snode->key, &key, sizeof(key));
 
     uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
+#if !(OPT_DYNAMIC_STATES && OPT_DYNAMIC_DEPTH_STENCIL)
     bool depth_test = control_0 & NV_PGRAPH_CONTROL_0_ZENABLE;
     bool depth_write = !!(control_0 & NV_PGRAPH_CONTROL_0_ZWRITEENABLE);
     bool stencil_test =
         pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1) & NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE;
+#endif
 
     int num_active_shader_stages = 0;
     VkPipelineShaderStageCreateInfo shader_stages[3];
@@ -959,8 +1036,12 @@ static void create_pipeline(PGRAPHState *pg)
 
     VkPipelineDepthStencilStateCreateInfo depth_stencil = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-        .depthWriteEnable = depth_write ? VK_TRUE : VK_FALSE,
     };
+
+#if OPT_DYNAMIC_STATES && OPT_DYNAMIC_DEPTH_STENCIL
+    depth_stencil.depthBoundsTestEnable = VK_FALSE;
+#else
+    depth_stencil.depthWriteEnable = depth_write ? VK_TRUE : VK_FALSE;
 
     if (depth_test) {
         depth_stencil.depthTestEnable = VK_TRUE;
@@ -1002,6 +1083,7 @@ static void create_pipeline(PGRAPHState *pg)
         depth_stencil.front.reference = stencil_ref;
         depth_stencil.back = depth_stencil.front;
     }
+#endif
 
     VkColorComponentFlags write_mask = 0;
     if (control_0 & NV_PGRAPH_CONTROL_0_RED_WRITE_ENABLE)
@@ -1062,7 +1144,7 @@ static void create_pipeline(PGRAPHState *pg)
         .blendConstants[3] = blend_constant[3],
     };
 
-    VkDynamicState dynamic_states[10] = {
+    VkDynamicState dynamic_states[16] = {
         VK_DYNAMIC_STATE_VIEWPORT,
         VK_DYNAMIC_STATE_SCISSOR,
 #if OPT_DYNAMIC_STATES
@@ -1072,9 +1154,17 @@ static void create_pipeline(PGRAPHState *pg)
         VK_DYNAMIC_STATE_STENCIL_REFERENCE,
         VK_DYNAMIC_STATE_CULL_MODE,
         VK_DYNAMIC_STATE_FRONT_FACE,
+#if OPT_DYNAMIC_DEPTH_STENCIL
+        VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE,
+        VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE,
+        VK_DYNAMIC_STATE_DEPTH_COMPARE_OP,
+        VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE,
+        VK_DYNAMIC_STATE_STENCIL_OP,
+#endif
 #endif
     };
-    int num_dynamic_states = OPT_DYNAMIC_STATES ? 8 : 2;
+    int num_dynamic_states = OPT_DYNAMIC_STATES ?
+        (OPT_DYNAMIC_DEPTH_STENCIL ? 13 : 8) : 2;
 
     snode->has_dynamic_line_width =
         (r->enabled_physical_device_features.wideLines == VK_TRUE) &&
@@ -1264,8 +1354,10 @@ static void sync_staging_buffer(PGRAPHState *pg, VkCommandBuffer cmd,
 
     switch (index_dst) {
     case BUFFER_INDEX:
-        dst_access_mask = VK_ACCESS_INDEX_READ_BIT;
-        dst_stage_mask = VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+        dst_access_mask = VK_ACCESS_INDEX_READ_BIT |
+                          VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+        dst_stage_mask = VK_PIPELINE_STAGE_VERTEX_INPUT_BIT |
+                         VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
         break;
     case BUFFER_VERTEX_INLINE:
         dst_access_mask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
@@ -1653,6 +1745,9 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
         r->color_drawn_in_cb = false;
         r->zeta_drawn_in_cb = false;
         r->queries_reset_in_cb = false;
+#if OPT_DYNAMIC_STATES
+        r->dyn_state.valid = false;
+#endif
 
         NV2A_PHASE_TIMER_END(finish_fence);
 
@@ -1743,6 +1838,28 @@ static void begin_pre_draw(PGRAPHState *pg)
     assert(r->color_binding || r->zeta_binding);
     assert(!r->color_binding || r->color_binding->initialized);
     assert(!r->zeta_binding || r->zeta_binding->initialized);
+
+#if OPT_SUPER_FAST_PATH
+    if (!pg->clearing &&
+        r->pipeline_binding &&
+        r->in_command_buffer &&
+        r->in_render_pass &&
+        r->framebuffer_index > 0 &&
+        !r->framebuffer_dirty &&
+        !r->shader_bindings_changed &&
+        !r->pipeline_state_dirty &&
+        !r->need_descriptor_rebind &&
+        !r->uniforms_changed &&
+        r->descriptor_set_index > 0 &&
+        pg->texture_state_gen == r->last_texture_state_gen &&
+        pgraph_vk_check_textures_fast_skip(pg) &&
+        !pgraph_has_dirty_regs(pg) &&
+        !pg->program_data_dirty) {
+        r->pre_draw_skipped = true;
+        return;
+    }
+#endif
+    r->pre_draw_skipped = false;
 
     NV2A_PHASE_TIMER_BEGIN(draw_pipeline);
     if (pg->clearing) {
@@ -1839,6 +1956,9 @@ static void begin_draw(PGRAPHState *pg)
                           r->pipeline_binding->pipeline);
         r->pipeline_binding_changed = false;
         r->pipeline_binding->draw_time = pg->draw_time;
+#if OPT_DYNAMIC_STATES
+        r->dyn_state.valid = false;
+#endif
 
         unsigned int vp_width = pg->surface_binding_dim.width,
                      vp_height = pg->surface_binding_dim.height;
@@ -1885,42 +2005,133 @@ static void begin_draw(PGRAPHState *pg)
 #if OPT_DYNAMIC_STATES
         {
             uint32_t setupraster = pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER);
-            VkCullModeFlags cull = VK_CULL_MODE_NONE;
-            if (setupraster & NV_PGRAPH_SETUPRASTER_CULLENABLE) {
-                uint32_t cull_face = GET_MASK(setupraster,
-                                              NV_PGRAPH_SETUPRASTER_CULLCTRL);
-                assert(cull_face < ARRAY_SIZE(pgraph_cull_face_vk_map));
-                cull = pgraph_cull_face_vk_map[cull_face];
+            if (!r->dyn_state.valid ||
+                setupraster != r->dyn_state.setupraster) {
+                VkCullModeFlags cull = VK_CULL_MODE_NONE;
+                if (setupraster & NV_PGRAPH_SETUPRASTER_CULLENABLE) {
+                    uint32_t cull_face = GET_MASK(setupraster,
+                                                  NV_PGRAPH_SETUPRASTER_CULLCTRL);
+                    assert(cull_face < ARRAY_SIZE(pgraph_cull_face_vk_map));
+                    cull = pgraph_cull_face_vk_map[cull_face];
+                }
+                vkCmdSetCullMode(r->command_buffer, cull);
+                vkCmdSetFrontFace(r->command_buffer,
+                                  (setupraster & NV_PGRAPH_SETUPRASTER_FRONTFACE)
+                                      ? VK_FRONT_FACE_COUNTER_CLOCKWISE
+                                      : VK_FRONT_FACE_CLOCKWISE);
+                r->dyn_state.setupraster = setupraster;
             }
-            vkCmdSetCullMode(r->command_buffer, cull);
-            vkCmdSetFrontFace(r->command_buffer,
-                              (setupraster & NV_PGRAPH_SETUPRASTER_FRONTFACE)
-                                  ? VK_FRONT_FACE_COUNTER_CLOCKWISE
-                                  : VK_FRONT_FACE_CLOCKWISE);
         }
 
-        float blend_constant[4] = { 0, 0, 0, 0 };
-        uint32_t blend_color = pgraph_reg_r(pg, NV_PGRAPH_BLENDCOLOR);
-        pgraph_argb_pack32_to_rgba_float(blend_color, blend_constant);
-        vkCmdSetBlendConstants(r->command_buffer, blend_constant);
+        {
+            uint32_t blend_color = pgraph_reg_r(pg, NV_PGRAPH_BLENDCOLOR);
+            if (!r->dyn_state.valid ||
+                blend_color != r->dyn_state.blendcolor) {
+                float blend_constant[4] = { 0, 0, 0, 0 };
+                pgraph_argb_pack32_to_rgba_float(blend_color, blend_constant);
+                vkCmdSetBlendConstants(r->command_buffer, blend_constant);
+                r->dyn_state.blendcolor = blend_color;
+            }
+        }
 
-        uint32_t control_1 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1);
-        uint32_t stencil_ref = GET_MASK(control_1,
-                                        NV_PGRAPH_CONTROL_1_STENCIL_REF);
-        uint32_t mask_read = GET_MASK(control_1,
-                                      NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ);
-        uint32_t mask_write = GET_MASK(control_1,
-                                       NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE);
-        vkCmdSetStencilCompareMask(r->command_buffer,
-                                   VK_STENCIL_FACE_FRONT_AND_BACK, mask_read);
-        vkCmdSetStencilWriteMask(r->command_buffer,
-                                 VK_STENCIL_FACE_FRONT_AND_BACK, mask_write);
-        vkCmdSetStencilReference(r->command_buffer,
-                                 VK_STENCIL_FACE_FRONT_AND_BACK, stencil_ref);
+#if OPT_DYNAMIC_DEPTH_STENCIL
+        {
+            uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
+            if (!r->dyn_state.valid ||
+                control_0 != r->dyn_state.control_0) {
+                vkCmdSetDepthTestEnable(
+                    r->command_buffer,
+                    (control_0 & NV_PGRAPH_CONTROL_0_ZENABLE) ? VK_TRUE
+                                                              : VK_FALSE);
+                vkCmdSetDepthWriteEnable(
+                    r->command_buffer,
+                    (control_0 & NV_PGRAPH_CONTROL_0_ZWRITEENABLE) ? VK_TRUE
+                                                                   : VK_FALSE);
+                uint32_t depth_func = GET_MASK(control_0,
+                                               NV_PGRAPH_CONTROL_0_ZFUNC);
+                assert(depth_func < ARRAY_SIZE(pgraph_depth_func_vk_map));
+                vkCmdSetDepthCompareOp(r->command_buffer,
+                                       pgraph_depth_func_vk_map[depth_func]);
+                r->dyn_state.control_0 = control_0;
+            }
+        }
+
+        {
+            uint32_t control_1 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1);
+            uint32_t control_2 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_2);
+            if (!r->dyn_state.valid ||
+                control_1 != r->dyn_state.control_1 ||
+                control_2 != r->dyn_state.control_2) {
+                bool stencil_test_enable =
+                    control_1 & NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE;
+                vkCmdSetStencilTestEnable(r->command_buffer,
+                                          stencil_test_enable ? VK_TRUE
+                                                              : VK_FALSE);
+                uint32_t stencil_func = GET_MASK(control_1,
+                                                 NV_PGRAPH_CONTROL_1_STENCIL_FUNC);
+                assert(stencil_func < ARRAY_SIZE(pgraph_stencil_func_vk_map));
+                uint32_t stencil_ref = GET_MASK(control_1,
+                                                NV_PGRAPH_CONTROL_1_STENCIL_REF);
+                uint32_t mask_read = GET_MASK(control_1,
+                                              NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ);
+                uint32_t mask_write = GET_MASK(control_1,
+                                               NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE);
+                vkCmdSetStencilCompareMask(r->command_buffer,
+                                           VK_STENCIL_FACE_FRONT_AND_BACK, mask_read);
+                vkCmdSetStencilWriteMask(r->command_buffer,
+                                         VK_STENCIL_FACE_FRONT_AND_BACK, mask_write);
+                vkCmdSetStencilReference(r->command_buffer,
+                                         VK_STENCIL_FACE_FRONT_AND_BACK, stencil_ref);
+
+                uint32_t op_fail = GET_MASK(control_2,
+                                            NV_PGRAPH_CONTROL_2_STENCIL_OP_FAIL);
+                uint32_t op_zfail = GET_MASK(control_2,
+                                             NV_PGRAPH_CONTROL_2_STENCIL_OP_ZFAIL);
+                uint32_t op_zpass = GET_MASK(control_2,
+                                             NV_PGRAPH_CONTROL_2_STENCIL_OP_ZPASS);
+                assert(op_fail < ARRAY_SIZE(pgraph_stencil_op_vk_map));
+                assert(op_zfail < ARRAY_SIZE(pgraph_stencil_op_vk_map));
+                assert(op_zpass < ARRAY_SIZE(pgraph_stencil_op_vk_map));
+                vkCmdSetStencilOp(r->command_buffer,
+                                  VK_STENCIL_FACE_FRONT_AND_BACK,
+                                  pgraph_stencil_op_vk_map[op_fail],
+                                  pgraph_stencil_op_vk_map[op_zpass],
+                                  pgraph_stencil_op_vk_map[op_zfail],
+                                  pgraph_stencil_func_vk_map[stencil_func]);
+
+                r->dyn_state.control_1 = control_1;
+                r->dyn_state.control_2 = control_2;
+            }
+        }
+#else
+        {
+            uint32_t control_1 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1);
+            if (!r->dyn_state.valid ||
+                control_1 != r->dyn_state.control_1) {
+                uint32_t stencil_ref = GET_MASK(control_1,
+                                                NV_PGRAPH_CONTROL_1_STENCIL_REF);
+                uint32_t mask_read = GET_MASK(control_1,
+                                              NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ);
+                uint32_t mask_write = GET_MASK(control_1,
+                                               NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE);
+                vkCmdSetStencilCompareMask(r->command_buffer,
+                                           VK_STENCIL_FACE_FRONT_AND_BACK, mask_read);
+                vkCmdSetStencilWriteMask(r->command_buffer,
+                                         VK_STENCIL_FACE_FRONT_AND_BACK, mask_write);
+                vkCmdSetStencilReference(r->command_buffer,
+                                         VK_STENCIL_FACE_FRONT_AND_BACK, stencil_ref);
+                r->dyn_state.control_1 = control_1;
+            }
+        }
 #endif
 
-        bind_descriptor_sets(pg);
-        push_vertex_attr_values(pg);
+        r->dyn_state.valid = true;
+#endif
+
+        if (!r->pre_draw_skipped) {
+            bind_descriptor_sets(pg);
+            push_vertex_attr_values(pg);
+        }
     }
 
     r->in_draw = true;
@@ -1943,7 +2154,6 @@ static void end_draw(PGRAPHState *pg)
 void pgraph_vk_draw_end(NV2AState *d)
 {
     PGRAPHState *pg = &d->pgraph;
-    PGRAPHVkState *r = pg->vk_renderer_state;
 
     uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
     bool mask_alpha = control_0 & NV_PGRAPH_CONTROL_0_ALPHA_WRITE_ENABLE;
@@ -1957,19 +2167,13 @@ void pgraph_vk_draw_end(NV2AState *d)
     bool is_nop_draw = !(color_write || depth_test || stencil_test);
 
     if (is_nop_draw) {
-        // FIXME: Check PGRAPH register 0x880.
-        // HW uses bit 11 in 0x880 to enable or disable a color/zeta limit
-        // check that will raise an exception in the case that a draw should
-        // modify the color and/or zeta buffer but the target(s) are masked
-        // off. This check only seems to trigger during the fragment
-        // processing, it is legal to attempt a draw that is entirely
-        // clipped regardless of 0x880. See xemu#635 for context.
         NV2A_VK_DPRINTF("nop draw!\n");
         return;
     }
 
     pgraph_vk_flush_draw(d);
 
+    PGRAPHVkState *r = pg->vk_renderer_state;
     pg->draw_time++;
     if (r->color_binding && pgraph_color_write_enabled(pg)) {
         r->color_binding->draw_time = pg->draw_time;
@@ -2577,6 +2781,12 @@ void pgraph_vk_flush_draw(NV2AState *d)
             size_t rewrite_size =
                 prim_rw.num_indices * sizeof(uint32_t);
             ensure_buffer_space(pg, BUFFER_INDEX_STAGING, rewrite_size);
+#if OPT_MULTI_DRAW
+        } else if (pg->draw_arrays_length > 1) {
+            size_t indirect_size =
+                pg->draw_arrays_length * sizeof(VkDrawIndirectCommand);
+            ensure_buffer_space(pg, BUFFER_INDEX_STAGING, indirect_size);
+#endif
         }
         NV2A_PHASE_TIMER_END(draw_prim_rw);
 
@@ -2599,6 +2809,26 @@ void pgraph_vk_flush_draw(NV2AState *d)
                                  buffer_offset, VK_INDEX_TYPE_UINT32);
             vkCmdDrawIndexed(r->command_buffer, prim_rw.num_indices, 1, 0, 0,
                              0);
+#if OPT_MULTI_DRAW
+        } else if (pg->draw_arrays_length > 1) {
+            VkDrawIndirectCommand cmds[pg->draw_arrays_length];
+            for (int i = 0; i < pg->draw_arrays_length; i++) {
+                cmds[i] = (VkDrawIndirectCommand){
+                    .vertexCount = pg->draw_arrays_count[i],
+                    .instanceCount = 1,
+                    .firstVertex = pg->draw_arrays_start[i],
+                    .firstInstance = 0,
+                };
+            }
+            size_t indirect_size = pg->draw_arrays_length * sizeof(VkDrawIndirectCommand);
+            ensure_buffer_space(pg, BUFFER_INDEX_STAGING, indirect_size);
+            VkDeviceSize buffer_offset = pgraph_vk_update_index_buffer(
+                pg, cmds, indirect_size);
+            vkCmdDrawIndirect(r->command_buffer,
+                              r->storage_buffers[BUFFER_INDEX].buffer,
+                              buffer_offset, pg->draw_arrays_length,
+                              sizeof(VkDrawIndirectCommand));
+#endif
         } else {
             for (int i = 0; i < pg->draw_arrays_length; i++) {
                 uint32_t start = pg->draw_arrays_start[i],

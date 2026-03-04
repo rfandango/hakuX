@@ -140,7 +140,8 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
     r->storage_buffers[BUFFER_INDEX] = (StorageBuffer){
         .alloc_info = device_alloc_create_info,
         .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                 VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                 VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                 VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
         .buffer_size = sizeof(pg->inline_elements) * 100,
     };
 
@@ -185,7 +186,9 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
         .alloc_info = device_alloc_create_info,
         .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                  VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-#if OPT_LARGER_POOLS
+#if OPT_LARGER_STAGING
+        .buffer_size = 32 * 1024 * 1024,
+#elif OPT_LARGER_POOLS
         .buffer_size = 16 * 1024 * 1024,
 #else
         .buffer_size = 8 * 1024 * 1024,
@@ -236,6 +239,16 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
     for (int i = 0; i < NUM_SUBMIT_FRAMES; i++) {
         FrameStagingState *fs = &r->frame_staging[i];
 
+#if OPT_LARGER_STAGING
+        size_t idx_cap = MIN(r->storage_buffers[BUFFER_INDEX].buffer_size,
+                             16 * mib);
+        size_t vtx_cap = MIN(r->storage_buffers[BUFFER_VERTEX_INLINE].buffer_size,
+                             64 * mib);
+        size_t uni_cap = MIN(r->storage_buffers[BUFFER_UNIFORM].buffer_size,
+                             32 * mib);
+        size_t stg_cap = MIN(r->storage_buffers[BUFFER_STAGING_SRC].buffer_size,
+                             64 * mib);
+#else
         size_t idx_cap = MIN(r->storage_buffers[BUFFER_INDEX].buffer_size,
                              8 * mib);
         size_t vtx_cap = MIN(r->storage_buffers[BUFFER_VERTEX_INLINE].buffer_size,
@@ -244,6 +257,7 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
                              16 * mib);
         size_t stg_cap = MIN(r->storage_buffers[BUFFER_STAGING_SRC].buffer_size,
                              32 * mib);
+#endif
 
         fs->index_staging = (StorageBuffer){
             .alloc_info = host_alloc_create_info,

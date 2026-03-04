@@ -3130,6 +3130,8 @@ DEF_METHOD_INC(NV097, SET_VERTEX_DATA_ARRAY_FORMAT)
     } else {
         pg->compressed_attrs &= ~(1 << slot);
     }
+
+    pg->vertex_attr_gen++;
 }
 
 DEF_METHOD_INC(NV097, SET_VERTEX_DATA_ARRAY_OFFSET)
@@ -3138,6 +3140,8 @@ DEF_METHOD_INC(NV097, SET_VERTEX_DATA_ARRAY_OFFSET)
 
     pg->vertex_attributes[slot].dma_select = parameter & 0x80000000;
     pg->vertex_attributes[slot].offset = parameter & 0x7fffffff;
+
+    pg->vertex_attr_gen++;
 }
 
 DEF_METHOD(NV097, SET_LOGIC_OP_ENABLE)
