@@ -29,6 +29,8 @@
 
 extern "C" void xemu_set_native_x87(bool enable);
 extern "C" bool xemu_get_native_x87(void);
+extern "C" void xemu_set_fast_fences(bool enable);
+extern "C" bool xemu_get_fast_fences(void);
 
 #ifdef CONFIG_VULKAN
 #include <adrenotools/driver.h>
@@ -738,6 +740,11 @@ static SetupFiles SyncSetupFiles() {
   xemu_set_native_x87(native_x87);
   __android_log_print(ANDROID_LOG_INFO, "xemu-android",
                       "native x87 FPU: %s", native_x87 ? "ON" : "OFF");
+
+  bool fast_fences = GetPrefBool(env, activity, "fast_fences", false);
+  xemu_set_fast_fences(fast_fences);
+  __android_log_print(ANDROID_LOG_INFO, "xemu-android",
+                      "fast fences: %s", fast_fences ? "ON" : "OFF");
   std::string filterPref = GetPrefString(env, activity, "filtering");
   if (!filterPref.empty()) ds.filtering = filterPref;
   std::string arPref = GetPrefString(env, activity, "aspect_ratio");
@@ -1210,6 +1217,18 @@ Java_com_rfandango_xemuandroid_SettingsActivity_nativeSetNativeX87(JNIEnv *, job
             remove(path);
         }
     }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_rfandango_xemuandroid_SettingsActivity_nativeGetFastFences(JNIEnv *, jobject)
+{
+    return xemu_get_fast_fences() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_rfandango_xemuandroid_SettingsActivity_nativeSetFastFences(JNIEnv *, jobject, jboolean enable)
+{
+    xemu_set_fast_fences(enable == JNI_TRUE);
 }
 
 #ifdef CONFIG_VULKAN

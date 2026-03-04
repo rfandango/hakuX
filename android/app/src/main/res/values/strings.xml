@@ -138,6 +138,9 @@
   <string name="settings_native_x87">Fast FPU (native floats)</string>
   <string name="settings_native_x87_desc">Use native ARM64 double-precision for x87 FPU operations. Significantly faster but may cause visual artifacts (bloom, lighting) in some games. Disable if you see rendering issues. Takes effect immediately.</string>
 
+  <string name="settings_fast_fences">Fast fences (reduce GPU stalls)</string>
+  <string name="settings_fast_fences_desc">Defer GPU fence waits for buffer-space and vertex-dirty flushes. Significantly reduces frame time but may cause geometry popping or flickering. Takes effect immediately.</string>
+
   <string name="settings_validation_layers">Vulkan validation layers</string>
   <string name="settings_validation_layers_desc">Enable Vulkan validation for graphics debugging. Significant performance impact. Requires app restart.</string>
 </resources>

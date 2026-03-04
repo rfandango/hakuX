@@ -94,6 +94,17 @@ class SettingsActivity : AppCompatActivity() {
       try { nativeSetNativeX87(checked) } catch (_: Throwable) {}
     }
 
+    val switchFastFences = findViewById<MaterialSwitch>(R.id.switch_fast_fences)
+    try {
+      switchFastFences.isChecked = nativeGetFastFences()
+    } catch (_: Throwable) {
+      switchFastFences.isChecked = prefs.getBoolean("fast_fences", false)
+    }
+    switchFastFences.setOnCheckedChangeListener { _, checked ->
+      prefs.edit().putBoolean("fast_fences", checked).apply()
+      try { nativeSetFastFences(checked) } catch (_: Throwable) {}
+    }
+
     val switchValidation = findViewById<MaterialSwitch>(R.id.switch_validation_layers)
     switchValidation.isChecked = prefs.getBoolean("validation_layers", false)
     switchValidation.setOnCheckedChangeListener { _, checked ->
@@ -404,6 +415,8 @@ class SettingsActivity : AppCompatActivity() {
 
   private external fun nativeGetNativeX87(): Boolean
   private external fun nativeSetNativeX87(enable: Boolean)
+  private external fun nativeGetFastFences(): Boolean
+  private external fun nativeSetFastFences(enable: Boolean)
 
   companion object {
     private const val FATX_SUPERBLOCK_SIZE = 4096

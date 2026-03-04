@@ -1679,6 +1679,11 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
             static int dbg_finish_count = 0;
             bool deferred = (finish_reason == VK_FINISH_REASON_FLIP_STALL ||
                              finish_reason == VK_FINISH_REASON_PRESENTING);
+            if (g_xemu_fast_fences) {
+                deferred = deferred ||
+                    finish_reason == VK_FINISH_REASON_NEED_BUFFER_SPACE ||
+                    finish_reason == VK_FINISH_REASON_VERTEX_BUFFER_DIRTY;
+            }
             if (dbg_finish_count < 200) {
                 DBG_LOG("[FIN] reason=%d deferred=%d frame=%d submit=%d",
                         finish_reason, deferred, r->current_frame,
