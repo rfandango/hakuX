@@ -1139,13 +1139,13 @@ extern "C" int SDL_main(int argc, char* argv[]) {
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_izzy2lost_x1box_MainActivity_nativeGetFps(JNIEnv *, jobject)
+Java_com_rfandango_xemuandroid_MainActivity_nativeGetFps(JNIEnv *, jobject)
 {
     return static_cast<jint>(g_nv2a_stats.increment_fps);
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_izzy2lost_x1box_MainActivity_nativeGetFramePacing(JNIEnv *env, jobject)
+Java_com_rfandango_xemuandroid_MainActivity_nativeGetFramePacing(JNIEnv *env, jobject)
 {
     char buf[256];
     nv2a_profile_get_pacing_str(buf, sizeof(buf));
@@ -1153,7 +1153,7 @@ Java_com_izzy2lost_x1box_MainActivity_nativeGetFramePacing(JNIEnv *env, jobject)
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_izzy2lost_x1box_MainActivity_nativeGetShaderStats(JNIEnv *env, jobject)
+Java_com_rfandango_xemuandroid_MainActivity_nativeGetShaderStats(JNIEnv *env, jobject)
 {
     char buf[256];
     nv2a_profile_get_shader_stats_str(buf, sizeof(buf));
@@ -1161,7 +1161,7 @@ Java_com_izzy2lost_x1box_MainActivity_nativeGetShaderStats(JNIEnv *env, jobject)
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_izzy2lost_x1box_MainActivity_nativeCaptureFrame(JNIEnv *, jobject)
+Java_com_rfandango_xemuandroid_MainActivity_nativeCaptureFrame(JNIEnv *, jobject)
 {
 #ifdef CONFIG_RENDERDOC
     if (nv2a_dbg_renderdoc_available()) {
@@ -1173,13 +1173,13 @@ Java_com_izzy2lost_x1box_MainActivity_nativeCaptureFrame(JNIEnv *, jobject)
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_izzy2lost_x1box_MainActivity_nativeDumpRenderTarget(JNIEnv *env, jobject)
+Java_com_rfandango_xemuandroid_MainActivity_nativeDumpRenderTarget(JNIEnv *env, jobject)
 {
     nv2a_dbg_trigger_rt_dump();
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_izzy2lost_x1box_MainActivity_nativeDumpDiagFrame(JNIEnv *, jobject)
+Java_com_rfandango_xemuandroid_MainActivity_nativeDumpDiagFrame(JNIEnv *, jobject)
 {
     nv2a_dbg_trigger_diag_frame();
 }
@@ -1187,19 +1187,19 @@ Java_com_izzy2lost_x1box_MainActivity_nativeDumpDiagFrame(JNIEnv *, jobject)
 extern "C" char g_vulkan_driver_info[256];
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_izzy2lost_x1box_MainActivity_nativeGetDriverInfo(JNIEnv *env, jobject)
+Java_com_rfandango_xemuandroid_MainActivity_nativeGetDriverInfo(JNIEnv *env, jobject)
 {
     return env->NewStringUTF(g_vulkan_driver_info);
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_izzy2lost_x1box_SettingsActivity_nativeGetNativeX87(JNIEnv *, jobject)
+Java_com_rfandango_xemuandroid_SettingsActivity_nativeGetNativeX87(JNIEnv *, jobject)
 {
     return xemu_get_native_x87() ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_izzy2lost_x1box_SettingsActivity_nativeSetNativeX87(JNIEnv *, jobject, jboolean enable)
+Java_com_rfandango_xemuandroid_SettingsActivity_nativeSetNativeX87(JNIEnv *, jobject, jboolean enable)
 {
     xemu_set_native_x87(enable == JNI_TRUE);
     if (!enable) {
@@ -1214,13 +1214,13 @@ Java_com_izzy2lost_x1box_SettingsActivity_nativeSetNativeX87(JNIEnv *, jobject, 
 
 #ifdef CONFIG_VULKAN
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_izzy2lost_x1box_GpuDriverHelper_nativeSupportsCustomDriverLoading(JNIEnv *, jclass)
+Java_com_rfandango_xemuandroid_GpuDriverHelper_nativeSupportsCustomDriverLoading(JNIEnv *, jclass)
 {
     return access("/dev/kgsl-3d0", F_OK) == 0 ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_izzy2lost_x1box_GpuDriverHelper_nativeInitializeDriver(
+Java_com_rfandango_xemuandroid_GpuDriverHelper_nativeInitializeDriver(
     JNIEnv *env, jclass,
     jstring hookLibDir, jstring customDriverDir,
     jstring customDriverName)

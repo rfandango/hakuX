@@ -9,7 +9,7 @@ X1 BOX is an original Xbox emulator for Android, based on xemu.
 
 ## Project Origin
 
-- This project is forked from: https://github.com/xemu-project/xemu
+- This project is forked from: https://github.com/izzy2lost/xemu
 - Upstream xemu project: https://xemu.app
 
 ## What It Does

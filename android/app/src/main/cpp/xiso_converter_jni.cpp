@@ -9,7 +9,7 @@ extern "C" int xiso_convert_iso_to_xiso(const char *input_path,
                                           size_t err_buf_len);
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_izzy2lost_x1box_XisoConverterNative_nativeConvertIsoToXiso(
+Java_com_rfandango_xemuandroid_XisoConverterNative_nativeConvertIsoToXiso(
     JNIEnv *env,
     jclass,
     jstring input_path,

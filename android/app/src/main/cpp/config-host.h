@@ -11,14 +11,14 @@
 #define CONFIG_AUDIO_DRIVERS "sdl",
 #define CONFIG_DEVICES "config-devices.h"
 
-#define CONFIG_QEMU_DATADIR "/sdcard/Android/data/com.izzy2lost.x1box/files"
-#define CONFIG_QEMU_FIRMWAREPATH "/sdcard/Android/data/com.izzy2lost.x1box/files/firmware",
-#define CONFIG_SYSCONFDIR "/sdcard/Android/data/com.izzy2lost.x1box/files/etc"
-#define CONFIG_QEMU_CONFDIR "/sdcard/Android/data/com.izzy2lost.x1box/files/etc/xemu"
-#define CONFIG_QEMU_HELPERDIR "/sdcard/Android/data/com.izzy2lost.x1box/files/bin"
-#define CONFIG_PREFIX "/sdcard/Android/data/com.izzy2lost.x1box/files"
-#define CONFIG_BINDIR "/sdcard/Android/data/com.izzy2lost.x1box/files/bin"
-#define CONFIG_QEMU_LOCALSTATEDIR "/sdcard/Android/data/com.izzy2lost.x1box/files/state"
+#define CONFIG_QEMU_DATADIR "/sdcard/Android/data/com.rfandango.xemuandroid/files"
+#define CONFIG_QEMU_FIRMWAREPATH "/sdcard/Android/data/com.rfandango.xemuandroid/files/firmware",
+#define CONFIG_SYSCONFDIR "/sdcard/Android/data/com.rfandango.xemuandroid/files/etc"
+#define CONFIG_QEMU_CONFDIR "/sdcard/Android/data/com.rfandango.xemuandroid/files/etc/xemu"
+#define CONFIG_QEMU_HELPERDIR "/sdcard/Android/data/com.rfandango.xemuandroid/files/bin"
+#define CONFIG_PREFIX "/sdcard/Android/data/com.rfandango.xemuandroid/files"
+#define CONFIG_BINDIR "/sdcard/Android/data/com.rfandango.xemuandroid/files/bin"
+#define CONFIG_QEMU_LOCALSTATEDIR "/sdcard/Android/data/com.rfandango.xemuandroid/files/state"
 
 #define CONFIG_BDRV_RW_WHITELIST
 #define CONFIG_BDRV_RO_WHITELIST

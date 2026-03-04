@@ -20,13 +20,13 @@ val hasReleaseKeystore = hasKeystoreProperties &&
   }
 
 android {
-  namespace = "com.izzy2lost.x1box"
+  namespace = "com.rfandango.xemuandroid"
   compileSdk = 36
   buildToolsVersion = "36.1.0"
   ndkVersion = "29.0.14206865"
 
   defaultConfig {
-    applicationId = "com.izzy2lost.x1box"
+    applicationId = "com.rfandango.xemuandroid"
     minSdk = 26
     targetSdk = 36
 
@@ -65,6 +65,13 @@ android {
     debug {
       ndk {
         debugSymbolLevel = "NONE"
+      }
+      externalNativeBuild {
+        cmake {
+          arguments += listOf(
+            "-DCMAKE_BUILD_TYPE=Release"
+          )
+        }
       }
     }
     release {

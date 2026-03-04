@@ -1,4 +1,4 @@
-package com.izzy2lost.x1box
+package com.rfandango.xemuandroid
 
 import android.view.KeyEvent
 import org.libsdl.app.SDLControllerManager
