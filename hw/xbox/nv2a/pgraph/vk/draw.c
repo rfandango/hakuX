@@ -1639,6 +1639,11 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
                                 BUFFER_VERTEX_INLINE);
         sync_staging_buffer(pg, cmd, BUFFER_UNIFORM_STAGING, BUFFER_UNIFORM);
         bitmap_clear(get_uploaded_bitmap(r), 0, r->bitmap_size);
+#if OPT_SYNC_RANGE_SKIP
+        r->sync_range_attr_gen = 0;
+        r->sync_range_min = UINT32_MAX;
+        r->sync_range_max = 0;
+#endif
         flush_memory_buffer(pg, cmd);
         VK_CHECK(vkEndCommandBuffer(r->aux_command_buffer));
         r->in_aux_command_buffer = false;
@@ -1678,10 +1683,10 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
         {
             static int dbg_finish_count = 0;
             bool deferred = (finish_reason == VK_FINISH_REASON_FLIP_STALL ||
-                             finish_reason == VK_FINISH_REASON_PRESENTING);
+                             finish_reason == VK_FINISH_REASON_PRESENTING ||
+                             finish_reason == VK_FINISH_REASON_NEED_BUFFER_SPACE);
             if (g_xemu_fast_fences) {
                 deferred = deferred ||
-                    finish_reason == VK_FINISH_REASON_NEED_BUFFER_SPACE ||
                     finish_reason == VK_FINISH_REASON_VERTEX_BUFFER_DIRTY;
             }
             if (dbg_finish_count < 200) {
@@ -2248,6 +2253,33 @@ static int compare_memory_sync_requirement_by_addr(const void *p1,
         return 1;
     return 0;
 }
+
+#if OPT_SYNC_RANGE_SKIP
+static inline bool sync_range_covers(PGRAPHVkState *r,
+                                     uint32_t attr_gen,
+                                     uint32_t min_el,
+                                     uint32_t max_el)
+{
+    return attr_gen == r->sync_range_attr_gen &&
+           min_el >= r->sync_range_min &&
+           max_el <= r->sync_range_max;
+}
+
+static inline void sync_range_update(PGRAPHVkState *r,
+                                     uint32_t attr_gen,
+                                     uint32_t min_el,
+                                     uint32_t max_el)
+{
+    if (attr_gen != r->sync_range_attr_gen) {
+        r->sync_range_attr_gen = attr_gen;
+        r->sync_range_min = min_el;
+        r->sync_range_max = max_el;
+    } else {
+        r->sync_range_min = MIN(r->sync_range_min, min_el);
+        r->sync_range_max = MAX(r->sync_range_max, max_el);
+    }
+}
+#endif
 
 static void sync_vertex_ram_buffer(PGRAPHState *pg)
 {
@@ -2820,7 +2852,16 @@ void pgraph_vk_flush_draw(NV2AState *d)
         NV2A_PHASE_TIMER_END(draw_vtx_attr);
 
         NV2A_PHASE_TIMER_BEGIN(draw_vtx_sync);
+#if OPT_SYNC_RANGE_SKIP
+        if (sync_range_covers(r, pg->vertex_attr_gen, min_element, max_element)) {
+            r->num_vertex_ram_buffer_syncs = 0;
+        } else {
+            sync_vertex_ram_buffer(pg);
+            sync_range_update(r, pg->vertex_attr_gen, min_element, max_element);
+        }
+#else
         sync_vertex_ram_buffer(pg);
+#endif
         VertexBufferRemap remap = remap_unaligned_attributes(pg, max_element);
         NV2A_PHASE_TIMER_END(draw_vtx_sync);
 
@@ -2935,7 +2976,16 @@ void pgraph_vk_flush_draw(NV2AState *d)
         NV2A_PHASE_TIMER_END(draw_vtx_attr);
 
         NV2A_PHASE_TIMER_BEGIN(draw_vtx_sync);
+#if OPT_SYNC_RANGE_SKIP
+        if (sync_range_covers(r, pg->vertex_attr_gen, min_element, max_element)) {
+            r->num_vertex_ram_buffer_syncs = 0;
+        } else {
+            sync_vertex_ram_buffer(pg);
+            sync_range_update(r, pg->vertex_attr_gen, min_element, max_element);
+        }
+#else
         sync_vertex_ram_buffer(pg);
+#endif
         VertexBufferRemap remap = remap_unaligned_attributes(pg, max_element + 1);
         NV2A_PHASE_TIMER_END(draw_vtx_sync);
 

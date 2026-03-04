@@ -58,6 +58,7 @@
 #define OPT_SURF_BATCH_UPLOAD   1
 #define OPT_TRIPLE_BUFFERING    1
 #define OPT_LARGER_POOLS        1
+#define NUM_GFX_DESCRIPTOR_SETS (OPT_LARGER_POOLS ? 8192 : 1024)
 #define OPT_ALWAYS_DEFERRED_FENCES 1
 #define OPT_PRECISE_BARRIERS    1
 #define OPT_SYNC_EARLY_EXIT     1
@@ -84,6 +85,27 @@ struct OptBisectStats {
 };
 extern struct OptBisectStats g_opt_stats;
 #define OPT_SURF_TO_TEX_INLINE  1
+/*
+ * DISABLED: OPT_SYNC_RANGE_SKIP skips sync_vertex_ram_buffer when the element
+ * range is "covered" by a previous sync within the same command buffer, keyed
+ * on vertex_attr_gen (format/offset changes) and element min/max.
+ *
+ * The bug: vertex_attr_gen only tracks SET_VERTEX_DATA_ARRAY_FORMAT and
+ * SET_VERTEX_DATA_ARRAY_OFFSET writes. It does NOT detect when the CPU writes
+ * new vertex data to the same VRAM address with the same layout. When that
+ * happens, sync_vertex_ram_buffer is skipped even though the DIRTY_MEMORY_NV2A
+ * bitmap has new dirty pages, causing stale vertex data on the GPU (vertex
+ * explosions, missing geometry).
+ *
+ * To fix properly, the skip decision must incorporate the VRAM dirty bitmap.
+ * One approach: after sync_vertex_ram_buffer runs and finds no dirty pages,
+ * record that the range was clean. On the next call with the same range, do a
+ * lightweight dirty bitmap scan (like OPT_SYNC_EARLY_EXIT) before skipping.
+ * The existing OPT_SYNC_EARLY_EXIT already provides a fast uploaded_bitmap
+ * check inside sync_vertex_ram_buffer — this may be sufficient and makes
+ * OPT_SYNC_RANGE_SKIP redundant unless the sort/merge overhead is significant.
+ */
+#define OPT_SYNC_RANGE_SKIP     0
 
 #if OPT_ALWAYS_DEFERRED_FENCES
 _Static_assert(OPT_TRIPLE_BUFFERING && OPT_N_BUFFERED_SUBMIT && OPT_DEFERRED_FENCES,
@@ -502,11 +524,8 @@ typedef struct PGRAPHVkState {
 
     VkDescriptorPool descriptor_pool;
     VkDescriptorSetLayout descriptor_set_layout;
-#if OPT_LARGER_POOLS
-    VkDescriptorSet descriptor_sets[2048];
-#else
-    VkDescriptorSet descriptor_sets[1024];
-#endif
+    VkDescriptorSet *descriptor_sets;
+    int descriptor_set_count;
     int descriptor_set_index;
     bool need_descriptor_rebind;
 
@@ -524,6 +543,9 @@ typedef struct PGRAPHVkState {
 
     uint32_t last_vertex_attr_gen;
     uint32_t pipeline_vertex_attr_gen;
+    uint32_t sync_range_attr_gen;
+    uint32_t sync_range_min;
+    uint32_t sync_range_max;
     int cached_num_active_bindings;
     int cached_num_active_attrs;
     struct {
