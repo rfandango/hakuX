@@ -24,9 +24,33 @@
 #define tcg_temp_new_fp glue(tcg_temp_new_, fPREC)
 #define tcg_gen_st80f_fp glue(tcg_gen_st80f, PREC_SUFFIX)
 #define tcg_gen_ld80f_fp glue(tcg_gen_ld80f, PREC_SUFFIX)
+#define nds_load_fp glue(nds_load_fp, PREC_SUFFIX)
+#define nds_store_fp glue(nds_store_fp, PREC_SUFFIX)
 #define get_ft0 glue(get_ft0, PREC_SUFFIX)
+#define alloc_ft0 glue(alloc_ft0, PREC_SUFFIX)
 #define get_stn glue(get_stn, PREC_SUFFIX)
+#define alloc_stn glue(alloc_stn, PREC_SUFFIX)
 #define get_st0 glue(get_st0, PREC_SUFFIX)
+#define alloc_st0 glue(alloc_st0, PREC_SUFFIX)
+
+static void glue(nds_load_fp, PREC_SUFFIX)(PREC_TYPE dst, TCGv_ptr p)
+{
+#if defined(__aarch64__)
+    if (g_use_fp_jit) {
+        TCGv_i64 raw = tcg_temp_new_i64();
+        tcg_gen_ld_i64(raw, p, 0);
+#if PREC == 64
+        tcg_gen_mov64i_f64(dst, raw);
+#else
+        TCGv_f64 tmp = tcg_temp_new_f64();
+        tcg_gen_mov64i_f64(tmp, raw);
+        tcg_gen_cvt64f_f32(dst, tmp);
+#endif
+        return;
+    }
+#endif
+    tcg_gen_ld80f_fp(dst, p);
+}
 
 static PREC_TYPE get_ft0(DisasContext *s)
 {
@@ -37,7 +61,24 @@ static PREC_TYPE get_ft0(DisasContext *s)
     if (*v == NULL) {
         *v = tcg_temp_new_fp();
         TCGv_ptr p = gen_ft0_ptr();
-        tcg_gen_ld80f_fp(*v, p);
+        glue(nds_load_fp, PREC_SUFFIX)(*v, p);
+    }
+
+    return *v;
+}
+
+/*
+ * Allocate FT0 temp without loading the current value from memory.
+ * Use when the caller will immediately overwrite the value.
+ */
+static PREC_TYPE alloc_ft0(DisasContext *s)
+{
+    gen_flcr(s);
+
+    PREC_TYPE *v = (PREC_TYPE *)&s->ft0;
+
+    if (*v == NULL) {
+        *v = tcg_temp_new_fp();
     }
 
     return *v;
@@ -53,7 +94,25 @@ static PREC_TYPE get_stn(DisasContext *s, int opreg)
     if (*t == NULL) {
         *t = tcg_temp_new_fp();
         TCGv_ptr p = gen_stn_ptr(opreg);
-        tcg_gen_ld80f_fp(*t, p);
+        glue(nds_load_fp, PREC_SUFFIX)(*t, p);
+    }
+
+    return *t;
+}
+
+/*
+ * Allocate STn temp without loading the current value from memory.
+ * Use when the caller will immediately overwrite the value.
+ */
+static PREC_TYPE alloc_stn(DisasContext *s, int opreg)
+{
+    assert(!(opreg & ~7));
+    gen_flcr(s);
+
+    PREC_TYPE *t = (PREC_TYPE *)&s->fpregs[(s->fpstt_delta + opreg) & 7];
+
+    if (*t == NULL) {
+        *t = tcg_temp_new_fp();
     }
 
     return *t;
@@ -64,20 +123,44 @@ static PREC_TYPE get_st0(DisasContext *s)
     return get_stn(s, 0);
 }
 
+static PREC_TYPE alloc_st0(DisasContext *s)
+{
+    return alloc_stn(s, 0);
+}
+
+static void glue(nds_store_fp, PREC_SUFFIX)(PREC_TYPE src, TCGv_ptr p)
+{
+#if defined(__aarch64__)
+    if (g_use_fp_jit) {
+        TCGv_i64 raw = tcg_temp_new_i64();
+#if PREC == 64
+        tcg_gen_mov64f_i64(raw, src);
+#else
+        TCGv_f64 tmp = tcg_temp_new_f64();
+        tcg_gen_cvt32f_f64(tmp, src);
+        tcg_gen_mov64f_i64(raw, tmp);
+#endif
+        tcg_gen_st_i64(raw, p, 0);
+        return;
+    }
+#endif
+    tcg_gen_st80f_fp(src, p);
+}
+
 static void glue(flush_fp_regs, PREC_SUFFIX)(DisasContext *s)
 {
     for (int i = 0; i < 8; i++) {
         PREC_TYPE *t = (PREC_TYPE *)&s->fpregs[(s->fpstt_delta + i) & 7];
         if (*t) {
             TCGv_ptr ptr = gen_stn_ptr(i);
-            tcg_gen_st80f_fp(*t, ptr);
+            glue(nds_store_fp, PREC_SUFFIX)(*t, ptr);
             *t = NULL;
         }
    }
 
     if (s->ft0) {
         TCGv_ptr ptr = gen_ft0_ptr();
-        tcg_gen_st80f_fp((PREC_TYPE)s->ft0, ptr);
+        glue(nds_store_fp, PREC_SUFFIX)((PREC_TYPE)s->ft0, ptr);
         s->ft0 = NULL;
     }
 }
@@ -194,52 +277,52 @@ static void glue(gen_helper_fp_arith_STN_ST0, PREC_SUFFIX)(DisasContext *s,
 
 static void glue(gen_fmov_FT0_STN, PREC_SUFFIX)(DisasContext *s, int st_index)
 {
-    glue(tcg_gen_mov, PREC_SUFFIX)(get_ft0(s), get_stn(s, st_index));
+    glue(tcg_gen_mov, PREC_SUFFIX)(alloc_ft0(s), get_stn(s, st_index));
 }
 
 static void glue(gen_fmov_ST0_STN, PREC_SUFFIX)(DisasContext *s, int st_index)
 {
-    glue(tcg_gen_mov, PREC_SUFFIX)(get_st0(s), get_stn(s, st_index));
+    glue(tcg_gen_mov, PREC_SUFFIX)(alloc_st0(s), get_stn(s, st_index));
 }
 
 static void glue(gen_fmov_STN_ST0, PREC_SUFFIX)(DisasContext *s, int st_index)
 {
-    glue(tcg_gen_mov, PREC_SUFFIX)(get_stn(s, st_index), get_st0(s));
+    glue(tcg_gen_mov, PREC_SUFFIX)(alloc_stn(s, st_index), get_st0(s));
 }
 
 static void glue(gen_flds_FT0, PREC_SUFFIX)(DisasContext *s, TCGv_i32 arg)
 {
-    glue(gen_mov32i, PREC_SUFFIX)(get_ft0(s), arg);
+    glue(gen_mov32i, PREC_SUFFIX)(alloc_ft0(s), arg);
 }
 
 static void glue(gen_flds_ST0, PREC_SUFFIX)(DisasContext *s, TCGv_i32 arg)
 {
-    glue(gen_mov32i, PREC_SUFFIX)(get_st0(s), arg);
+    glue(gen_mov32i, PREC_SUFFIX)(alloc_st0(s), arg);
 }
 
 static void glue(gen_fldl_FT0, PREC_SUFFIX)(DisasContext *s, TCGv_i64 arg)
 {
-    glue(gen_mov64i, PREC_SUFFIX)(get_ft0(s), arg);
+    glue(gen_mov64i, PREC_SUFFIX)(alloc_ft0(s), arg);
 }
 
 static void glue(gen_fldl_ST0, PREC_SUFFIX)(DisasContext *s, TCGv_i64 arg)
 {
-    glue(gen_mov64i, PREC_SUFFIX)(get_st0(s), arg);
+    glue(gen_mov64i, PREC_SUFFIX)(alloc_st0(s), arg);
 }
 
 static void glue(gen_fildl_FT0, PREC_SUFFIX)(DisasContext *s, TCGv_i32 arg)
 {
-    glue(tcg_gen_cvt32i, PREC_SUFFIX)(get_ft0(s), arg);
+    glue(tcg_gen_cvt32i, PREC_SUFFIX)(alloc_ft0(s), arg);
 }
 
 static void glue(gen_fildl_ST0, PREC_SUFFIX)(DisasContext *s, TCGv_i32 arg)
 {
-    glue(tcg_gen_cvt32i, PREC_SUFFIX)(get_st0(s), arg);
+    glue(tcg_gen_cvt32i, PREC_SUFFIX)(alloc_st0(s), arg);
 }
 
 static void glue(gen_fildll_ST0, PREC_SUFFIX)(DisasContext *s, TCGv_i64 arg)
 {
-    glue(tcg_gen_cvt64i, PREC_SUFFIX)(get_st0(s), arg);
+    glue(tcg_gen_cvt64i, PREC_SUFFIX)(alloc_st0(s), arg);
 }
 
 static void glue(gen_fistl_ST0, PREC_SUFFIX)(DisasContext *s, TCGv_i32 arg)
@@ -294,15 +377,15 @@ static void glue(gen_fcos, PREC_SUFFIX)(DisasContext *s)
 
 static void glue(gen_fld1_ST0, PREC_SUFFIX)(DisasContext *s)
 {
-    glue(gen_movi, PREC_SUFFIX)(s, get_st0(s), 1.0);
+    glue(gen_movi, PREC_SUFFIX)(s, alloc_st0(s), 1.0);
 }
 
 static void glue(gen_fldz_ST0, PREC_SUFFIX)(DisasContext *s)
 {
-    glue(gen_movi, PREC_SUFFIX)(s, get_st0(s), 0.0);
+    glue(gen_movi, PREC_SUFFIX)(s, alloc_st0(s), 0.0);
 }
 
 static void glue(gen_fldz_FT0, PREC_SUFFIX)(DisasContext *s)
 {
-    glue(gen_movi, PREC_SUFFIX)(s, get_ft0(s), 0.0);
+    glue(gen_movi, PREC_SUFFIX)(s, alloc_ft0(s), 0.0);
 }

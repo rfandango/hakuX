@@ -313,20 +313,37 @@
             android:layout_height="wrap_content"
             android:visibility="gone" />
 
-          <!-- Fast FPU (native x87) -->
+          <!-- Native Floats (Safe) -->
           <com.google.android.material.materialswitch.MaterialSwitch
-            android:id="@+id/switch_native_x87"
+            android:id="@+id/switch_fp_safe"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
-            android:text="@string/settings_native_x87"
+            android:text="@string/settings_fp_safe"
             android:textColor="@color/xemu_text_muted" />
           <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginStart="4dp"
             android:layout_marginTop="2dp"
-            android:text="@string/settings_native_x87_desc"
+            android:text="@string/settings_fp_safe_desc"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            android:textColor="@color/xemu_text_muted" />
+
+          <!-- Native Floats (JIT) -->
+          <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/switch_fp_jit"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/settings_fp_jit"
+            android:textColor="@color/xemu_text_muted" />
+          <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_fp_jit_desc"
             android:textAppearance="@style/TextAppearance.Material3.BodySmall"
             android:textColor="@color/xemu_text_muted" />
 

@@ -135,8 +135,11 @@
   <string name="settings_aspect_ratio">Aspect Ratio</string>
   <string name="settings_unlock_framerate">Unlock frame rate</string>
   <string name="settings_unlock_framerate_desc">Prevents frame rate from locking to 30 FPS when the device can\'t sustain 60 FPS. May affect game speed.</string>
-  <string name="settings_native_x87">Fast FPU (native floats)</string>
-  <string name="settings_native_x87_desc">Use native ARM64 double-precision for x87 FPU operations. Significantly faster but may cause visual artifacts (bloom, lighting) in some games. Disable if you see rendering issues. Takes effect immediately.</string>
+  <string name="settings_fp_safe">Native Floats (Safe)</string>
+  <string name="settings_fp_safe_desc">Use native ARM64 double-precision for x87 FPU arithmetic. Keeps legacy 80-bit storage. Moderate speedup with good compatibility. Takes effect immediately.</string>
+
+  <string name="settings_fp_jit">Native Floats (JIT)</string>
+  <string name="settings_fp_jit_desc">Full JIT-level FP optimization: native 64-bit storage + inline FP instructions. Best performance but may reduce accuracy. Requires restart.</string>
 
   <string name="settings_fast_fences">Fast fences (reduce GPU stalls)</string>
   <string name="settings_fast_fences_desc">Defer GPU fence waits for buffer-space and vertex-dirty flushes. Significantly reduces frame time but may cause geometry popping or flickering. Takes effect immediately.</string>

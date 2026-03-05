@@ -27,10 +27,12 @@
 #include "xemu-settings.h"
 #include "hw/xbox/nv2a/debug.h"
 
-extern "C" void xemu_set_native_x87(bool enable);
-extern "C" bool xemu_get_native_x87(void);
+extern "C" void xemu_set_fp_safe(bool enable);
+extern "C" bool xemu_get_fp_safe(void);
 extern "C" void xemu_set_fast_fences(bool enable);
 extern "C" bool xemu_get_fast_fences(void);
+extern "C" void xemu_set_fp_jit(bool enable);
+extern "C" bool xemu_get_fp_jit(void);
 
 #ifdef CONFIG_VULKAN
 #include <adrenotools/driver.h>
@@ -736,10 +738,15 @@ static SetupFiles SyncSetupFiles() {
   ds.unlock_framerate = GetPrefBool(env, activity, "unlock_framerate", true);
   ds.validation_layers = GetPrefBool(env, activity, "validation_layers", false);
 
-  bool native_x87 = GetPrefBool(env, activity, "native_x87", true);
-  xemu_set_native_x87(native_x87);
+  bool fp_safe = GetPrefBool(env, activity, "fp_safe", true);
+  xemu_set_fp_safe(fp_safe);
   __android_log_print(ANDROID_LOG_INFO, "xemu-android",
-                      "native x87 FPU: %s", native_x87 ? "ON" : "OFF");
+                      "FP safe (native arithmetic): %s", fp_safe ? "ON" : "OFF");
+
+  bool fp_jit = GetPrefBool(env, activity, "fp_jit", true);
+  xemu_set_fp_jit(fp_jit);
+  __android_log_print(ANDROID_LOG_INFO, "xemu-android",
+                      "FP JIT (native storage + inline ops): %s", fp_jit ? "ON" : "OFF");
 
   bool fast_fences = GetPrefBool(env, activity, "fast_fences", false);
   xemu_set_fast_fences(fast_fences);
@@ -1200,15 +1207,15 @@ Java_com_rfandango_xemuandroid_MainActivity_nativeGetDriverInfo(JNIEnv *env, job
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_rfandango_xemuandroid_SettingsActivity_nativeGetNativeX87(JNIEnv *, jobject)
+Java_com_rfandango_xemuandroid_SettingsActivity_nativeGetFpSafe(JNIEnv *, jobject)
 {
-    return xemu_get_native_x87() ? JNI_TRUE : JNI_FALSE;
+    return xemu_get_fp_safe() ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_rfandango_xemuandroid_SettingsActivity_nativeSetNativeX87(JNIEnv *, jobject, jboolean enable)
+Java_com_rfandango_xemuandroid_SettingsActivity_nativeSetFpSafe(JNIEnv *, jobject, jboolean enable)
 {
-    xemu_set_native_x87(enable == JNI_TRUE);
+    xemu_set_fp_safe(enable == JNI_TRUE);
     if (!enable) {
         const char *storage = SDL_AndroidGetInternalStoragePath();
         if (storage) {
@@ -1229,6 +1236,18 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_rfandango_xemuandroid_SettingsActivity_nativeSetFastFences(JNIEnv *, jobject, jboolean enable)
 {
     xemu_set_fast_fences(enable == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_rfandango_xemuandroid_SettingsActivity_nativeGetFpJit(JNIEnv *, jobject)
+{
+    return xemu_get_fp_jit() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_rfandango_xemuandroid_SettingsActivity_nativeSetFpJit(JNIEnv *, jobject, jboolean enable)
+{
+    xemu_set_fp_jit(enable == JNI_TRUE);
 }
 
 #ifdef CONFIG_VULKAN

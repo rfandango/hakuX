@@ -35,12 +35,12 @@
 
 #include "exec/log.h"
 
-static int g_use_hard_fpu;
+static int g_use_fp_jit;
 
-#if defined(XBOX) && defined(__x86_64__)
+#if defined(XBOX) && (defined(__x86_64__) || defined(__aarch64__))
 #include "ui/xemu-settings.h"
 #define MAP_GEN_HELPER_SOFT_HARD(name) \
-    (g_use_hard_fpu ? gen_helper_##name##__hard : gen_helper_##name##__soft)
+    (g_use_fp_jit ? gen_helper_##name##__hard : gen_helper_##name##__soft)
 #define gen_helper_flds_FT0       MAP_GEN_HELPER_SOFT_HARD(flds_FT0)
 #define gen_helper_fldl_FT0       MAP_GEN_HELPER_SOFT_HARD(fldl_FT0)
 #define gen_helper_fildl_FT0      MAP_GEN_HELPER_SOFT_HARD(fildl_FT0)
@@ -121,7 +121,7 @@ static int g_use_hard_fpu;
 #define gen_helper_fldenv         MAP_GEN_HELPER_SOFT_HARD(fldenv)
 #define gen_helper_fsave          MAP_GEN_HELPER_SOFT_HARD(fsave)
 #define gen_helper_frstor         MAP_GEN_HELPER_SOFT_HARD(frstor)
-#endif /* defined(XBOX) && defined(__x86_64__) */
+#endif /* defined(XBOX) && (__x86_64__ || __aarch64__) */
 
 #define HELPER_H "helper.h"
 #include "exec/helper-info.c.inc"
@@ -1668,7 +1668,14 @@ static TCGv_ptr gen_stn_ptr(int opreg)
 static TCGv_ptr gen_ft0_ptr(void)
 {
     TCGv_ptr ft0 = tcg_temp_new_ptr();
-    tcg_gen_addi_ptr(ft0, tcg_env, offsetof(CPUX86State, ft0));
+#if defined(__aarch64__)
+    if (g_use_fp_jit) {
+        tcg_gen_addi_ptr(ft0, tcg_env, offsetof(CPUX86State, ft0_native));
+    } else
+#endif
+    {
+        tcg_gen_addi_ptr(ft0, tcg_env, offsetof(CPUX86State, ft0));
+    }
     return ft0;
 }
 
@@ -1783,35 +1790,61 @@ static void gen_flush_fp(DisasContext *s)
 }
 
 /*
- * Ugly macros to handle soft FPU helper generation
+ * When fp_jit is enabled AND the backend supports TCG FP ops, skip the
+ * helper call and fall through to the TCG FP ops path (ld80f, add_f64, etc.).
+ *
+ * Both x86_64 and aarch64 backends now implement scalar FP ops.
+ * ARM64 sin/cos are excluded (no native insn) and always use helpers.
  */
-#define GEN_HELPER_FALLBACK_v_v(func) do { \
-        if (!g_use_hard_fpu) { \
+#if defined(__x86_64__) || defined(__aarch64__)
+#define HARD_FPU_HAS_TCG_FP_OPS 1
+#else
+#define HARD_FPU_HAS_TCG_FP_OPS 0
+#endif
+
+/*
+ * Per-group bisection flags for inline FP ops.
+ * Set a group to 0 to force that group through helper functions.
+ * Set to 1 to use the inline TCG FP ops path.
+ *
+ * Note: gen_helper_fp_arith_ST0_FT0 / STN_ST0 (add/sub/mul/div/com)
+ * are ALWAYS inline (they bypass these macros) and work correctly.
+ * sin/cos always use helpers on ARM64. Only these groups are suspects.
+ */
+#define BISECT_GRP_STACK   1  /* fpush, fpop, fmov_*, fxchg_*, enter_mmx */
+#define BISECT_GRP_LOAD_FT 1  /* flds_FT0, fldl_FT0 (load to FT0, no push) */
+#define BISECT_GRP_LOAD_ST 1  /* flds_ST0, fldl_ST0 (push + load to ST0) */
+#define BISECT_GRP_LOAD_I  1  /* fildl_FT0/ST0, fildll_ST0, fld1, fldz (int loads + constants) */
+#define BISECT_GRP_STORE   1  /* fsts_*, fstl_*, fistl_*, fistll_* */
+#define BISECT_GRP_UNARY   1  /* fchs, fabs, fsqrt */
+
+#define GEN_HELPER_FALLBACK_v_v(func, grp) do { \
+        if (!g_use_fp_jit || !HARD_FPU_HAS_TCG_FP_OPS || !(grp)) { \
             gen_helper_ ## func(tcg_env); \
             return; \
         }} while(0)
 
-#define GEN_HELPER_FALLBACK_v_i(func, arg) do { \
-        if (!g_use_hard_fpu) { \
+#define GEN_HELPER_FALLBACK_v_i(func, arg, grp) do { \
+        if (!g_use_fp_jit || !HARD_FPU_HAS_TCG_FP_OPS || !(grp)) { \
             gen_helper_ ## func(tcg_env, tcg_constant_i32(arg)); \
             return; \
         }} while(0)
 
-#define GEN_HELPER_FALLBACK_v_T(func, arg) do { \
-        if (!g_use_hard_fpu) { \
+#define GEN_HELPER_FALLBACK_v_T(func, arg, grp) do { \
+        if (!g_use_fp_jit || !HARD_FPU_HAS_TCG_FP_OPS || !(grp)) { \
             gen_helper_ ## func(tcg_env, arg); \
             return; \
         }} while(0)
 
-#define GEN_HELPER_FALLBACK_T_v(func, arg) do { \
-        if (!g_use_hard_fpu) { \
+#define GEN_HELPER_FALLBACK_T_v(func, arg, grp) do { \
+        if (!g_use_fp_jit || !HARD_FPU_HAS_TCG_FP_OPS || !(grp)) { \
             gen_helper_ ## func(arg, tcg_env); \
             return; \
         }} while(0)
 
 static void gen_fpush(DisasContext *s)
 {
-    GEN_HELPER_FALLBACK_v_v(fpush);
+    GEN_HELPER_FALLBACK_v_v(fpush, BISECT_GRP_STACK);
 
     tcg_gen_subi_i32(fpstt, fpstt, 1);
     tcg_gen_andi_i32(fpstt, fpstt, 7);
@@ -1822,7 +1855,7 @@ static void gen_fpush(DisasContext *s)
 
 static void gen_fpop(DisasContext *s)
 {
-    GEN_HELPER_FALLBACK_v_v(fpop);
+    GEN_HELPER_FALLBACK_v_v(fpop, BISECT_GRP_STACK);
 
     gen_set_fptag(0, 1); /* invalidate stack entry */
     tcg_gen_addi_i32(fpstt, fpstt, 1);
@@ -1834,25 +1867,25 @@ static void gen_fpop(DisasContext *s)
 
 static void gen_fmov_FT0_STN(DisasContext *s, int st_index)
 {
-    GEN_HELPER_FALLBACK_v_i(fmov_FT0_STN, st_index);
+    GEN_HELPER_FALLBACK_v_i(fmov_FT0_STN, st_index, BISECT_GRP_STACK);
     fp_pc_wrapper(gen_fmov_FT0_STN)(s, st_index);
 }
 
 static void gen_fmov_ST0_STN(DisasContext *s, int st_index)
 {
-    GEN_HELPER_FALLBACK_v_i(fmov_ST0_STN, st_index);
+    GEN_HELPER_FALLBACK_v_i(fmov_ST0_STN, st_index, BISECT_GRP_STACK);
     fp_pc_wrapper(gen_fmov_ST0_STN)(s, st_index);
 }
 
 static void gen_fmov_STN_ST0(DisasContext *s, int st_index)
 {
-    GEN_HELPER_FALLBACK_v_i(fmov_STN_ST0, st_index);
+    GEN_HELPER_FALLBACK_v_i(fmov_STN_ST0, st_index, BISECT_GRP_STACK);
     fp_pc_wrapper(gen_fmov_STN_ST0)(s, st_index);
 }
 
 static void gen_fxchg_ST0_STN(DisasContext *s, int st_index)
 {
-    GEN_HELPER_FALLBACK_v_i(fxchg_ST0_STN, st_index);
+    GEN_HELPER_FALLBACK_v_i(fxchg_ST0_STN, st_index, BISECT_GRP_STACK);
 
     /* Ensure ST0, STN are loaded */
     if (fpu_using_double_precision(s)) {
@@ -1870,7 +1903,7 @@ static void gen_fxchg_ST0_STN(DisasContext *s, int st_index)
 
 static void gen_enter_mmx(DisasContext *s)
 {
-    GEN_HELPER_FALLBACK_v_v(enter_mmx);
+    GEN_HELPER_FALLBACK_v_v(enter_mmx, BISECT_GRP_STACK);
 
     gen_flush_fp((DisasContext *)tcg_ctx->disas_ctx);
 
@@ -1884,89 +1917,89 @@ static void gen_enter_mmx(DisasContext *s)
 
 static void gen_flds_FT0(DisasContext *s, TCGv_i32 arg)
 {
-    GEN_HELPER_FALLBACK_v_T(flds_FT0, arg);
+    GEN_HELPER_FALLBACK_v_T(flds_FT0, arg, BISECT_GRP_LOAD_FT);
     fp_pc_wrapper(gen_flds_FT0)(s, arg);
 }
 
 static void gen_flds_ST0(DisasContext *s, TCGv_i32 arg)
 {
-    GEN_HELPER_FALLBACK_v_T(flds_ST0, arg);
+    GEN_HELPER_FALLBACK_v_T(flds_ST0, arg, BISECT_GRP_LOAD_ST);
     gen_fpush(s);
     fp_pc_wrapper(gen_flds_ST0)(s, arg);
 }
 
 static void gen_fldl_FT0(DisasContext *s, TCGv_i64 arg)
 {
-    GEN_HELPER_FALLBACK_v_T(fldl_FT0, arg);
+    GEN_HELPER_FALLBACK_v_T(fldl_FT0, arg, BISECT_GRP_LOAD_FT);
     fp_pc_wrapper(gen_fldl_FT0)(s, arg);
 }
 
 static void gen_fldl_ST0(DisasContext *s, TCGv_i64 arg)
 {
-    GEN_HELPER_FALLBACK_v_T(fldl_ST0, arg);
+    GEN_HELPER_FALLBACK_v_T(fldl_ST0, arg, BISECT_GRP_LOAD_ST);
     gen_fpush(s);
     fp_pc_wrapper(gen_fldl_ST0)(s, arg);
 }
 
 static void gen_fildl_FT0(DisasContext *s, TCGv_i32 arg)
 {
-    GEN_HELPER_FALLBACK_v_T(fildl_FT0, arg);
+    GEN_HELPER_FALLBACK_v_T(fildl_FT0, arg, BISECT_GRP_LOAD_I);
     fp_pc_wrapper(gen_fildl_FT0)(s, arg);
 }
 
 static void gen_fildl_ST0(DisasContext *s, TCGv_i32 arg)
 {
-    GEN_HELPER_FALLBACK_v_T(fildl_ST0, arg);
+    GEN_HELPER_FALLBACK_v_T(fildl_ST0, arg, BISECT_GRP_LOAD_I);
     gen_fpush(s);
     fp_pc_wrapper(gen_fildl_ST0)(s, arg);
 }
 
 static void gen_fildll_ST0(DisasContext *s, TCGv_i64 arg)
 {
-    GEN_HELPER_FALLBACK_v_T(fildll_ST0, arg);
+    GEN_HELPER_FALLBACK_v_T(fildll_ST0, arg, BISECT_GRP_LOAD_I);
     gen_fpush(s);
     fp_pc_wrapper(gen_fildll_ST0)(s, arg);
 }
 
 static void gen_fsts_ST0(DisasContext *s, TCGv_i32 arg)
 {
-    GEN_HELPER_FALLBACK_T_v(fsts_ST0, arg);
+    GEN_HELPER_FALLBACK_T_v(fsts_ST0, arg, BISECT_GRP_STORE);
     fp_pc_wrapper(gen_fsts_ST0)(s, arg);
 }
 
 static void gen_fstl_ST0(DisasContext *s, TCGv_i64 arg)
 {
-    GEN_HELPER_FALLBACK_T_v(fstl_ST0, arg);
+    GEN_HELPER_FALLBACK_T_v(fstl_ST0, arg, BISECT_GRP_STORE);
     fp_pc_wrapper(gen_fstl_ST0)(s, arg);
 }
 
 static void gen_fistl_ST0(DisasContext *s, TCGv_i32 arg)
 {
-    GEN_HELPER_FALLBACK_T_v(fistl_ST0, arg);
+    GEN_HELPER_FALLBACK_T_v(fistl_ST0, arg, BISECT_GRP_STORE);
     fp_pc_wrapper(gen_fistl_ST0)(s, arg);
 }
 
 static void gen_fistll_ST0(DisasContext *s, TCGv_i64 arg)
 {
-    GEN_HELPER_FALLBACK_T_v(fistll_ST0, arg);
+    GEN_HELPER_FALLBACK_T_v(fistll_ST0, arg, BISECT_GRP_STORE);
     fp_pc_wrapper(gen_fistll_ST0)(s, arg);
 }
 
 static void gen_fchs_ST0(DisasContext *s)
 {
-    GEN_HELPER_FALLBACK_v_v(fchs_ST0);
+    GEN_HELPER_FALLBACK_v_v(fchs_ST0, BISECT_GRP_UNARY);
     fp_pc_wrapper(gen_fchs_ST0)(s);
 }
 
 static void gen_fabs_ST0(DisasContext *s)
 {
-    GEN_HELPER_FALLBACK_v_v(fabs_ST0);
+    GEN_HELPER_FALLBACK_v_v(fabs_ST0, BISECT_GRP_UNARY);
     fp_pc_wrapper(gen_fabs_ST0)(s);
 }
 
 static void gen_fsqrt(DisasContext *s)
 {
-    GEN_HELPER_FALLBACK_v_v(fsqrt);
+    GEN_HELPER_FALLBACK_v_v(fsqrt, BISECT_GRP_UNARY);
     fp_pc_wrapper(gen_fsqrt)(s);
 }
 
@@ -1980,21 +2013,36 @@ static void gen_clear_fpus_c2(DisasContext *s)
 
 static void gen_fsin(DisasContext *s)
 {
-    GEN_HELPER_FALLBACK_v_v(fsin);
+    /*
+     * ARM64 has no native sin instruction, so always use helper even when
+     * HARD_FPU_HAS_TCG_FP_OPS is set. The helper uses __hard (native double)
+     * when fp_jit is enabled, which is fast enough for the rare FSIN.
+     */
+#ifndef __x86_64__
+    gen_helper_fsin(tcg_env);
+    gen_clear_fpus_c2(s);
+    return;
+#endif
+    GEN_HELPER_FALLBACK_v_v(fsin, BISECT_GRP_UNARY);
     fp_pc_wrapper(gen_fsin)(s);
     gen_clear_fpus_c2(s); /* FIXME: Does not check range correctly */
 }
 
 static void gen_fcos(DisasContext *s)
 {
-    GEN_HELPER_FALLBACK_v_v(fcos);
+#ifndef __x86_64__
+    gen_helper_fcos(tcg_env);
+    gen_clear_fpus_c2(s);
+    return;
+#endif
+    GEN_HELPER_FALLBACK_v_v(fcos, BISECT_GRP_UNARY);
     fp_pc_wrapper(gen_fcos)(s);
     gen_clear_fpus_c2(s); /* FIXME: Does not check range correctly */
 }
 
 static void gen_helper_fp_arith_ST0_FT0(DisasContext *s, int op)
 {
-    if (g_use_hard_fpu) {
+    if (g_use_fp_jit && HARD_FPU_HAS_TCG_FP_OPS) {
         fp_pc_wrapper(gen_helper_fp_arith_ST0_FT0)(s, op);
     } else {
         switch (op) {
@@ -2034,7 +2082,7 @@ static void gen_fcom_ST0_FT0(DisasContext *s)
 /* NOTE the exception in "r" op ordering */
 static void gen_helper_fp_arith_STN_ST0(DisasContext *s, int op, int opreg)
 {
-    if (g_use_hard_fpu) {
+    if (g_use_fp_jit && HARD_FPU_HAS_TCG_FP_OPS) {
         fp_pc_wrapper(gen_helper_fp_arith_STN_ST0)(s, op, opreg);
     } else {
         TCGv_i32 tmp = tcg_constant_i32(opreg);
@@ -2064,20 +2112,20 @@ static void gen_helper_fp_arith_STN_ST0(DisasContext *s, int op, int opreg)
 
 static void gen_fld1_ST0(DisasContext *s)
 {
-    GEN_HELPER_FALLBACK_v_v(fld1_ST0);
+    GEN_HELPER_FALLBACK_v_v(fld1_ST0, BISECT_GRP_LOAD_I);
     fp_pc_wrapper(gen_fld1_ST0)(s);
 }
 
 static void gen_fldz_ST0(DisasContext *s)
 {
-    GEN_HELPER_FALLBACK_v_v(fldz_ST0);
+    GEN_HELPER_FALLBACK_v_v(fldz_ST0, BISECT_GRP_LOAD_I);
     fp_pc_wrapper(gen_fldz_ST0)(s);
     /* FIXME: Set tag word */
 }
 
 static void gen_fldz_FT0(DisasContext *s)
 {
-    GEN_HELPER_FALLBACK_v_v(fldz_FT0);
+    GEN_HELPER_FALLBACK_v_v(fldz_FT0, BISECT_GRP_LOAD_I);
     fp_pc_wrapper(gen_fldz_FT0)(s);
 }
 
@@ -4281,8 +4329,8 @@ void tcg_x86_init(void)
     fpstt = tcg_global_mem_new_i32(tcg_env,
                                    offsetof(CPUX86State, fpstt), "fpstt");
 
-#if defined(XBOX) && defined(__x86_64__)
-    g_use_hard_fpu = g_config.perf.hard_fpu;
+#if defined(XBOX) && (defined(__x86_64__) || defined(__aarch64__))
+    g_use_fp_jit = g_config.perf.fp_jit;
 #endif
 }
 

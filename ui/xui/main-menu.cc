@@ -61,8 +61,8 @@ void MainMenuGeneralView::Draw()
 
 #if defined(__x86_64__)
     SectionTitle("Performance");
-    Toggle("Hard FPU emulation", &g_config.perf.hard_fpu,
-           "Use hardware-accelerated floating point emulation (requires restart)");
+    Toggle("Native Floats (JIT)", &g_config.perf.fp_jit,
+           "Full JIT-level FP optimization with native 64-bit storage. Best performance (requires restart)");
 #endif
 
     Toggle("Cache shaders to disk", &g_config.perf.cache_shaders,

@@ -99,7 +99,7 @@ static void xemu_settings_apply_defaults(void)
     g_config.sys.mem_limit = CONFIG_SYS_MEM_LIMIT_64;
     g_config.sys.avpack = CONFIG_SYS_AVPACK_HDTV;
 
-    g_config.perf.hard_fpu = true;
+    g_config.perf.fp_jit = true;
     g_config.perf.cache_shaders = true;
     g_config.perf.unlock_framerate = true;
 }
@@ -275,16 +275,21 @@ bool xemu_settings_load(void)
         if (auto ar = display_ui["aspect_ratio"].value<std::string>()) {
             if (*ar == "native" || *ar == "4:3") {
                 g_config.display.ui.aspect_ratio = CONFIG_DISPLAY_UI_ASPECT_RATIO_NATIVE;
+                g_config.display.ui.fit = CONFIG_DISPLAY_UI_FIT_SCALE;
             } else if (*ar == "auto") {
                 g_config.display.ui.aspect_ratio = CONFIG_DISPLAY_UI_ASPECT_RATIO_AUTO;
+                g_config.display.ui.fit = CONFIG_DISPLAY_UI_FIT_SCALE;
             } else if (*ar == "16:9") {
                 g_config.display.ui.aspect_ratio = CONFIG_DISPLAY_UI_ASPECT_RATIO_16X9;
+                g_config.display.ui.fit = CONFIG_DISPLAY_UI_FIT_SCALE;
+            } else if (*ar == "fit") {
+                g_config.display.ui.fit = CONFIG_DISPLAY_UI_FIT_STRETCH;
             }
         }
 
         // Performance settings
-        if (auto hard_fpu = perf["hard_fpu"].value<bool>()) {
-            g_config.perf.hard_fpu = *hard_fpu;
+        if (auto fp_jit = perf["fp_jit"].value<bool>()) {
+            g_config.perf.fp_jit = *fp_jit;
         }
         if (auto cache_shaders = perf["cache_shaders"].value<bool>()) {
             g_config.perf.cache_shaders = *cache_shaders;
@@ -560,4 +565,14 @@ void xemu_settings_reset_controller_mapping(const char *guid)
 
 void xemu_settings_reset_keyboard_mapping(void)
 {
+}
+
+extern "C" void xemu_set_fp_jit(bool enable)
+{
+    g_config.perf.fp_jit = enable;
+}
+
+extern "C" bool xemu_get_fp_jit(void)
+{
+    return g_config.perf.fp_jit;
 }

@@ -144,6 +144,7 @@ static GLuint g_android_blit_vao;
 static GLuint g_android_blit_vbo;
 static GLint g_android_blit_tex_loc = -1;
 static GLint g_android_blit_flip_loc = -1;
+static GLint g_android_blit_scale_loc = -1;
 static GLuint g_android_cpu_tex = 0;
 static int g_android_cpu_tex_w = 0;
 static int g_android_cpu_tex_h = 0;
@@ -220,11 +221,12 @@ static bool android_blit_init(void)
                      "layout(location=0) in vec2 a_pos;\n"
                      "layout(location=1) in vec2 a_uv;\n"
                      "uniform bool u_flip;\n"
+                     "uniform vec2 u_scale;\n"
                      "out vec2 v_uv;\n"
                      "void main() {\n"
                      "  v_uv = a_uv;\n"
                      "  if (u_flip) { v_uv.y = 1.0 - v_uv.y; }\n"
-                     "  gl_Position = vec4(a_pos, 0.0, 1.0);\n"
+                     "  gl_Position = vec4(a_pos * u_scale, 0.0, 1.0);\n"
                      "}\n";
     const char *fs = "#version 300 es\n"
                      "precision highp float;\n"
@@ -264,6 +266,7 @@ static bool android_blit_init(void)
     g_android_blit_prog = prog;
     g_android_blit_tex_loc = glGetUniformLocation(prog, "u_tex");
     g_android_blit_flip_loc = glGetUniformLocation(prog, "u_flip");
+    g_android_blit_scale_loc = glGetUniformLocation(prog, "u_scale");
 
     const float verts[] = {
         -1.0f, -1.0f, 0.0f, 0.0f,
@@ -287,6 +290,21 @@ static bool android_blit_init(void)
     return true;
 }
 
+static float android_get_display_aspect_ratio(int tex_w, int tex_h)
+{
+    switch (g_config.display.ui.aspect_ratio) {
+    case CONFIG_DISPLAY_UI_ASPECT_RATIO_NATIVE:
+        return (float)tex_w / (float)tex_h;
+    case CONFIG_DISPLAY_UI_ASPECT_RATIO_16X9:
+        return 16.0f / 9.0f;
+    case CONFIG_DISPLAY_UI_ASPECT_RATIO_4X3:
+        return 4.0f / 3.0f;
+    case CONFIG_DISPLAY_UI_ASPECT_RATIO_AUTO:
+    default:
+        return 4.0f / 3.0f;
+    }
+}
+
 static void android_blit_frame(GLuint tex, bool flip)
 {
     if (!android_blit_init()) {
@@ -299,6 +317,29 @@ static void android_blit_frame(GLuint tex, bool flip)
     if (w <= 0) w = 1;
     if (h <= 0) h = 1;
 
+    int tw = 0, th = 0;
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &tw);
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &th);
+    if (tw <= 0) tw = 640;
+    if (th <= 0) th = 480;
+
+    float scale_x = 1.0f, scale_y = 1.0f;
+    if (g_config.display.ui.fit == CONFIG_DISPLAY_UI_FIT_STRETCH) {
+        scale_x = 1.0f;
+        scale_y = 1.0f;
+    } else {
+        float t_ratio = android_get_display_aspect_ratio(tw, th);
+        float w_ratio = (float)w / (float)h;
+        if (t_ratio > w_ratio) {
+            scale_x = 1.0f;
+            scale_y = w_ratio / t_ratio;
+        } else {
+            scale_x = t_ratio / w_ratio;
+            scale_y = 1.0f;
+        }
+    }
+
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, w, h);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -309,6 +350,7 @@ static void android_blit_frame(GLuint tex, bool flip)
     glUseProgram(g_android_blit_prog);
     glUniform1i(g_android_blit_tex_loc, 0);
     glUniform1i(g_android_blit_flip_loc, flip ? 1 : 0);
+    glUniform2f(g_android_blit_scale_loc, scale_x, scale_y);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindVertexArray(g_android_blit_vao);

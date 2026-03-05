@@ -647,6 +647,53 @@ typedef enum {
     I3617_ABS       = 0x0e20b800,
     I3617_NEG       = 0x2e20b800,
 
+    /* Scalar FP data-processing (2 source) -- Rd, Rn, Rm */
+    I_FP2_FMUL_S    = 0x1e200800,
+    I_FP2_FDIV_S    = 0x1e201800,
+    I_FP2_FADD_S    = 0x1e202800,
+    I_FP2_FSUB_S    = 0x1e203800,
+    I_FP2_FMUL_D    = 0x1e600800,
+    I_FP2_FDIV_D    = 0x1e601800,
+    I_FP2_FADD_D    = 0x1e602800,
+    I_FP2_FSUB_D    = 0x1e603800,
+
+    /* Scalar FP data-processing (1 source) -- Rd, Rn */
+    I_FP1_FMOV_S    = 0x1e204000,
+    I_FP1_FABS_S    = 0x1e20c000,
+    I_FP1_FNEG_S    = 0x1e214000,
+    I_FP1_FSQRT_S   = 0x1e21c000,
+    I_FP1_FCVT_DS   = 0x1e22c000,  /* FCVT Dd, Sn (single->double) */
+    I_FP1_FMOV_D    = 0x1e604000,
+    I_FP1_FABS_D    = 0x1e60c000,
+    I_FP1_FNEG_D    = 0x1e614000,
+    I_FP1_FSQRT_D   = 0x1e61c000,
+    I_FP1_FCVT_SD   = 0x1e624000,  /* FCVT Sd, Dn (double->single) */
+
+    /* Scalar FP compare -- Rn, Rm */
+    I_FPCMP_FCMP_S  = 0x1e202000,
+    I_FPCMP_FCMP_D  = 0x1e602000,
+
+    /* FP<->integer conversions */
+    I_FPCVT_SCVTF_SW = 0x1e220000, /* SCVTF Sd, Wn */
+    I_FPCVT_SCVTF_DW = 0x1e620000, /* SCVTF Dd, Wn */
+    I_FPCVT_SCVTF_SX = 0x9e220000, /* SCVTF Sd, Xn */
+    I_FPCVT_SCVTF_DX = 0x9e620000, /* SCVTF Dd, Xn */
+    I_FPCVT_FCVTZS_WS = 0x1e380000, /* FCVTZS Wn, Sd */
+    I_FPCVT_FCVTZS_WD = 0x1e780000, /* FCVTZS Wn, Dd */
+    I_FPCVT_FCVTZS_XS = 0x9e380000, /* FCVTZS Xn, Sd */
+    I_FPCVT_FCVTZS_XD = 0x9e780000, /* FCVTZS Xn, Dd */
+
+    /* FP<->integer bit-copy (FMOV between GPR and FP reg) */
+    I_FPMOV_W_S     = 0x1e260000,  /* FMOV Wd, Sn */
+    I_FPMOV_S_W     = 0x1e270000,  /* FMOV Sd, Wn */
+    I_FPMOV_X_D     = 0x9e660000,  /* FMOV Xd, Dn */
+    I_FPMOV_D_X     = 0x9e670000,  /* FMOV Dd, Xn */
+
+    /* System: read NZCV flags into GPR */
+    I_MRS_NZCV      = 0xd53b4200,  /* MRS Xt, NZCV */
+    /* System: write FPCR */
+    I_MSR_FPCR      = 0xd51b4400,  /* MSR FPCR, Xt */
+
     /* System instructions.  */
     NOP             = 0xd503201f,
     DMB_ISH         = 0xd50338bf,
@@ -1258,6 +1305,15 @@ static bool tcg_out_mov(TCGContext *s, TCGType type, TCGReg ret, TCGReg arg)
         tcg_out_insn(s, 3616, ORR, 1, 0, ret, arg, arg);
         break;
 
+    case TCG_TYPE_F32:
+        tcg_debug_assert(ret >= 32 && arg >= 32);
+        tcg_out32(s, I_FP1_FMOV_S | ((arg & 0x1f) << 5) | (ret & 0x1f));
+        break;
+    case TCG_TYPE_F64:
+        tcg_debug_assert(ret >= 32 && arg >= 32);
+        tcg_out32(s, I_FP1_FMOV_D | ((arg & 0x1f) << 5) | (ret & 0x1f));
+        break;
+
     default:
         g_assert_not_reached();
     }
@@ -1287,6 +1343,14 @@ static void tcg_out_ld(TCGContext *s, TCGType type, TCGReg ret,
         insn = I3312_LDRVQ;
         lgsz = 4;
         break;
+    case TCG_TYPE_F32:
+        insn = I3312_LDRVS;
+        lgsz = 2;
+        break;
+    case TCG_TYPE_F64:
+        insn = I3312_LDRVD;
+        lgsz = 3;
+        break;
     default:
         g_assert_not_reached();
     }
@@ -1315,6 +1379,14 @@ static void tcg_out_st(TCGContext *s, TCGType type, TCGReg src,
     case TCG_TYPE_V128:
         insn = I3312_STRVQ;
         lgsz = 4;
+        break;
+    case TCG_TYPE_F32:
+        insn = I3312_STRVS;
+        lgsz = 2;
+        break;
+    case TCG_TYPE_F64:
+        insn = I3312_STRVD;
+        lgsz = 3;
         break;
     default:
         g_assert_not_reached();
@@ -2971,11 +3043,584 @@ static const TCGOutOpStore outop_st = {
     .out_r = tcg_out_st,
 };
 
-static inline void tcg_out_op(TCGContext *s, TCGOpcode opc, TCGType type,
-                              const TCGArg args[TCG_MAX_OP_ARGS],
-                              const int const_args[TCG_MAX_OP_ARGS])
+/*
+ * Bisection flags for ARM64 TCG FP ops.
+ * Set to 0 to stub out the group and isolate bugs.
+ * When stubbed: flcr=NOP, ld80f=load zero, st80f=NOP.
+ */
+#define BISECT_FP_FLCR   1   /* FP control register write */
+#define BISECT_FP_LD80F  1   /* floatx80 -> double load */
+#define BISECT_FP_ST80F  1   /* double -> floatx80 store */
+#define BISECT_FP_ARITH  1   /* add/sub/mul/div/sqrt/abs/chs/mov */
+#define BISECT_FP_COM    1   /* compare (FCMP + flag conversion) */
+#define BISECT_FP_CVT    1   /* int<->FP conversions, FP<->FP conversions */
+#define BISECT_FP_MOVIF  1   /* bit-copy FMOV between int and FP regs */
+
+/*
+ * Scalar FP instruction emission helpers.
+ * V registers are encoded using their low 5 bits (V0-V31 = TCG_REG_V0-V31).
+ */
+static void tcg_out_fp2src(TCGContext *s, AArch64Insn insn,
+                           TCGReg rd, TCGReg rn, TCGReg rm)
 {
-    g_assert_not_reached();
+    tcg_out32(s, insn | (rm & 0x1f) << 16 | (rn & 0x1f) << 5 | (rd & 0x1f));
+}
+
+static void tcg_out_fp1src(TCGContext *s, AArch64Insn insn,
+                           TCGReg rd, TCGReg rn)
+{
+    tcg_out32(s, insn | (rn & 0x1f) << 5 | (rd & 0x1f));
+}
+
+static void tcg_out_fpcmp(TCGContext *s, AArch64Insn insn,
+                          TCGReg rn, TCGReg rm)
+{
+    tcg_out32(s, insn | (rm & 0x1f) << 16 | (rn & 0x1f) << 5);
+}
+
+static void tcg_out_fpcvt(TCGContext *s, AArch64Insn insn,
+                          TCGReg rd, TCGReg rn)
+{
+    tcg_out32(s, insn | (rn & 0x1f) << 5 | (rd & 0x1f));
+}
+
+/*
+ * Emit FCMP + flag conversion to x86-style EFLAGS (CF, PF, ZF) in a GPR.
+ *
+ * ARM64 FCMP NZCV results:
+ *   a > b:  N=0 Z=0 C=1 V=0
+ *   a < b:  N=1 Z=0 C=0 V=0
+ *   a == b: N=0 Z=1 C=1 V=0
+ *   unord:  N=0 Z=0 C=1 V=1
+ *
+ * x86 COMISD/COMISS flags (CF=bit0, PF=bit2, ZF=bit6):
+ *   a > b:  0x00
+ *   a < b:  0x01
+ *   a == b: 0x40
+ *   unord:  0x45
+ *
+ * Mapping: x86_CF = N|V, x86_PF = V, x86_ZF = Z
+ */
+static void tcg_out_fp_com(TCGContext *s, AArch64Insn cmp_insn,
+                           TCGReg rd, TCGReg rn, TCGReg rm)
+{
+    TCGReg t0 = TCG_REG_TMP0;
+    TCGReg t1 = TCG_REG_TMP1;
+
+    /* FCMP Sn/Dn, Sm/Dm -- sets NZCV */
+    tcg_out_fpcmp(s, cmp_insn, rn, rm);
+
+    /* MRS t0, NZCV */
+    tcg_out32(s, I_MRS_NZCV | t0);
+
+    /* UBFX t0, t0, #28, #4 -> t0 = {N(3),Z(2),C(1),V(0)} */
+    tcg_out_ubfm(s, TCG_TYPE_I64, t0, t0, 28, 31);
+
+    /*
+     * Map ARM64 FCMP NZCV to x86 EFLAGS {CF, PF, ZF}:
+     *   CF (bit 0) = N | V   (less-than or unordered)
+     *   PF (bit 2) = V       (unordered / NaN)
+     *   ZF (bit 6) = Z | V   (equal or unordered)
+     *
+     * t0 = {N(3), Z(2), C(1), V(0)} after UBFX above
+     */
+
+    /* t1 = V (bit 0 of t0) */
+    tcg_out_ubfm(s, TCG_TYPE_I64, t1, t0, 0, 0);
+
+    /* rd = N (bit 3 of t0 -> bit 0) */
+    tcg_out_ubfm(s, TCG_TYPE_I64, rd, t0, 3, 3);
+
+    /* rd = N | V -> CF at bit 0 */
+    tcg_out_insn(s, 3510, ORR, TCG_TYPE_I64, rd, rd, t1);
+
+    /* rd |= (V << 2) -> PF at bit 2 */
+    tcg_out_insn_3502S(s, I3510_ORR, TCG_TYPE_I64, rd, rd, t1, 2);
+
+    /* t1 = Z | V for ZF: extract Z, OR with V (still in t0 bit 0) */
+    tcg_out_ubfm(s, TCG_TYPE_I64, t1, t0, 2, 2);   /* t1 = Z */
+    tcg_out_ubfm(s, TCG_TYPE_I64, t0, t0, 0, 0);   /* t0 = V (re-extract) */
+    tcg_out_insn(s, 3510, ORR, TCG_TYPE_I64, t1, t1, t0); /* t1 = Z | V */
+
+    /* rd |= ((Z|V) << 6) -> ZF at bit 6 */
+    tcg_out_insn_3502S(s, I3510_ORR, TCG_TYPE_I64, rd, rd, t1, 6);
+}
+
+/*
+ * ld80f: Load 10-byte floatx80 from memory, convert to f64 (or f32).
+ *
+ * floatx80 layout: [mantissa: 8 bytes @ +0][sign|exp: 2 bytes @ +8]
+ *
+ * Conversion to IEEE 754 double (normal case):
+ *   d_exp  = exp_80 - 15360  (rebias: 16383 -> 1023)
+ *   d_mant = mant[62:11]     (drop integer bit, keep top 52)
+ *   double = (sign << 63) | (d_exp << 52) | d_mant
+ *
+ * Special cases (inf/NaN/zero/denorm) produce +0.0 for simplicity.
+ * This is acceptable since fp_jit already implies 64-bit precision loss.
+ *
+ * Uses scratch: TCG_REG_TMP0 (X16), TCG_REG_TMP1 (X17).
+ */
+static void tcg_out_ld80f(TCGContext *s, bool dp, TCGReg rd_fp, TCGReg rn_ptr)
+{
+    TCGReg r0 = TCG_REG_TMP0;
+    TCGReg r1 = TCG_REG_TMP1;
+    tcg_insn_unit *br_special, *br_done;
+
+    /* r0 = mantissa (8 bytes), r1 = sign_exp (2 bytes) */
+    tcg_out_ldst(s, I3312_LDRX, r0, rn_ptr, 0, 3);
+    tcg_out_ldst(s, I3312_LDRH, r1, rn_ptr, 8, 1);
+
+    /* d_mant = mant[62:11] in bits [51:0] */
+    tcg_out_ubfm(s, TCG_TYPE_I64, r0, r0, 11, 62);
+
+    /* exp = sign_exp[14:0] (clobbers sign in r1) */
+    tcg_out_ubfm(s, TCG_TYPE_I32, r1, r1, 0, 14);
+
+    /* d_exp = exp - 15360 (= exp - 12288 - 3072) */
+    tcg_out_insn_3401(s, I3401_SUBI, TCG_TYPE_I32, r1, r1, 12288);
+    tcg_out_insn_3401(s, I3401_SUBI, TCG_TYPE_I32, r1, r1, 3072);
+
+    /* If d_exp < 1 or d_exp > 0x7FE -> special (zero/denorm/inf/NaN).
+     * CMP W(r1), #0x7FF; B.HS -> special (unsigned d_exp >= 0x7FF) */
+    tcg_out_insn_3401(s, I3401_SUBSI, TCG_TYPE_I32, TCG_REG_XZR, r1, 0x7FF);
+    br_special = s->code_ptr;
+    tcg_out_insn(s, 3202, B_C, TCG_COND_GEU, 0);  /* placeholder offset */
+
+    /* CBZ W(r1), special (d_exp == 0 -> zero/denorm) */
+    tcg_out_insn(s, 3201, CBZ, TCG_TYPE_I32, r1, 0);  /* placeholder */
+
+    /* --- Normal path --- */
+    /* LSL r1, r1, #52: shift d_exp into position */
+    tcg_out_ubfm(s, TCG_TYPE_I64, r1, r1, 12, 11);
+
+    /* r0 = d_mant | (d_exp << 52) */
+    tcg_out_insn(s, 3510, ORR, TCG_TYPE_I64, r0, r0, r1);
+
+    /* Reload sign_exp for sign extraction */
+    tcg_out_ldst(s, I3312_LDRH, r1, rn_ptr, 8, 1);
+
+    /* UBFX r1, r1, #15, #1 -> r1 = sign bit (0 or 1) */
+    tcg_out_ubfm(s, TCG_TYPE_I64, r1, r1, 15, 15);
+
+    /* LSL r1, r1, #63 -> sign at bit 63 */
+    tcg_out_ubfm(s, TCG_TYPE_I64, r1, r1, 1, 0);
+
+    /* r0 |= sign */
+    tcg_out_insn(s, 3510, ORR, TCG_TYPE_I64, r0, r0, r1);
+
+    /* FMOV Dd, X(r0) */
+    tcg_out32(s, I_FPMOV_D_X | (r0 & 0x1f) << 5 | (rd_fp & 0x1f));
+
+    if (!dp) {
+        tcg_out32(s, I_FP1_FCVT_SD | ((rd_fp & 0x1f) << 5)
+                  | (rd_fp & 0x1f));
+    }
+
+    /* B .Ldone */
+    br_done = s->code_ptr;
+    tcg_out32(s, I3206_B);  /* placeholder */
+
+    /* --- Special path: emit +0.0 (acceptable for fp_jit) --- */
+    {
+        tcg_insn_unit *special_start = s->code_ptr;
+
+        /* FMOV Dd, XZR (zero) */
+        tcg_out32(s, I_FPMOV_D_X | (TCG_REG_XZR & 0x1f) << 5
+                  | (rd_fp & 0x1f));
+
+        /* Patch br_special (B.HS) to jump here */
+        ptrdiff_t off1 = special_start - br_special;
+        *br_special = deposit32(*br_special, 5, 19, off1);
+
+        /* Patch CBZ to jump here */
+        tcg_insn_unit *cbz_insn = br_special + 1;
+        ptrdiff_t off2 = special_start - cbz_insn;
+        *cbz_insn = deposit32(*cbz_insn, 5, 19, off2);
+    }
+
+    /* Patch br_done to jump here */
+    {
+        tcg_insn_unit *done = s->code_ptr;
+        ptrdiff_t off = done - br_done;
+        *br_done = deposit32(*br_done, 0, 26, off);
+    }
+}
+
+/*
+ * st80f: Convert f64 (or f32) from FP register to 10-byte floatx80 in memory.
+ *
+ * Reverse of ld80f:
+ *   exp_80 = d_exp + 15360
+ *   mant   = (1 << 63) | (d_mant << 11)
+ *   sign_exp = (sign << 15) | exp_80
+ *
+ * Uses scratch: TCG_REG_TMP0 (X16), TCG_REG_TMP1 (X17).
+ */
+static void tcg_out_st80f(TCGContext *s, bool dp, TCGReg rn_fp, TCGReg rd_ptr)
+{
+    TCGReg r0 = TCG_REG_TMP0;
+    TCGReg r1 = TCG_REG_TMP1;
+
+    if (!dp) {
+        /* Promote f32 to f64 in-place */
+        tcg_out32(s, I_FP1_FCVT_DS | ((rn_fp & 0x1f) << 5)
+                  | (rn_fp & 0x1f));
+    }
+
+    /* FMOV X(r0), Dn -> r0 = double bit pattern */
+    tcg_out32(s, I_FPMOV_X_D | (rn_fp & 0x1f) << 5 | (r0 & 0x1f));
+
+    /* --- Build sign_exp (16-bit) in r1 --- */
+    /* Extract d_exp = bits[62:52] (11 bits) */
+    tcg_out_ubfm(s, TCG_TYPE_I64, r1, r0, 52, 62);
+
+    /* exp_80 = d_exp + 15360 (= d_exp + 12288 + 3072) */
+    tcg_out_insn_3401(s, I3401_ADDI, TCG_TYPE_I32, r1, r1, 12288);
+    tcg_out_insn_3401(s, I3401_ADDI, TCG_TYPE_I32, r1, r1, 3072);
+
+    /* Insert sign bit: sign_exp[15] = double[63].
+     * BFI r1, r0_sign, #15, #1: insert bit from r0.
+     * First get sign into r0 bit 0, then BFI. But r0 is still the full
+     * double. We can use UBFX to isolate, but r0 is still needed for mant.
+     *
+     * Strategy: extract sign, shift, OR into r1. */
+    /* Extract sign into r0 temporarily, then restore r0 from FP reg. */
+    tcg_out_ubfm(s, TCG_TYPE_I64, r0, r0, 63, 63);  /* r0 = sign (0 or 1) */
+    /* r1 |= (sign << 15) */
+    tcg_out_insn_3502S(s, I3510_ORR, TCG_TYPE_I32, r1, r1, r0, 15);
+
+    /* Store sign_exp: STRH W(r1), [rd_ptr, #8] */
+    tcg_out_ldst(s, I3312_STRH, r1, rd_ptr, 8, 1);
+
+    /* --- Build mantissa (64-bit) in r0 --- */
+    /* Reload double bits from FP reg */
+    tcg_out32(s, I_FPMOV_X_D | (rn_fp & 0x1f) << 5 | (r0 & 0x1f));
+
+    /* Extract d_mant = bits[51:0] */
+    tcg_out_ubfm(s, TCG_TYPE_I64, r0, r0, 0, 51);
+
+    /* LSL r0, r0, #11 -> mant = d_mant << 11 */
+    tcg_out_ubfm(s, TCG_TYPE_I64, r0, r0, 53, 52);
+
+    /* Set integer bit (bit 63): ORR r0, r0, #(1<<63).
+     * 0x8000000000000000 is a valid ARM64 logical immediate. */
+    tcg_out_logicali(s, I3404_ORRI, TCG_TYPE_I64, r0, r0,
+                     UINT64_C(0x8000000000000000));
+
+    /* Store mantissa: STR X(r0), [rd_ptr, #0] */
+    tcg_out_ldst(s, I3312_STRX, r0, rd_ptr, 0, 3);
+}
+
+static void tcg_out_op(TCGContext *s, TCGOpcode opc, TCGType type,
+                       const TCGArg args[TCG_MAX_OP_ARGS],
+                       const int const_args[TCG_MAX_OP_ARGS])
+{
+    TCGReg a0 = args[0], a1 = args[1], a2 = args[2];
+
+    switch (opc) {
+    /* --- Arithmetic (3-register) --- */
+    case INDEX_op_add_f32:
+#if BISECT_FP_ARITH
+        tcg_out_fp2src(s, I_FP2_FADD_S, a0, a1, a2);
+#else
+        tcg_out_fp1src(s, I_FP1_FMOV_S, a0, a1);
+#endif
+        break;
+    case INDEX_op_add_f64:
+#if BISECT_FP_ARITH
+        tcg_out_fp2src(s, I_FP2_FADD_D, a0, a1, a2);
+#else
+        tcg_out_fp1src(s, I_FP1_FMOV_D, a0, a1);
+#endif
+        break;
+    case INDEX_op_sub_f32:
+#if BISECT_FP_ARITH
+        tcg_out_fp2src(s, I_FP2_FSUB_S, a0, a1, a2);
+#else
+        tcg_out_fp1src(s, I_FP1_FMOV_S, a0, a1);
+#endif
+        break;
+    case INDEX_op_sub_f64:
+#if BISECT_FP_ARITH
+        tcg_out_fp2src(s, I_FP2_FSUB_D, a0, a1, a2);
+#else
+        tcg_out_fp1src(s, I_FP1_FMOV_D, a0, a1);
+#endif
+        break;
+    case INDEX_op_mul_f32:
+#if BISECT_FP_ARITH
+        tcg_out_fp2src(s, I_FP2_FMUL_S, a0, a1, a2);
+#else
+        tcg_out_fp1src(s, I_FP1_FMOV_S, a0, a1);
+#endif
+        break;
+    case INDEX_op_mul_f64:
+#if BISECT_FP_ARITH
+        tcg_out_fp2src(s, I_FP2_FMUL_D, a0, a1, a2);
+#else
+        tcg_out_fp1src(s, I_FP1_FMOV_D, a0, a1);
+#endif
+        break;
+    case INDEX_op_div_f32:
+#if BISECT_FP_ARITH
+        tcg_out_fp2src(s, I_FP2_FDIV_S, a0, a1, a2);
+#else
+        tcg_out_fp1src(s, I_FP1_FMOV_S, a0, a1);
+#endif
+        break;
+    case INDEX_op_div_f64:
+#if BISECT_FP_ARITH
+        tcg_out_fp2src(s, I_FP2_FDIV_D, a0, a1, a2);
+#else
+        tcg_out_fp1src(s, I_FP1_FMOV_D, a0, a1);
+#endif
+        break;
+
+    /* --- Unary (2-register) --- */
+    case INDEX_op_sqrt_f32:
+#if BISECT_FP_ARITH
+        tcg_out_fp1src(s, I_FP1_FSQRT_S, a0, a1);
+#else
+        tcg_out_fp1src(s, I_FP1_FMOV_S, a0, a1);
+#endif
+        break;
+    case INDEX_op_sqrt_f64:
+#if BISECT_FP_ARITH
+        tcg_out_fp1src(s, I_FP1_FSQRT_D, a0, a1);
+#else
+        tcg_out_fp1src(s, I_FP1_FMOV_D, a0, a1);
+#endif
+        break;
+    case INDEX_op_abs_f32:
+#if BISECT_FP_ARITH
+        tcg_out_fp1src(s, I_FP1_FABS_S, a0, a1);
+#else
+        tcg_out_fp1src(s, I_FP1_FMOV_S, a0, a1);
+#endif
+        break;
+    case INDEX_op_abs_f64:
+#if BISECT_FP_ARITH
+        tcg_out_fp1src(s, I_FP1_FABS_D, a0, a1);
+#else
+        tcg_out_fp1src(s, I_FP1_FMOV_D, a0, a1);
+#endif
+        break;
+    case INDEX_op_chs_f32:
+#if BISECT_FP_ARITH
+        tcg_out_fp1src(s, I_FP1_FNEG_S, a0, a1);
+#else
+        tcg_out_fp1src(s, I_FP1_FMOV_S, a0, a1);
+#endif
+        break;
+    case INDEX_op_chs_f64:
+#if BISECT_FP_ARITH
+        tcg_out_fp1src(s, I_FP1_FNEG_D, a0, a1);
+#else
+        tcg_out_fp1src(s, I_FP1_FMOV_D, a0, a1);
+#endif
+        break;
+    case INDEX_op_mov_f32:
+        tcg_out_fp1src(s, I_FP1_FMOV_S, a0, a1);
+        break;
+    case INDEX_op_mov_f64:
+        tcg_out_fp1src(s, I_FP1_FMOV_D, a0, a1);
+        break;
+
+    /* --- Compare: FCMP + convert ARM64 NZCV to x86-style EFLAGS --- */
+    case INDEX_op_com_f32:
+#if BISECT_FP_COM
+        tcg_out_fp_com(s, I_FPCMP_FCMP_S, a0, a1, a2);
+#else
+        tcg_out_movi(s, TCG_TYPE_I64, a0, 0);
+#endif
+        break;
+    case INDEX_op_com_f64:
+#if BISECT_FP_COM
+        tcg_out_fp_com(s, I_FPCMP_FCMP_D, a0, a1, a2);
+#else
+        tcg_out_movi(s, TCG_TYPE_I64, a0, 0);
+#endif
+        break;
+
+    /* --- Conversions --- */
+    case INDEX_op_cvt32i_f32:
+#if BISECT_FP_CVT
+        tcg_out_fpcvt(s, I_FPCVT_SCVTF_SW, a0, a1);
+#else
+        tcg_out32(s, I_FPMOV_S_W | (a1 & 0x1f) << 5 | (a0 & 0x1f));
+#endif
+        break;
+    case INDEX_op_cvt32i_f64:
+#if BISECT_FP_CVT
+        tcg_out_fpcvt(s, I_FPCVT_SCVTF_DW, a0, a1);
+#else
+        tcg_out32(s, I_FPMOV_D_X | (a1 & 0x1f) << 5 | (a0 & 0x1f));
+#endif
+        break;
+    case INDEX_op_cvt64i_f32:
+#if BISECT_FP_CVT
+        tcg_out_fpcvt(s, I_FPCVT_SCVTF_SX, a0, a1);
+#else
+        tcg_out32(s, I_FPMOV_S_W | (a1 & 0x1f) << 5 | (a0 & 0x1f));
+#endif
+        break;
+    case INDEX_op_cvt64i_f64:
+#if BISECT_FP_CVT
+        tcg_out_fpcvt(s, I_FPCVT_SCVTF_DX, a0, a1);
+#else
+        tcg_out32(s, I_FPMOV_D_X | (a1 & 0x1f) << 5 | (a0 & 0x1f));
+#endif
+        break;
+    case INDEX_op_cvt32f_i32:
+#if BISECT_FP_CVT
+        tcg_out_fpcvt(s, I_FPCVT_FCVTZS_WS, a0, a1);
+#else
+        tcg_out32(s, I_FPMOV_W_S | (a1 & 0x1f) << 5 | (a0 & 0x1f));
+#endif
+        break;
+    case INDEX_op_cvt32f_i64:
+#if BISECT_FP_CVT
+        tcg_out_fpcvt(s, I_FPCVT_FCVTZS_XS, a0, a1);
+#else
+        tcg_out32(s, I_FPMOV_W_S | (a1 & 0x1f) << 5 | (a0 & 0x1f));
+#endif
+        break;
+    case INDEX_op_cvt64f_i32:
+#if BISECT_FP_CVT
+        tcg_out_fpcvt(s, I_FPCVT_FCVTZS_WD, a0, a1);
+#else
+        tcg_out32(s, I_FPMOV_W_S | (a1 & 0x1f) << 5 | (a0 & 0x1f));
+#endif
+        break;
+    case INDEX_op_cvt64f_i64:
+#if BISECT_FP_CVT
+        tcg_out_fpcvt(s, I_FPCVT_FCVTZS_XD, a0, a1);
+#else
+        tcg_out32(s, I_FPMOV_X_D | (a1 & 0x1f) << 5 | (a0 & 0x1f));
+#endif
+        break;
+    case INDEX_op_cvt32f_f64:
+#if BISECT_FP_CVT
+        tcg_out_fp1src(s, I_FP1_FCVT_DS, a0, a1); /* FCVT Dd, Sn (widen) */
+#else
+        tcg_out_fp1src(s, I_FP1_FMOV_S, a0, a1);
+#endif
+        break;
+    case INDEX_op_cvt64f_f32:
+#if BISECT_FP_CVT
+        tcg_out_fp1src(s, I_FP1_FCVT_SD, a0, a1); /* FCVT Sd, Dn (narrow) */
+#else
+        tcg_out_fp1src(s, I_FP1_FMOV_D, a0, a1);
+#endif
+        break;
+
+    /* --- Bit-copy between integer and FP registers --- */
+    case INDEX_op_mov32i_f32:
+#if BISECT_FP_MOVIF
+        tcg_out_fpcvt(s, I_FPMOV_S_W, a0, a1);
+#else
+        tcg_out32(s, I_FPMOV_S_W | (a1 & 0x1f) << 5 | (a0 & 0x1f));
+#endif
+        break;
+    case INDEX_op_mov64i_f64:
+#if BISECT_FP_MOVIF
+        tcg_out_fpcvt(s, I_FPMOV_D_X, a0, a1);
+#else
+        tcg_out32(s, I_FPMOV_D_X | (a1 & 0x1f) << 5 | (a0 & 0x1f));
+#endif
+        break;
+    case INDEX_op_mov32f_i32:
+#if BISECT_FP_MOVIF
+        tcg_out_fpcvt(s, I_FPMOV_W_S, a0, a1);
+#else
+        tcg_out32(s, I_FPMOV_W_S | (a1 & 0x1f) << 5 | (a0 & 0x1f));
+#endif
+        break;
+    case INDEX_op_mov64f_i64:
+#if BISECT_FP_MOVIF
+        tcg_out_fpcvt(s, I_FPMOV_X_D, a0, a1);
+#else
+        tcg_out32(s, I_FPMOV_X_D | (a1 & 0x1f) << 5 | (a0 & 0x1f));
+#endif
+        break;
+
+    /* --- ld80f/st80f --- */
+    case INDEX_op_ld80f_f32:
+#if BISECT_FP_LD80F
+        tcg_out_ld80f(s, false, a0, a1);
+#else
+        tcg_out32(s, I_FPMOV_S_W | (TCG_REG_XZR & 0x1f) << 5 | (a0 & 0x1f));
+#endif
+        break;
+    case INDEX_op_ld80f_f64:
+#if BISECT_FP_LD80F
+        tcg_out_ld80f(s, true, a0, a1);
+#else
+        tcg_out32(s, I_FPMOV_D_X | (TCG_REG_XZR & 0x1f) << 5 | (a0 & 0x1f));
+#endif
+        break;
+    case INDEX_op_st80f_f32:
+#if BISECT_FP_ST80F
+        tcg_out_st80f(s, false, a0, a1);
+#else
+        /* NOP: don't store back */
+        tcg_out32(s, 0xd503201f);
+#endif
+        break;
+    case INDEX_op_st80f_f64:
+#if BISECT_FP_ST80F
+        tcg_out_st80f(s, true, a0, a1);
+#else
+        /* NOP: don't store back */
+        tcg_out32(s, 0xd503201f);
+#endif
+        break;
+
+    /* --- sin/cos: not yet implemented, kept as helpers --- */
+    case INDEX_op_sin_f32:
+    case INDEX_op_sin_f64:
+    case INDEX_op_cos_f32:
+    case INDEX_op_cos_f64:
+        g_assert_not_reached();
+        break;
+
+    /* --- flcr: write FP control register --- */
+    /* Input a0 is MXCSR-formatted: rounding mode at bits [14:13].
+     * ARM64 FPCR rounding mode at bits [23:22].
+     * MXCSR: 00=RN, 01=RD(-inf), 10=RU(+inf), 11=RZ
+     * FPCR:  00=RN, 01=RU(+inf), 10=RD(-inf), 11=RZ
+     * Need to swap bits 0 and 1 of the 2-bit RC field. */
+    case INDEX_op_flcr:
+#if BISECT_FP_FLCR
+        {
+            TCGReg t0 = TCG_REG_TMP0;
+            TCGReg t1 = TCG_REG_TMP1;
+
+            /* Extract MXCSR RC bits [14:13] */
+            tcg_out_ubfm(s, TCG_TYPE_I32, t0, a0, 13, 14);
+
+            /* Swap bit 0 and bit 1: new = (old[1]) | (old[0] << 1) */
+            tcg_out_ubfm(s, TCG_TYPE_I32, t1, t0, 0, 0);  /* t1 = bit 0 */
+            tcg_out_ubfm(s, TCG_TYPE_I32, t0, t0, 1, 1);  /* t0 = bit 1 */
+            tcg_out_insn_3502S(s, I3510_ORR, TCG_TYPE_I32,
+                               t0, t0, t1, 1);  /* t0 = bit1 | (bit0 << 1) */
+
+            /* Shift to FPCR position [23:22] */
+            tcg_out_ubfm(s, TCG_TYPE_I32, t0, t0, 32 - 22, 31 - 22);
+
+            /* MSR FPCR, X(t0) */
+            tcg_out32(s, I_MSR_FPCR | (t0 & 0x1f));
+        }
+#else
+        /* NOP: leave FPCR at default (round-to-nearest) */
+        tcg_out32(s, 0xd503201f);
+#endif
+        break;
+
+    default:
+        g_assert_not_reached();
+    }
 }
 
 static void tcg_out_vec_op(TCGContext *s, TCGOpcode opc,
@@ -3466,6 +4111,74 @@ tcg_target_op_def(TCGOpcode op, TCGType type, unsigned flags)
     case INDEX_op_aa64_sli_vec:
         return C_O1_I2(w, 0, w);
 
+    /* Scalar FP: arithmetic (3-register) */
+    case INDEX_op_add_f32:
+    case INDEX_op_add_f64:
+    case INDEX_op_sub_f32:
+    case INDEX_op_sub_f64:
+    case INDEX_op_mul_f32:
+    case INDEX_op_mul_f64:
+    case INDEX_op_div_f32:
+    case INDEX_op_div_f64:
+        return C_O1_I2(w, w, w);
+
+    /* Scalar FP: unary (2-register) */
+    case INDEX_op_sqrt_f32:
+    case INDEX_op_sqrt_f64:
+    case INDEX_op_abs_f32:
+    case INDEX_op_abs_f64:
+    case INDEX_op_chs_f32:
+    case INDEX_op_chs_f64:
+    case INDEX_op_mov_f32:
+    case INDEX_op_mov_f64:
+    case INDEX_op_cvt32f_f64:
+    case INDEX_op_cvt64f_f32:
+        return C_O1_I1(w, w);
+
+    /* Scalar FP: compare -> result in GPR */
+    case INDEX_op_com_f32:
+    case INDEX_op_com_f64:
+        return C_O1_I2(r, w, w);
+
+    /* Int-to-FP: GPR input, FP output */
+    case INDEX_op_cvt32i_f32:
+    case INDEX_op_cvt32i_f64:
+    case INDEX_op_cvt64i_f32:
+    case INDEX_op_cvt64i_f64:
+    case INDEX_op_mov32i_f32:
+    case INDEX_op_mov64i_f64:
+        return C_O1_I1(w, r);
+
+    /* FP-to-Int: FP input, GPR output */
+    case INDEX_op_cvt32f_i32:
+    case INDEX_op_cvt32f_i64:
+    case INDEX_op_cvt64f_i32:
+    case INDEX_op_cvt64f_i64:
+    case INDEX_op_mov32f_i32:
+    case INDEX_op_mov64f_i64:
+        return C_O1_I1(r, w);
+
+    /* ld80f: FP output, GPR input (memory pointer) */
+    case INDEX_op_ld80f_f32:
+    case INDEX_op_ld80f_f64:
+        return C_O1_I1(w, r);
+
+    /* st80f: FP input, GPR input (memory pointer) */
+    case INDEX_op_st80f_f32:
+    case INDEX_op_st80f_f64:
+        return C_O0_I2(w, r);
+
+    /* sin/cos: FP input, FP output */
+    case INDEX_op_sin_f32:
+    case INDEX_op_sin_f64:
+    case INDEX_op_cos_f32:
+    case INDEX_op_cos_f64:
+        return C_O1_I1(w, w);
+
+    /* flcr: GPR input only */
+    case INDEX_op_flcr:
+        return C_O0_I1(r);
+
     default:
         return C_NotImplemented;
     }
@@ -3477,6 +4190,8 @@ static void tcg_target_init(TCGContext *s)
     tcg_target_available_regs[TCG_TYPE_I64] = 0xffffffffu;
     tcg_target_available_regs[TCG_TYPE_V64] = 0xffffffff00000000ull;
     tcg_target_available_regs[TCG_TYPE_V128] = 0xffffffff00000000ull;
+    tcg_target_available_regs[TCG_TYPE_F32] = ALL_VECTOR_REGS;
+    tcg_target_available_regs[TCG_TYPE_F64] = ALL_VECTOR_REGS;
 
     tcg_target_call_clobber_regs = -1ull;
     tcg_regset_reset_reg(tcg_target_call_clobber_regs, TCG_REG_X19);

@@ -364,7 +364,7 @@ sys:
     dvd_path: string
 
 perf:
-  hard_fpu:
+  fp_jit:
     type: bool
     default: true
   cache_shaders:

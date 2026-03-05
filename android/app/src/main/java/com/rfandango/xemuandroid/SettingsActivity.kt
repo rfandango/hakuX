@@ -83,15 +83,26 @@ class SettingsActivity : AppCompatActivity() {
       prefs.edit().putBoolean("unlock_framerate", checked).apply()
     }
 
-    val switchNativeX87 = findViewById<MaterialSwitch>(R.id.switch_native_x87)
+    val switchFpSafe = findViewById<MaterialSwitch>(R.id.switch_fp_safe)
     try {
-      switchNativeX87.isChecked = nativeGetNativeX87()
+      switchFpSafe.isChecked = nativeGetFpSafe()
     } catch (_: Throwable) {
-      switchNativeX87.isChecked = prefs.getBoolean("native_x87", true)
+      switchFpSafe.isChecked = prefs.getBoolean("fp_safe", true)
     }
-    switchNativeX87.setOnCheckedChangeListener { _, checked ->
-      prefs.edit().putBoolean("native_x87", checked).apply()
-      try { nativeSetNativeX87(checked) } catch (_: Throwable) {}
+    switchFpSafe.setOnCheckedChangeListener { _, checked ->
+      prefs.edit().putBoolean("fp_safe", checked).apply()
+      try { nativeSetFpSafe(checked) } catch (_: Throwable) {}
+    }
+
+    val switchFpJit = findViewById<MaterialSwitch>(R.id.switch_fp_jit)
+    try {
+      switchFpJit.isChecked = nativeGetFpJit()
+    } catch (_: Throwable) {
+      switchFpJit.isChecked = prefs.getBoolean("fp_jit", true)
+    }
+    switchFpJit.setOnCheckedChangeListener { _, checked ->
+      prefs.edit().putBoolean("fp_jit", checked).apply()
+      try { nativeSetFpJit(checked) } catch (_: Throwable) {}
     }
 
     val switchFastFences = findViewById<MaterialSwitch>(R.id.switch_fast_fences)
@@ -413,8 +424,10 @@ class SettingsActivity : AppCompatActivity() {
     }.start()
   }
 
-  private external fun nativeGetNativeX87(): Boolean
-  private external fun nativeSetNativeX87(enable: Boolean)
+  private external fun nativeGetFpSafe(): Boolean
+  private external fun nativeSetFpSafe(enable: Boolean)
+  private external fun nativeGetFpJit(): Boolean
+  private external fun nativeSetFpJit(enable: Boolean)
   private external fun nativeGetFastFences(): Boolean
   private external fun nativeSetFastFences(enable: Boolean)
 

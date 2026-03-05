@@ -1634,6 +1634,7 @@ typedef struct BNDCSReg {
 typedef union {
     floatx80 d __attribute__((aligned(16)));
     MMXReg mmx;
+    double native_d;
 } FPReg;
 
 typedef struct {
@@ -1901,6 +1902,7 @@ typedef struct CPUArchState {
     /* emulator internal variables */
     float_status fp_status;
     floatx80 ft0;
+    double ft0_native;
 
     float_status mmx_status; /* for 3DNow! float ops */
     float_status sse_status;
