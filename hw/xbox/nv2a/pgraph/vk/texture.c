@@ -408,6 +408,7 @@ void pgraph_vk_mark_textures_possibly_dirty(NV2AState *d,
     addr &= TARGET_PAGE_MASK;
     assert(end <= memory_region_size(d->vram));
 
+    bool any_newly_dirty = false;
     TextureBinding *tnode;
     QTAILQ_FOREACH(tnode, &r->texture_active_list, active_entry) {
         if (tnode->possibly_dirty) {
@@ -424,7 +425,13 @@ void pgraph_vk_mark_textures_possibly_dirty(NV2AState *d,
             overlapping |= !(addr > k_pal_end || k_pal_addr > end);
         }
 
+        if (overlapping) {
+            any_newly_dirty = true;
+        }
         tnode->possibly_dirty |= overlapping;
+    }
+    if (any_newly_dirty) {
+        r->texture_vram_gen++;
     }
 }
 

@@ -602,6 +602,8 @@ typedef struct PGRAPHVkState {
     TextureBinding dummy_texture;
     bool texture_bindings_changed;
     uint32_t last_texture_state_gen;
+    uint32_t texture_vram_gen;
+    uint32_t last_texture_vram_gen;
 
     struct {
         uint32_t surface_list_gen;

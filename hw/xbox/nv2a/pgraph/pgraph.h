@@ -304,6 +304,7 @@ extern NV2AState *g_nv2a;
 
 #define REG_CAT_SHADER   (1 << 0)
 #define REG_CAT_PIPELINE (1 << 1)
+#define REG_CAT_TEXTURE  (1 << 2)
 extern uint8_t pgraph_reg_category_table[];
 
 static inline uint32_t pgraph_reg_r(PGRAPHState *pg, unsigned int r)
@@ -320,6 +321,7 @@ static inline void pgraph_reg_w(PGRAPHState *pg, unsigned int r, uint32_t v)
         uint8_t cat = pgraph_reg_category_table[r / 4];
         if (cat & REG_CAT_SHADER)   pg->shader_state_gen++;
         if (cat & REG_CAT_PIPELINE) pg->pipeline_state_gen++;
+        if (cat & REG_CAT_TEXTURE)  pg->texture_state_gen++;
         pg->any_reg_gen++;
     }
     pg->regs_[r] = v;

@@ -249,6 +249,8 @@ static void pgraph_vk_flush(NV2AState *d)
     pgraph_vk_mark_textures_possibly_dirty(d, 0, memory_region_size(d->vram));
     pgraph_vk_update_vertex_ram_buffer(&d->pgraph, 0, d->vram_ptr,
                                        memory_region_size(d->vram));
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    r->texture_vram_gen++;
     for (int i = 0; i < 4; i++) {
         pg->texture_dirty[i] = true;
     }

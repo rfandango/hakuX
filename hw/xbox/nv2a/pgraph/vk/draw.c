@@ -845,7 +845,7 @@ static void create_pipeline(PGRAPHState *pg)
         !r->shader_bindings_changed &&
         !r->pipeline_state_dirty &&
         pg->texture_state_gen == r->last_texture_state_gen &&
-        pgraph_vk_check_textures_fast_skip(pg) &&
+        r->texture_vram_gen == r->last_texture_vram_gen &&
         !check_render_pass_dirty(pg) &&
         pg->shader_state_gen == r->last_shader_state_gen &&
         pg->pipeline_state_gen == r->last_pipeline_state_gen &&
@@ -859,9 +859,10 @@ static void create_pipeline(PGRAPHState *pg)
 
     NV2A_PHASE_TIMER_BEGIN(pipe_bind_tex);
     if (pg->texture_state_gen != r->last_texture_state_gen ||
-        !pgraph_vk_check_textures_fast_skip(pg)) {
+        r->texture_vram_gen != r->last_texture_vram_gen) {
         pgraph_vk_bind_textures(d);
         r->last_texture_state_gen = pg->texture_state_gen;
+        r->last_texture_vram_gen = r->texture_vram_gen;
     }
     NV2A_PHASE_TIMER_END(pipe_bind_tex);
 
@@ -893,6 +894,7 @@ static void create_pipeline(PGRAPHState *pg)
     r->last_pipeline_state_gen = pg->pipeline_state_gen;
     r->last_shader_state_gen = pg->shader_state_gen;
     r->last_any_reg_gen = pg->any_reg_gen;
+    r->last_texture_vram_gen = r->texture_vram_gen;
 
     if (r->pipeline_binding && !pipeline_dirty) {
         NV2A_VK_DPRINTF("Cache hit");
@@ -1875,16 +1877,38 @@ static void begin_pre_draw(PGRAPHState *pg)
         !r->uniforms_changed &&
         r->descriptor_set_index > 0 &&
         pg->texture_state_gen == r->last_texture_state_gen &&
-        pgraph_vk_check_textures_fast_skip(pg) &&
         pg->any_reg_gen == r->last_any_reg_gen &&
         !pg->program_data_dirty &&
         pg->vertex_attr_gen == r->pipeline_vertex_attr_gen) {
+
+        bool tex_vram_clean = (r->texture_vram_gen == r->last_texture_vram_gen);
+        if (!tex_vram_clean) {
+            tex_vram_clean = true;
+            for (int i = 0; i < NV2A_MAX_TEXTURES; i++) {
+                TextureBinding *b = r->texture_bindings[i];
+                if (b && b != &r->dummy_texture && b->possibly_dirty) {
+                    if (b->dirty_check_frame == pg->frame_time &&
+                        !b->dirty_check_result) {
+                        b->possibly_dirty = false;
+                    } else {
+                        tex_vram_clean = false;
+                        break;
+                    }
+                }
+            }
+            if (tex_vram_clean) {
+                r->last_texture_vram_gen = r->texture_vram_gen;
+            }
+        }
+
+        if (tex_vram_clean) {
 #if OPT_VALIDATE_GEN_COUNTERS
-        assert(!pgraph_has_dirty_regs(pg));
+            assert(!pgraph_has_dirty_regs(pg));
 #endif
-        g_opt_stats.super_fast_hits++;
-        r->pre_draw_skipped = true;
-        return;
+            g_opt_stats.super_fast_hits++;
+            r->pre_draw_skipped = true;
+            return;
+        }
     }
     g_opt_stats.super_fast_misses++;
 #endif
@@ -1900,7 +1924,7 @@ static void begin_pre_draw(PGRAPHState *pg)
         !r->need_descriptor_rebind &&
         r->descriptor_set_index > 0 &&
         pg->texture_state_gen == r->last_texture_state_gen &&
-        pgraph_vk_check_textures_fast_skip(pg) &&
+        r->texture_vram_gen == r->last_texture_vram_gen &&
         pg->shader_state_gen == r->last_shader_state_gen &&
         pg->pipeline_state_gen == r->last_pipeline_state_gen &&
         pg->primitive_mode == r->shader_binding->state.geom.primitive_mode &&
