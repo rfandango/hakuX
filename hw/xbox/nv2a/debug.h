@@ -344,7 +344,7 @@ void nv2a_profile_get_surf_timing_str(char *buf, int bufsize);
 void nv2a_profile_get_workload_str(char *buf, int bufsize);
 
 #ifndef NV2A_PERF_LOG
-#define NV2A_PERF_LOG 0
+#define NV2A_PERF_LOG 1
 #endif
 
 /*

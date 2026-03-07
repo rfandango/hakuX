@@ -71,6 +71,9 @@
 #define OPT_DESC_REBIND_SKIP    1
 #define OPT_PIPELINE_EARLY_EXIT 1
 #define OPT_MEDIUM_FAST_PATH    1
+#define OPT_DRAW_MERGING        1
+#define OPT_INDEXED_DRAW_MERGING 1
+#define OPT_DRAW_MERGE_MAX      128
 #define OPT_VALIDATE_GEN_COUNTERS 0
 
 struct OptBisectStats {
@@ -456,6 +459,43 @@ typedef struct PGRAPHVkComputeState {
     ComputePipeline *pipeline_cache_entries;
 } PGRAPHVkComputeState;
 
+#if OPT_DRAW_MERGING
+#define DRAW_QUEUE_MAX 128
+#define INDEX_QUEUE_MAX (64 * 1024)
+
+typedef struct DrawQueueEntry {
+    int32_t first_vertex;
+    int32_t vertex_count;
+    uint32_t index_offset;
+    uint32_t index_count;
+    size_t uniform_offsets[2];
+} DrawQueueEntry;
+
+typedef struct DrawQueue {
+    DrawQueueEntry entries[DRAW_QUEUE_MAX];
+    int count;
+    bool active;
+    bool indexed;
+    bool has_uniform_changes;
+
+    uint32_t shader_state_gen;
+    uint32_t pipeline_state_gen;
+    uint32_t texture_state_gen;
+    uint32_t any_reg_gen;
+    uint32_t vertex_attr_gen;
+    uint32_t texture_vram_gen;
+    int primitive_mode;
+
+    uint32_t min_start;
+    uint32_t max_end;
+
+    uint32_t min_element;
+    uint32_t max_element;
+    uint32_t total_indices;
+    uint32_t *index_buf;
+} DrawQueue;
+#endif
+
 typedef struct PGRAPHVkState {
     VkInstance instance;
     VkDebugUtilsMessengerEXT debug_messenger;
@@ -538,6 +578,10 @@ typedef struct PGRAPHVkState {
 
     StorageBuffer storage_buffers[BUFFER_COUNT];
     PrimRewriteBuf prim_rewrite_buf;
+
+#if OPT_DRAW_MERGING
+    DrawQueue draw_queue;
+#endif
 
 #if OPT_ALWAYS_DEFERRED_FENCES
     FrameStagingState frame_staging[NUM_SUBMIT_FRAMES];
@@ -883,6 +927,7 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason why);
 void pgraph_vk_flush_all_frames(PGRAPHState *pg);
 #endif
 void pgraph_vk_flush_draw(NV2AState *d);
+void pgraph_vk_flush_draw_queue(NV2AState *d);
 void pgraph_vk_begin_command_buffer(PGRAPHState *pg);
 void pgraph_vk_ensure_command_buffer(PGRAPHState *pg);
 void pgraph_vk_ensure_not_in_render_pass(PGRAPHState *pg);

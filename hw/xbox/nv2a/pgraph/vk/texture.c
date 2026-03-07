@@ -621,6 +621,13 @@ static void copy_zeta_surface_to_texture(PGRAPHState *pg, SurfaceBinding *surfac
     assert(!surface->color);
 
     PGRAPHVkState *r = pg->vk_renderer_state;
+
+#if OPT_DRAW_MERGING
+    if (r->draw_queue.count > 0) {
+        NV2AState *d = container_of(pg, NV2AState, pgraph);
+        pgraph_vk_flush_draw_queue(d);
+    }
+#endif
     TextureShape *state = &texture->key.state;
     VkColorFormatInfo vkf = kelvin_color_format_vk_map[state->color_format];
 
@@ -851,6 +858,13 @@ static void copy_surface_to_texture(PGRAPHState *pg, SurfaceBinding *surface,
     }
 
     PGRAPHVkState *r = pg->vk_renderer_state;
+
+#if OPT_DRAW_MERGING
+    if (r->draw_queue.count > 0) {
+        NV2AState *d = container_of(pg, NV2AState, pgraph);
+        pgraph_vk_flush_draw_queue(d);
+    }
+#endif
     TextureShape *state = &texture->key.state;
     VkColorFormatInfo vkf = kelvin_color_format_vk_map[state->color_format];
 

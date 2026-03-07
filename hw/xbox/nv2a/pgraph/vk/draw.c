@@ -1548,8 +1548,21 @@ void pgraph_vk_flush_all_frames(PGRAPHState *pg)
 }
 #endif
 
+#if OPT_DRAW_MERGING
+static void flush_draw_queue_internal(NV2AState *d);
+#endif
+
 void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
 {
+#if OPT_DRAW_MERGING
+    PGRAPHVkState *r_pre = pg->vk_renderer_state;
+    if (r_pre->draw_queue.count > 0) {
+        NV2AState *d = container_of(pg, NV2AState, pgraph);
+        flush_draw_queue_internal(d);
+    }
+    r_pre->draw_queue.active = false;
+#endif
+
     NV2A_PHASE_TIMER_BEGIN(finish);
     PGRAPHVkState *r = pg->vk_renderer_state;
 
@@ -2231,9 +2244,566 @@ static void end_draw(PGRAPHState *pg)
     r->in_draw = false;
 }
 
+typedef struct VertexBufferRemap {
+    uint16_t attributes;
+    size_t buffer_space_required;
+    struct {
+        VkDeviceAddress offset;
+        VkDeviceSize old_stride;
+        VkDeviceSize new_stride;
+    } map[NV2A_VERTEXSHADER_ATTRIBUTES];
+} VertexBufferRemap;
+
+static void sync_vertex_ram_buffer(PGRAPHState *pg);
+static VertexBufferRemap remap_unaligned_attributes(PGRAPHState *pg,
+                                                    uint32_t num_vertices);
+static bool ensure_buffer_space(PGRAPHState *pg, int index, VkDeviceSize size);
+static void copy_remapped_attributes_to_inline_buffer(PGRAPHState *pg,
+                                                      VertexBufferRemap remap,
+                                                      uint32_t start_vertex,
+                                                      uint32_t num_vertices);
+static void bind_vertex_buffer(PGRAPHState *pg, uint16_t inline_map,
+                               VkDeviceSize offset);
+
+#if OPT_DRAW_MERGING
+static bool check_rt_as_texture_hazard(PGRAPHState *pg)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+
+    for (int i = 0; i < NV2A_MAX_TEXTURES; i++) {
+        TextureBinding *b = r->texture_bindings[i];
+        if (!b || b == &r->dummy_texture) {
+            continue;
+        }
+        hwaddr tex_start = b->key.texture_vram_offset;
+        hwaddr tex_end = tex_start + b->key.texture_length;
+        if (r->color_binding) {
+            hwaddr rt_start = r->color_binding->vram_addr;
+            hwaddr rt_end = rt_start + r->color_binding->size;
+            if (tex_start < rt_end && rt_start < tex_end) {
+                return true;
+            }
+        }
+        if (r->zeta_binding) {
+            hwaddr zt_start = r->zeta_binding->vram_addr;
+            hwaddr zt_end = zt_start + r->zeta_binding->size;
+            if (tex_start < zt_end && zt_start < tex_end) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool check_draw_mergeable(PGRAPHState *pg, DrawQueue *q)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+
+    if (pg->shader_state_gen != q->shader_state_gen ||
+        pg->pipeline_state_gen != q->pipeline_state_gen ||
+        pg->texture_state_gen != q->texture_state_gen ||
+        pg->vertex_attr_gen != q->vertex_attr_gen ||
+        r->texture_vram_gen != q->texture_vram_gen ||
+        r->framebuffer_dirty ||
+        pg->program_data_dirty ||
+        pg->primitive_mode != q->primitive_mode) {
+        return false;
+    }
+
+    if (check_rt_as_texture_hazard(pg)) {
+        return false;
+    }
+
+    return true;
+}
+
+static bool upload_draw_uniforms(PGRAPHState *pg, size_t offsets_out[2])
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    ShaderBinding *binding = r->shader_binding;
+    if (!binding) {
+        return false;
+    }
+
+    pgraph_vk_update_shader_uniforms(pg);
+
+    ShaderUniformLayout *layouts[] = {
+        &binding->vsh.module_info->uniforms,
+        &binding->psh.module_info->uniforms,
+    };
+
+    VkDeviceSize total = 0;
+    for (int i = 0; i < 2; i++) {
+        total += layouts[i]->total_size;
+    }
+
+    if (!pgraph_vk_buffer_has_space_for(
+            pg, BUFFER_UNIFORM_STAGING, total,
+            r->device_props.limits.minUniformBufferOffsetAlignment)) {
+        return false;
+    }
+
+    for (int i = 0; i < 2; i++) {
+        void *data = layouts[i]->allocation;
+        VkDeviceSize size = layouts[i]->total_size;
+        offsets_out[i] = pgraph_vk_append_to_buffer(
+            pg, BUFFER_UNIFORM_STAGING, &data, &size, 1,
+            r->device_props.limits.minUniformBufferOffsetAlignment);
+    }
+
+    return true;
+}
+
+static bool try_enqueue_draw_arrays(PGRAPHState *pg, DrawQueue *q)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    int new_count = q->count + (int)pg->draw_arrays_length;
+    if (new_count > DRAW_QUEUE_MAX) {
+        return false;
+    }
+
+    bool uniforms_changed = (q->count > 0 &&
+                             pg->any_reg_gen != q->any_reg_gen);
+
+    size_t ubo_offsets[2];
+    if (uniforms_changed || (q->count == 0 && r->shader_binding)) {
+        if (!upload_draw_uniforms(pg, ubo_offsets)) {
+            return false;
+        }
+    } else if (q->count == 0) {
+        ubo_offsets[0] = r->uniform_buffer_offsets[0];
+        ubo_offsets[1] = r->uniform_buffer_offsets[1];
+    } else {
+        ubo_offsets[0] = q->entries[q->count - 1].uniform_offsets[0];
+        ubo_offsets[1] = q->entries[q->count - 1].uniform_offsets[1];
+    }
+
+    for (int i = 0; i < (int)pg->draw_arrays_length; i++) {
+        DrawQueueEntry *e = &q->entries[q->count + i];
+        e->first_vertex = pg->draw_arrays_start[i];
+        e->vertex_count = pg->draw_arrays_count[i];
+        e->uniform_offsets[0] = ubo_offsets[0];
+        e->uniform_offsets[1] = ubo_offsets[1];
+
+        uint32_t start = (uint32_t)pg->draw_arrays_start[i];
+        uint32_t end = start + (uint32_t)pg->draw_arrays_count[i];
+        if (q->count == 0 && i == 0) {
+            q->min_start = start;
+            q->max_end = end;
+        } else {
+            if (start < q->min_start) q->min_start = start;
+            if (end > q->max_end) q->max_end = end;
+        }
+    }
+
+    if (q->count == 0) {
+        q->shader_state_gen = pg->shader_state_gen;
+        q->pipeline_state_gen = pg->pipeline_state_gen;
+        q->texture_state_gen = pg->texture_state_gen;
+        q->any_reg_gen = pg->any_reg_gen;
+        q->vertex_attr_gen = pg->vertex_attr_gen;
+        q->texture_vram_gen = r->texture_vram_gen;
+        q->primitive_mode = pg->primitive_mode;
+        q->active = true;
+        q->has_uniform_changes = false;
+    }
+
+    if (uniforms_changed) {
+        q->has_uniform_changes = true;
+        q->any_reg_gen = pg->any_reg_gen;
+    }
+
+    q->count = new_count;
+    return true;
+}
+
+#if OPT_INDEXED_DRAW_MERGING
+static bool try_enqueue_draw_indexed(PGRAPHState *pg, DrawQueue *q)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+
+    if (q->count + 1 > DRAW_QUEUE_MAX) {
+        return false;
+    }
+
+    PrimAssemblyState assembly = {
+        .primitive_mode = pg->primitive_mode,
+        .polygon_mode = (enum ShaderPolygonMode)GET_MASK(
+            pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
+            NV_PGRAPH_SETUPRASTER_FRONTFACEMODE),
+        .last_provoking = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
+                                   NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX) ==
+                          NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX_LAST,
+        .flat_shading = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
+                                 NV_PGRAPH_CONTROL_3_SHADEMODE) ==
+                        NV_PGRAPH_CONTROL_3_SHADEMODE_FLAT,
+    };
+
+    uint32_t *draw_indices = pg->inline_elements;
+    unsigned int draw_index_count = pg->inline_elements_length;
+    PrimRewrite prim_rw = pgraph_prim_rewrite_indexed(
+        &r->prim_rewrite_buf, assembly,
+        pg->inline_elements, pg->inline_elements_length);
+    if (prim_rw.num_indices > 0) {
+        draw_indices = prim_rw.indices;
+        draw_index_count = prim_rw.num_indices;
+    }
+
+    unsigned int verts_per_prim;
+    switch (pgraph_prim_rewrite_get_output_mode(
+                assembly.primitive_mode, assembly.polygon_mode)) {
+    case PRIM_TYPE_TRIANGLES: verts_per_prim = 3; break;
+    case PRIM_TYPE_LINES:     verts_per_prim = 2; break;
+    default:                  verts_per_prim = 1; break;
+    }
+    draw_index_count = (draw_index_count / verts_per_prim) * verts_per_prim;
+    if (draw_index_count == 0) {
+        return true;
+    }
+
+    if (q->total_indices + draw_index_count > INDEX_QUEUE_MAX) {
+        return false;
+    }
+
+    uint32_t local_min = UINT32_MAX;
+    uint32_t local_max = 0;
+    for (unsigned int i = 0; i < draw_index_count; i++) {
+        if (draw_indices[i] > local_max) local_max = draw_indices[i];
+        if (draw_indices[i] < local_min) local_min = draw_indices[i];
+    }
+
+    bool uniforms_changed = (q->count > 0 &&
+                             pg->any_reg_gen != q->any_reg_gen);
+
+    size_t ubo_offsets[2];
+    if (uniforms_changed || (q->count == 0 && r->shader_binding)) {
+        if (!upload_draw_uniforms(pg, ubo_offsets)) {
+            return false;
+        }
+    } else if (q->count == 0) {
+        ubo_offsets[0] = r->uniform_buffer_offsets[0];
+        ubo_offsets[1] = r->uniform_buffer_offsets[1];
+    } else {
+        ubo_offsets[0] = q->entries[q->count - 1].uniform_offsets[0];
+        ubo_offsets[1] = q->entries[q->count - 1].uniform_offsets[1];
+    }
+
+    memcpy(q->index_buf + q->total_indices, draw_indices,
+           draw_index_count * sizeof(uint32_t));
+
+    DrawQueueEntry *e = &q->entries[q->count];
+    e->index_offset = q->total_indices;
+    e->index_count = draw_index_count;
+    e->uniform_offsets[0] = ubo_offsets[0];
+    e->uniform_offsets[1] = ubo_offsets[1];
+
+    q->total_indices += draw_index_count;
+
+    if (q->count == 0) {
+        q->min_element = local_min;
+        q->max_element = local_max;
+        q->shader_state_gen = pg->shader_state_gen;
+        q->pipeline_state_gen = pg->pipeline_state_gen;
+        q->texture_state_gen = pg->texture_state_gen;
+        q->any_reg_gen = pg->any_reg_gen;
+        q->vertex_attr_gen = pg->vertex_attr_gen;
+        q->texture_vram_gen = r->texture_vram_gen;
+        q->primitive_mode = pg->primitive_mode;
+        q->active = true;
+        q->indexed = true;
+        q->has_uniform_changes = false;
+    } else {
+        if (local_min < q->min_element) q->min_element = local_min;
+        if (local_max > q->max_element) q->max_element = local_max;
+    }
+
+    if (uniforms_changed) {
+        q->has_uniform_changes = true;
+        q->any_reg_gen = pg->any_reg_gen;
+    }
+
+    q->count++;
+    return true;
+}
+#endif
+
+static void flush_draw_queue_internal(NV2AState *d)
+{
+    PGRAPHState *pg = &d->pgraph;
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    DrawQueue *q = &r->draw_queue;
+
+    if (q->count == 0) {
+        return;
+    }
+
+    int entry_count = q->count;
+    int prim_mode = q->primitive_mode;
+    bool has_uniform_changes = q->has_uniform_changes;
+    bool is_indexed = q->indexed;
+
+    size_t ubo_offsets[DRAW_QUEUE_MAX][2];
+    for (int i = 0; i < entry_count; i++) {
+        ubo_offsets[i][0] = q->entries[i].uniform_offsets[0];
+        ubo_offsets[i][1] = q->entries[i].uniform_offsets[1];
+    }
+
+    int32_t starts[DRAW_QUEUE_MAX];
+    int32_t counts_arr[DRAW_QUEUE_MAX];
+    uint32_t idx_offsets[DRAW_QUEUE_MAX];
+    uint32_t idx_counts[DRAW_QUEUE_MAX];
+    uint32_t total_indices = 0;
+    uint32_t min_start = 0, max_end = 0;
+    uint32_t min_element = 0, max_element = 0;
+
+    if (is_indexed) {
+        total_indices = q->total_indices;
+        min_element = q->min_element;
+        max_element = q->max_element;
+        for (int i = 0; i < entry_count; i++) {
+            idx_offsets[i] = q->entries[i].index_offset;
+            idx_counts[i] = q->entries[i].index_count;
+        }
+    } else {
+        min_start = q->min_start;
+        max_end = q->max_end;
+        for (int i = 0; i < entry_count; i++) {
+            starts[i] = q->entries[i].first_vertex;
+            counts_arr[i] = q->entries[i].vertex_count;
+        }
+    }
+
+    q->count = 0;
+    q->active = false;
+
+    if (!(r->color_binding || r->zeta_binding)) {
+        return;
+    }
+
+    int saved_primitive_mode = pg->primitive_mode;
+    uint32_t saved_shader_gen = pg->shader_state_gen;
+    uint32_t saved_pipeline_gen = pg->pipeline_state_gen;
+    uint32_t saved_texture_gen = pg->texture_state_gen;
+    uint32_t saved_any_reg_gen = pg->any_reg_gen;
+    uint32_t saved_vertex_attr_gen = pg->vertex_attr_gen;
+    uint32_t saved_texture_vram_gen = r->texture_vram_gen;
+    bool saved_fb_dirty = r->framebuffer_dirty;
+    bool saved_prog_dirty = pg->program_data_dirty;
+
+    pg->primitive_mode = prim_mode;
+    pg->shader_state_gen = q->shader_state_gen;
+    pg->pipeline_state_gen = q->pipeline_state_gen;
+    pg->texture_state_gen = q->texture_state_gen;
+    pg->any_reg_gen = q->any_reg_gen;
+    pg->vertex_attr_gen = q->vertex_attr_gen;
+    r->texture_vram_gen = q->texture_vram_gen;
+    r->framebuffer_dirty = false;
+    pg->program_data_dirty = false;
+
+    r->num_vertex_ram_buffer_syncs = 0;
+
+    if (is_indexed) {
+        uint32_t provoking = (total_indices > 0)
+            ? q->index_buf[total_indices - 1]
+            : max_element;
+        pgraph_vk_bind_vertex_attributes(d, min_element, max_element,
+                                         false, 0, provoking);
+
+        sync_vertex_ram_buffer(pg);
+        VertexBufferRemap remap =
+            remap_unaligned_attributes(pg, max_element + 1);
+
+        size_t index_data_size = total_indices * sizeof(uint32_t);
+        ensure_buffer_space(pg, BUFFER_INDEX_STAGING, index_data_size);
+
+        begin_pre_draw(pg);
+        copy_remapped_attributes_to_inline_buffer(pg, remap, 0,
+                                                  max_element + 1);
+        pgraph_vk_begin_debug_marker(r, r->command_buffer, RGBA_BLUE,
+                                     "Merged Indexed (%d)", entry_count);
+        begin_draw(pg);
+        bind_vertex_buffer(pg, remap.attributes, 0);
+
+        VkDeviceSize buffer_offset = pgraph_vk_update_index_buffer(
+            pg, q->index_buf, index_data_size);
+        vkCmdBindIndexBuffer(r->command_buffer,
+                             r->storage_buffers[BUFFER_INDEX].buffer,
+                             buffer_offset, VK_INDEX_TYPE_UINT32);
+
+        {
+            int ds_index = r->descriptor_set_index - 1;
+            assert(ds_index >= 0);
+            for (int i = 0; i < entry_count; i++) {
+                uint32_t dyn_off[2] = {
+                    (uint32_t)ubo_offsets[i][0],
+                    (uint32_t)ubo_offsets[i][1]
+                };
+                vkCmdBindDescriptorSets(
+                    r->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    r->pipeline_binding->layout, 0, 1,
+                    &r->descriptor_sets[ds_index], 2, dyn_off);
+                vkCmdDrawIndexed(r->command_buffer, idx_counts[i], 1,
+                                 idx_offsets[i], 0, 0);
+            }
+        }
+    } else {
+        PrimAssemblyState assembly = {
+            .primitive_mode = prim_mode,
+            .polygon_mode = (enum ShaderPolygonMode)GET_MASK(
+                pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
+                NV_PGRAPH_SETUPRASTER_FRONTFACEMODE),
+            .last_provoking =
+                GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
+                         NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX) ==
+                NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX_LAST,
+            .flat_shading =
+                GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
+                         NV_PGRAPH_CONTROL_3_SHADEMODE) ==
+                NV_PGRAPH_CONTROL_3_SHADEMODE_FLAT,
+        };
+
+        pgraph_vk_bind_vertex_attributes(d, min_start, max_end - 1,
+                                         false, 0, max_end - 1);
+
+        sync_vertex_ram_buffer(pg);
+        VertexBufferRemap remap = remap_unaligned_attributes(pg, max_end);
+
+        PrimRewrite prim_rw = pgraph_prim_rewrite_ranges(
+            &r->prim_rewrite_buf, assembly,
+            starts, counts_arr, entry_count);
+
+        if (prim_rw.num_indices > 0) {
+            size_t rewrite_size = prim_rw.num_indices * sizeof(uint32_t);
+            ensure_buffer_space(pg, BUFFER_INDEX_STAGING, rewrite_size);
+        } else if (entry_count > 1) {
+            size_t indirect_size =
+                entry_count * sizeof(VkDrawIndirectCommand);
+            ensure_buffer_space(pg, BUFFER_INDEX_STAGING, indirect_size);
+        }
+
+        begin_pre_draw(pg);
+        copy_remapped_attributes_to_inline_buffer(pg, remap, 0, max_end);
+        pgraph_vk_begin_debug_marker(r, r->command_buffer, RGBA_BLUE,
+                                     "Merged Draw Arrays (%d)", entry_count);
+        begin_draw(pg);
+        bind_vertex_buffer(pg, remap.attributes, 0);
+
+        if (prim_rw.num_indices > 0) {
+            size_t rewrite_size = prim_rw.num_indices * sizeof(uint32_t);
+            VkDeviceSize buffer_offset = pgraph_vk_update_index_buffer(
+                pg, prim_rw.indices, rewrite_size);
+            vkCmdBindIndexBuffer(r->command_buffer,
+                                 r->storage_buffers[BUFFER_INDEX].buffer,
+                                 buffer_offset, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(r->command_buffer, prim_rw.num_indices,
+                             1, 0, 0, 0);
+        } else if (!has_uniform_changes && entry_count > 1) {
+            VkDrawIndirectCommand cmds[DRAW_QUEUE_MAX];
+            for (int i = 0; i < entry_count; i++) {
+                cmds[i] = (VkDrawIndirectCommand){
+                    .vertexCount = counts_arr[i],
+                    .instanceCount = 1,
+                    .firstVertex = starts[i],
+                    .firstInstance = 0,
+                };
+            }
+            size_t indirect_size =
+                entry_count * sizeof(VkDrawIndirectCommand);
+            ensure_buffer_space(pg, BUFFER_INDEX_STAGING, indirect_size);
+            VkDeviceSize buffer_offset = pgraph_vk_update_index_buffer(
+                pg, cmds, indirect_size);
+            vkCmdDrawIndirect(r->command_buffer,
+                              r->storage_buffers[BUFFER_INDEX].buffer,
+                              buffer_offset, entry_count,
+                              sizeof(VkDrawIndirectCommand));
+        } else if (has_uniform_changes) {
+            int ds_index = r->descriptor_set_index - 1;
+            assert(ds_index >= 0);
+
+            int i = 0;
+            while (i < entry_count) {
+                size_t cur_off0 = ubo_offsets[i][0];
+                size_t cur_off1 = ubo_offsets[i][1];
+
+                uint32_t dyn_off[2] = {
+                    (uint32_t)cur_off0, (uint32_t)cur_off1
+                };
+                vkCmdBindDescriptorSets(
+                    r->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    r->pipeline_binding->layout, 0, 1,
+                    &r->descriptor_sets[ds_index], 2, dyn_off);
+
+                int j = i;
+                while (j < entry_count &&
+                       ubo_offsets[j][0] == cur_off0 &&
+                       ubo_offsets[j][1] == cur_off1) {
+                    j++;
+                }
+
+                int group_count = j - i;
+                if (group_count > 1) {
+                    VkDrawIndirectCommand cmds[DRAW_QUEUE_MAX];
+                    for (int k = 0; k < group_count; k++) {
+                        cmds[k] = (VkDrawIndirectCommand){
+                            .vertexCount = counts_arr[i + k],
+                            .instanceCount = 1,
+                            .firstVertex = starts[i + k],
+                            .firstInstance = 0,
+                        };
+                    }
+                    size_t indirect_size =
+                        group_count * sizeof(VkDrawIndirectCommand);
+                    ensure_buffer_space(pg, BUFFER_INDEX_STAGING,
+                                        indirect_size);
+                    VkDeviceSize buf_off = pgraph_vk_update_index_buffer(
+                        pg, cmds, indirect_size);
+                    vkCmdDrawIndirect(r->command_buffer,
+                                      r->storage_buffers[BUFFER_INDEX].buffer,
+                                      buf_off, group_count,
+                                      sizeof(VkDrawIndirectCommand));
+                } else {
+                    vkCmdDraw(r->command_buffer, counts_arr[i], 1,
+                              starts[i], 0);
+                }
+
+                i = j;
+            }
+        } else {
+            vkCmdDraw(r->command_buffer, counts_arr[0], 1, starts[0], 0);
+        }
+    }
+
+    end_draw(pg);
+    pgraph_vk_end_debug_marker(r, r->command_buffer);
+
+    pg->primitive_mode = saved_primitive_mode;
+    pg->shader_state_gen = saved_shader_gen;
+    pg->pipeline_state_gen = saved_pipeline_gen;
+    pg->texture_state_gen = saved_texture_gen;
+    pg->any_reg_gen = saved_any_reg_gen;
+    pg->vertex_attr_gen = saved_vertex_attr_gen;
+    r->texture_vram_gen = saved_texture_vram_gen;
+    r->framebuffer_dirty = saved_fb_dirty;
+    pg->program_data_dirty = saved_prog_dirty;
+}
+#endif
+
+void pgraph_vk_flush_draw_queue(NV2AState *d)
+{
+#if OPT_DRAW_MERGING
+    PGRAPHState *pg = &d->pgraph;
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    if (r->draw_queue.count > 0) {
+        flush_draw_queue_internal(d);
+    }
+    r->draw_queue.active = false;
+#endif
+}
+
 void pgraph_vk_draw_end(NV2AState *d)
 {
     PGRAPHState *pg = &d->pgraph;
+    PGRAPHVkState *r = pg->vk_renderer_state;
 
     uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
     bool mask_alpha = control_0 & NV_PGRAPH_CONTROL_0_ALPHA_WRITE_ENABLE;
@@ -2251,9 +2821,101 @@ void pgraph_vk_draw_end(NV2AState *d)
         return;
     }
 
+#if OPT_DRAW_MERGING
+    if (pg->draw_arrays_length && !pg->clearing) {
+        DrawQueue *q = &r->draw_queue;
+
+        if (q->active) {
+            if (q->indexed || !check_draw_mergeable(pg, q)) {
+                if (q->count > 0) {
+                    flush_draw_queue_internal(d);
+                }
+                q->active = false;
+            }
+        }
+
+        if (q->active) {
+            if (q->count >= OPT_DRAW_MERGE_MAX ||
+                !try_enqueue_draw_arrays(pg, q)) {
+                flush_draw_queue_internal(d);
+                q->active = false;
+            } else {
+                goto post_draw;
+            }
+        }
+
+        pgraph_vk_flush_draw(d);
+
+        q->shader_state_gen = pg->shader_state_gen;
+        q->pipeline_state_gen = pg->pipeline_state_gen;
+        q->texture_state_gen = pg->texture_state_gen;
+        q->any_reg_gen = pg->any_reg_gen;
+        q->vertex_attr_gen = pg->vertex_attr_gen;
+        q->texture_vram_gen = r->texture_vram_gen;
+        q->primitive_mode = pg->primitive_mode;
+        q->active = true;
+        q->indexed = false;
+        q->has_uniform_changes = false;
+        q->count = 0;
+
+        goto post_draw;
+    }
+
+#if OPT_INDEXED_DRAW_MERGING
+    if (pg->inline_elements_length && !pg->clearing) {
+        DrawQueue *q = &r->draw_queue;
+
+        if (q->active) {
+            if (!q->indexed || !check_draw_mergeable(pg, q)) {
+                if (q->count > 0) {
+                    flush_draw_queue_internal(d);
+                }
+                q->active = false;
+            }
+        }
+
+        if (q->active) {
+            if (q->count >= OPT_DRAW_MERGE_MAX ||
+                !try_enqueue_draw_indexed(pg, q)) {
+                flush_draw_queue_internal(d);
+                q->active = false;
+            } else {
+                goto post_draw;
+            }
+        }
+
+        pgraph_vk_flush_draw(d);
+
+        q->shader_state_gen = pg->shader_state_gen;
+        q->pipeline_state_gen = pg->pipeline_state_gen;
+        q->texture_state_gen = pg->texture_state_gen;
+        q->any_reg_gen = pg->any_reg_gen;
+        q->vertex_attr_gen = pg->vertex_attr_gen;
+        q->texture_vram_gen = r->texture_vram_gen;
+        q->primitive_mode = pg->primitive_mode;
+        q->active = true;
+        q->indexed = true;
+        q->has_uniform_changes = false;
+        q->total_indices = 0;
+        q->min_element = UINT32_MAX;
+        q->max_element = 0;
+        q->count = 0;
+
+        goto post_draw;
+    }
+#endif
+
+    if (r->draw_queue.count > 0) {
+        flush_draw_queue_internal(d);
+    }
+    r->draw_queue.active = false;
+#endif
+
     pgraph_vk_flush_draw(d);
 
-    PGRAPHVkState *r = pg->vk_renderer_state;
+#if OPT_DRAW_MERGING
+post_draw:
+#endif
     pg->draw_time++;
     if (r->color_binding && pgraph_color_write_enabled(pg)) {
         r->color_binding->draw_time = pg->draw_time;
@@ -2451,6 +3113,13 @@ void pgraph_vk_clear_surface(NV2AState *d, uint32_t parameter)
 {
     PGRAPHState *pg = &d->pgraph;
     PGRAPHVkState *r = pg->vk_renderer_state;
+
+#if OPT_DRAW_MERGING
+    if (r->draw_queue.count > 0) {
+        flush_draw_queue_internal(d);
+    }
+    r->draw_queue.active = false;
+#endif
 
     nv2a_profile_inc_counter(NV2A_PROF_CLEAR);
 
@@ -2703,16 +3372,6 @@ static void get_size_and_count_for_format(VkFormat fmt, size_t *size, size_t *co
     *size = table[fmt].size;
     *count = table[fmt].count;
 }
-
-typedef struct VertexBufferRemap {
-    uint16_t attributes;
-    size_t buffer_space_required;
-    struct {
-        VkDeviceAddress offset;
-        VkDeviceSize old_stride;
-        VkDeviceSize new_stride;
-    } map[NV2A_VERTEXSHADER_ATTRIBUTES];
-} VertexBufferRemap;
 
 static VertexBufferRemap remap_unaligned_attributes(PGRAPHState *pg,
                                                     uint32_t num_vertices)
