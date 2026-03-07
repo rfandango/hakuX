@@ -18,7 +18,56 @@
  */
 
 #include "hw/xbox/nv2a/pgraph/pgraph.h"
+#include "qemu/fast-hash.h"
 #include "shaders.h"
+
+uint64_t pgraph_glsl_hash_shader_state(const ShaderState *state)
+{
+    size_t common_size = offsetof(VshState, fixed_function);
+    uint64_t h = fast_hash((const uint8_t *)&state->vsh, common_size);
+
+    if (state->vsh.is_fixed_function) {
+        h ^= fast_hash((const uint8_t *)&state->vsh.fixed_function,
+                        sizeof(FixedFunctionVshState));
+    } else {
+        size_t prog_size = offsetof(ProgrammableVshState, program_data) +
+            state->vsh.programmable.program_length *
+                VSH_TOKEN_SIZE * sizeof(uint32_t);
+        h ^= fast_hash((const uint8_t *)&state->vsh.programmable, prog_size);
+    }
+
+    h ^= fast_hash((const uint8_t *)&state->geom, sizeof(GeomState));
+    h ^= fast_hash((const uint8_t *)&state->psh, sizeof(PshState));
+    return h;
+}
+
+int pgraph_glsl_compare_shader_state(const ShaderState *a,
+                                     const ShaderState *b)
+{
+    size_t common_size = offsetof(VshState, fixed_function);
+    int r = memcmp(&a->vsh, &b->vsh, common_size);
+    if (r) return r;
+
+    if (a->vsh.is_fixed_function != b->vsh.is_fixed_function) return 1;
+
+    if (a->vsh.is_fixed_function) {
+        r = memcmp(&a->vsh.fixed_function, &b->vsh.fixed_function,
+                    sizeof(FixedFunctionVshState));
+    } else {
+        if (a->vsh.programmable.program_length !=
+            b->vsh.programmable.program_length) return 1;
+        size_t prog_size = offsetof(ProgrammableVshState, program_data) +
+            a->vsh.programmable.program_length *
+                VSH_TOKEN_SIZE * sizeof(uint32_t);
+        r = memcmp(&a->vsh.programmable, &b->vsh.programmable, prog_size);
+    }
+    if (r) return r;
+
+    r = memcmp(&a->geom, &b->geom, sizeof(GeomState));
+    if (r) return r;
+
+    return memcmp(&a->psh, &b->psh, sizeof(PshState));
+}
 
 ShaderState pgraph_glsl_get_shader_state(PGRAPHState *pg)
 {

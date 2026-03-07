@@ -296,11 +296,85 @@ static void update_shader_uniform_locs(ShaderBinding *binding)
     }
 }
 
+static uint64_t hash_shader_module_key(const ShaderModuleCacheKey *key)
+{
+    uint64_t h = fast_hash((const uint8_t *)&key->kind, sizeof(key->kind));
+    switch (key->kind) {
+    case VK_SHADER_STAGE_VERTEX_BIT: {
+        size_t common = offsetof(VshState, fixed_function);
+        h ^= fast_hash((const uint8_t *)&key->vsh.state, common);
+        if (key->vsh.state.is_fixed_function) {
+            h ^= fast_hash((const uint8_t *)&key->vsh.state.fixed_function,
+                            sizeof(FixedFunctionVshState));
+        } else {
+            size_t prog_size = offsetof(ProgrammableVshState, program_data) +
+                key->vsh.state.programmable.program_length *
+                    VSH_TOKEN_SIZE * sizeof(uint32_t);
+            h ^= fast_hash((const uint8_t *)&key->vsh.state.programmable,
+                            prog_size);
+        }
+        h ^= fast_hash((const uint8_t *)&key->vsh.glsl_opts,
+                        sizeof(key->vsh.glsl_opts));
+        break;
+    }
+    case VK_SHADER_STAGE_GEOMETRY_BIT:
+        h ^= fast_hash((const uint8_t *)&key->geom,
+                        sizeof(key->geom));
+        break;
+    case VK_SHADER_STAGE_FRAGMENT_BIT:
+        h ^= fast_hash((const uint8_t *)&key->psh,
+                        sizeof(key->psh));
+        break;
+    default:
+        h ^= fast_hash((const uint8_t *)key, sizeof(*key));
+        break;
+    }
+    return h;
+}
+
+static int compare_shader_module_key(const ShaderModuleCacheKey *a,
+                                     const ShaderModuleCacheKey *b)
+{
+    if (a->kind != b->kind) return 1;
+    switch (a->kind) {
+    case VK_SHADER_STAGE_VERTEX_BIT: {
+        size_t common = offsetof(VshState, fixed_function);
+        int r = memcmp(&a->vsh.state, &b->vsh.state, common);
+        if (r) return r;
+        if (a->vsh.state.is_fixed_function != b->vsh.state.is_fixed_function)
+            return 1;
+        if (a->vsh.state.is_fixed_function) {
+            r = memcmp(&a->vsh.state.fixed_function,
+                        &b->vsh.state.fixed_function,
+                        sizeof(FixedFunctionVshState));
+        } else {
+            if (a->vsh.state.programmable.program_length !=
+                b->vsh.state.programmable.program_length)
+                return 1;
+            size_t prog_size = offsetof(ProgrammableVshState, program_data) +
+                a->vsh.state.programmable.program_length *
+                    VSH_TOKEN_SIZE * sizeof(uint32_t);
+            r = memcmp(&a->vsh.state.programmable,
+                        &b->vsh.state.programmable, prog_size);
+        }
+        if (r) return r;
+        return memcmp(&a->vsh.glsl_opts, &b->vsh.glsl_opts,
+                      sizeof(a->vsh.glsl_opts));
+    }
+    case VK_SHADER_STAGE_GEOMETRY_BIT:
+        return memcmp(&a->geom, &b->geom, sizeof(a->geom));
+    case VK_SHADER_STAGE_FRAGMENT_BIT:
+        return memcmp(&a->psh, &b->psh, sizeof(a->psh));
+    default:
+        return memcmp(a, b, sizeof(*a));
+    }
+}
+
 static ShaderModuleInfo *
 get_and_ref_shader_module_for_key(PGRAPHVkState *r,
                                   const ShaderModuleCacheKey *key)
 {
-    uint64_t hash = fast_hash((void *)key, sizeof(ShaderModuleCacheKey));
+    uint64_t hash = hash_shader_module_key(key);
     LruNode *node = lru_lookup(&r->shader_module_cache, hash, key);
     ShaderModuleCacheEntry *module =
         container_of(node, ShaderModuleCacheEntry, node);
@@ -372,7 +446,7 @@ static void shader_cache_entry_post_evict(Lru *lru, LruNode *node)
 static bool shader_cache_entry_compare(Lru *lru, LruNode *node, const void *key)
 {
     ShaderBinding *snode = container_of(node, ShaderBinding, node);
-    return memcmp(&snode->state, key, sizeof(ShaderState));
+    return pgraph_glsl_compare_shader_state(&snode->state, key);
 }
 
 static bool shader_module_warmup_in_progress;
@@ -444,7 +518,7 @@ static bool shader_module_cache_entry_compare(Lru *lru, LruNode *node,
 {
     ShaderModuleCacheEntry *module =
         container_of(node, ShaderModuleCacheEntry, node);
-    return memcmp(&module->key, key, sizeof(ShaderModuleCacheKey));
+    return compare_shader_module_key(&module->key, key);
 }
 
 static void shader_cache_init(PGRAPHState *pg)
@@ -491,8 +565,7 @@ static void shader_cache_init(PGRAPHState *pg)
             shader_module_warmup_in_progress = true;
             int warmed = 0;
             for (size_t i = 0; i < num_keys; i++) {
-                uint64_t hash = fast_hash((void *)&keys[i],
-                                          sizeof(ShaderModuleCacheKey));
+                uint64_t hash = hash_shader_module_key(&keys[i]);
                 if (!lru_contains_hash(&r->shader_module_cache, hash)) {
                     lru_lookup(&r->shader_module_cache, hash, &keys[i]);
                     warmed++;
@@ -525,7 +598,7 @@ static ShaderBinding *get_shader_binding_for_state(PGRAPHVkState *r,
                                                    const ShaderState *state)
 {
     unsigned int misses_before = g_nv2a_stats.shader_stats.shader_cache_misses;
-    uint64_t hash = fast_hash((void *)state, sizeof(*state));
+    uint64_t hash = pgraph_glsl_hash_shader_state(state);
     LruNode *node = lru_lookup(&r->shader_cache, hash, state);
     if (g_nv2a_stats.shader_stats.shader_cache_misses == misses_before) {
         g_nv2a_stats.shader_stats.shader_cache_hits++;
@@ -621,9 +694,27 @@ void pgraph_vk_bind_shaders(PGRAPHState *pg)
 
     if (!r->shader_binding ||
         pgraph_glsl_check_shader_state_dirty(pg, &r->shader_binding->state)) {
-        ShaderState new_state = pgraph_glsl_get_shader_state(pg);
-        if (!r->shader_binding || memcmp(&r->shader_binding->state, &new_state,
-                                         sizeof(ShaderState))) {
+        ShaderState new_state;
+        if (r->cached_shader_state_valid &&
+            r->cached_shader_state_gen == pg->shader_state_gen &&
+            !pg->program_data_dirty) {
+            new_state = r->cached_shader_state;
+            new_state.geom.primitive_mode =
+                pgraph_prim_rewrite_get_output_mode(
+                    (enum ShaderPrimitiveMode)pg->primitive_mode,
+                    new_state.geom.polygon_front_mode);
+            new_state.vsh.compressed_attrs = pg->compressed_attrs;
+            new_state.vsh.uniform_attrs = pg->uniform_attrs;
+            new_state.vsh.swizzle_attrs = pg->swizzle_attrs;
+        } else {
+            new_state = pgraph_glsl_get_shader_state(pg);
+            r->cached_shader_state = new_state;
+            r->cached_shader_state_gen = pg->shader_state_gen;
+            r->cached_shader_state_valid = true;
+        }
+        if (!r->shader_binding ||
+            pgraph_glsl_compare_shader_state(&r->shader_binding->state,
+                                             &new_state)) {
             r->shader_binding = get_shader_binding_for_state(r, &new_state);
             r->shader_bindings_changed = true;
             r->pipeline_state_dirty = true;

@@ -631,6 +631,10 @@ typedef struct PGRAPHVkState {
     bool shader_bindings_changed;
     bool use_push_constants_for_uniform_attrs;
 
+    ShaderState cached_shader_state;
+    uint32_t cached_shader_state_gen;
+    bool cached_shader_state_valid;
+
     Lru shader_module_cache;
     ShaderModuleCacheEntry *shader_module_cache_entries;
 

@@ -71,8 +71,10 @@ typedef struct {
     bool z_perspective;
 
     bool is_fixed_function;
-    FixedFunctionVshState fixed_function;
-    ProgrammableVshState programmable;
+    union {
+        FixedFunctionVshState fixed_function;
+        ProgrammableVshState programmable;
+    };
 } VshState;
 
 void pgraph_glsl_set_vsh_state(PGRAPHState *pg, VshState *state);

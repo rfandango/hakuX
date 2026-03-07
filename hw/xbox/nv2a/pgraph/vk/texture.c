@@ -444,6 +444,29 @@ static bool check_texture_dirty(NV2AState *d, hwaddr addr, hwaddr size)
                                               DIRTY_MEMORY_NV2A_TEX);
 }
 
+static void resolve_possibly_dirty_textures(NV2AState *d)
+{
+    PGRAPHState *pg = &d->pgraph;
+    PGRAPHVkState *r = pg->vk_renderer_state;
+
+    for (int i = 0; i < NV2A_MAX_TEXTURES; i++) {
+        TextureBinding *b = r->texture_bindings[i];
+        if (!b || b == &r->dummy_texture || !b->possibly_dirty) continue;
+        if (b->dirty_check_frame == pg->frame_time) continue;
+
+        bool vram_dirty = check_texture_dirty(
+            d, b->key.texture_vram_offset, b->key.texture_length);
+        if (b->key.palette_length > 0) {
+            vram_dirty |= check_texture_dirty(
+                d, b->key.palette_vram_offset, b->key.palette_length);
+        }
+        b->dirty_check_frame = pg->frame_time;
+        b->dirty_check_result = vram_dirty;
+        if (!vram_dirty) {
+            b->possibly_dirty = false;
+        }
+    }
+}
 
 // FIXME: Make sure we update sampler when data matches. Should we add filtering
 // options to the textureshape?
@@ -1533,23 +1556,7 @@ void pgraph_vk_bind_textures(NV2AState *d)
         return;
     }
 
-    for (int i = 0; i < NV2A_MAX_TEXTURES; i++) {
-        TextureBinding *b = r->texture_bindings[i];
-        if (b && b != &r->dummy_texture && b->possibly_dirty &&
-            b->dirty_check_frame != pg->frame_time) {
-            bool vram_dirty = check_texture_dirty(
-                d, b->key.texture_vram_offset, b->key.texture_length);
-            if (b->key.palette_length > 0) {
-                vram_dirty |= check_texture_dirty(
-                    d, b->key.palette_vram_offset, b->key.palette_length);
-            }
-            b->dirty_check_frame = pg->frame_time;
-            b->dirty_check_result = vram_dirty;
-            if (!vram_dirty) {
-                b->possibly_dirty = false;
-            }
-        }
-    }
+    resolve_possibly_dirty_textures(d);
 
     for (int i = 0; i < NV2A_MAX_TEXTURES; i++) {
         if (!pgraph_is_texture_enabled(pg, i)) {

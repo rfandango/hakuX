@@ -33,6 +33,9 @@ typedef struct ShaderState {
 typedef struct PGRAPHState PGRAPHState;
 
 ShaderState pgraph_glsl_get_shader_state(PGRAPHState *pg);
+uint64_t pgraph_glsl_hash_shader_state(const ShaderState *state);
+int pgraph_glsl_compare_shader_state(const ShaderState *a,
+                                     const ShaderState *b);
 
 bool pgraph_glsl_check_shader_state_dirty(PGRAPHState *pg,
                                           const ShaderState *state);

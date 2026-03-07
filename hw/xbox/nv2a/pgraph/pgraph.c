@@ -2644,7 +2644,11 @@ DEF_METHOD_INC(NV097, SET_SPECULAR_PARAMS)
     int slot = (method - NV097_SET_SPECULAR_PARAMS) / 4;
     pg->specular_params[slot] = *(float *)&parameter;
     if (slot == 5) {
-        pg->specular_power = reconstruct_specular_power(pg->specular_params);
+        float new_power = reconstruct_specular_power(pg->specular_params);
+        if (pg->specular_power != new_power) {
+            pg->shader_state_gen++;
+        }
+        pg->specular_power = new_power;
     }
 }
 
@@ -2668,7 +2672,11 @@ DEF_METHOD_INC(NV097, SET_VIEWPORT_OFFSET)
 DEF_METHOD_INC(NV097, SET_POINT_PARAMS)
 {
     int slot = (method - NV097_SET_POINT_PARAMS) / 4;
-    pg->point_params[slot] = *(float *)&parameter; /* FIXME: Where? */
+    float new_val = *(float *)&parameter;
+    if (pg->point_params[slot] != new_val) {
+        pg->shader_state_gen++;
+    }
+    pg->point_params[slot] = new_val;
 }
 
 DEF_METHOD_INC(NV097, SET_EYE_POSITION)
@@ -3683,7 +3691,11 @@ DEF_METHOD_INC(NV097, SET_SPECULAR_PARAMS_BACK)
     int slot = (method - NV097_SET_SPECULAR_PARAMS_BACK) / 4;
     pg->specular_params_back[slot] = *(float *)&parameter;
     if (slot == 5) {
-        pg->specular_power_back = reconstruct_specular_power(pg->specular_params_back);
+        float new_power = reconstruct_specular_power(pg->specular_params_back);
+        if (pg->specular_power_back != new_power) {
+            pg->shader_state_gen++;
+        }
+        pg->specular_power_back = new_power;
     }
 }
 
