@@ -75,7 +75,11 @@ unsigned int pgraph_vk_get_surface_scale_factor(NV2AState *d)
 void pgraph_vk_reload_surface_scale_factor(PGRAPHState *pg)
 {
     int factor = g_config.display.quality.surface_scale;
-    pg->surface_scale_factor = MAX(factor, 1);
+    int new_factor = MAX(factor, 1);
+    if (pg->surface_scale_factor != new_factor) {
+        pg->shader_state_gen++;
+    }
+    pg->surface_scale_factor = new_factor;
 }
 
 // FIXME: Move to common

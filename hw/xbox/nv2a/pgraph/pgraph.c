@@ -40,6 +40,47 @@
         pgraph_reg_w(pg, reg, rv);           \
     } while (0)
 
+uint8_t pgraph_reg_category_table[0x2000 / 4] = { 0 };
+
+static void pgraph_init_reg_category_table(void)
+{
+    unsigned int shader_regs[] = {
+        NV_PGRAPH_COMBINECTL,      NV_PGRAPH_COMBINESPECFOG0,
+        NV_PGRAPH_COMBINESPECFOG1,  NV_PGRAPH_CONTROL_0,
+        NV_PGRAPH_CONTROL_3,       NV_PGRAPH_CSV0_C,
+        NV_PGRAPH_CSV0_D,          NV_PGRAPH_CSV1_A,
+        NV_PGRAPH_CSV1_B,          NV_PGRAPH_POINTSIZE,
+        NV_PGRAPH_SETUPRASTER,     NV_PGRAPH_SHADERCLIPMODE,
+        NV_PGRAPH_SHADERCTL,       NV_PGRAPH_SHADERPROG,
+        NV_PGRAPH_SHADOWCTL,       NV_PGRAPH_ZCOMPRESSOCCLUDE,
+    };
+    for (int i = 0; i < ARRAY_SIZE(shader_regs); i++)
+        pgraph_reg_category_table[shader_regs[i] / 4] |= REG_CAT_SHADER;
+
+    for (int i = 0; i < 8; i++) {
+        pgraph_reg_category_table[(NV_PGRAPH_COMBINEALPHAI0 + i * 4) / 4] |= REG_CAT_SHADER;
+        pgraph_reg_category_table[(NV_PGRAPH_COMBINEALPHAO0 + i * 4) / 4] |= REG_CAT_SHADER;
+        pgraph_reg_category_table[(NV_PGRAPH_COMBINECOLORI0 + i * 4) / 4] |= REG_CAT_SHADER;
+        pgraph_reg_category_table[(NV_PGRAPH_COMBINECOLORO0 + i * 4) / 4] |= REG_CAT_SHADER;
+    }
+
+    for (int i = 0; i < 4; i++) {
+        pgraph_reg_category_table[(NV_PGRAPH_TEXCTL0_0  + i * 4) / 4] |= REG_CAT_SHADER;
+        pgraph_reg_category_table[(NV_PGRAPH_TEXFILTER0 + i * 4) / 4] |= REG_CAT_SHADER;
+        pgraph_reg_category_table[(NV_PGRAPH_TEXFMT0    + i * 4) / 4] |= REG_CAT_SHADER;
+    }
+
+    unsigned int pipeline_regs[] = {
+        NV_PGRAPH_BLEND,       NV_PGRAPH_CONTROL_0,
+        NV_PGRAPH_CONTROL_1,   NV_PGRAPH_CONTROL_2,
+        NV_PGRAPH_CONTROL_3,   NV_PGRAPH_SETUPRASTER,
+        NV_PGRAPH_BLENDCOLOR,
+        NV_PGRAPH_ZOFFSETBIAS, NV_PGRAPH_ZOFFSETFACTOR,
+    };
+    for (int i = 0; i < ARRAY_SIZE(pipeline_regs); i++)
+        pgraph_reg_category_table[pipeline_regs[i] / 4] |= REG_CAT_PIPELINE;
+}
+
 #ifndef XEMU_OPT_METHOD_FAST_TABLE
 #define XEMU_OPT_METHOD_FAST_TABLE 1
 #endif
@@ -676,6 +717,7 @@ void pgraph_renderer_register(const PGRAPHRenderer *renderer)
 void pgraph_init(NV2AState *d)
 {
     g_nv2a = d;
+    pgraph_init_reg_category_table();
 
     PGRAPHState *pg = &d->pgraph;
     qemu_mutex_init(&pg->lock);
@@ -1648,8 +1690,12 @@ DEF_METHOD(NV097, SET_SURFACE_FORMAT)
 
     pg->surface_shape.color_format =
         GET_MASK(parameter, NV097_SET_SURFACE_FORMAT_COLOR);
+    uint32_t old_zeta_format = pg->surface_shape.zeta_format;
     pg->surface_shape.zeta_format =
         GET_MASK(parameter, NV097_SET_SURFACE_FORMAT_ZETA);
+    if (pg->surface_shape.zeta_format != old_zeta_format) {
+        pg->shader_state_gen++;
+    }
     pg->surface_shape.anti_aliasing =
         GET_MASK(parameter, NV097_SET_SURFACE_FORMAT_ANTI_ALIASING);
     pg->surface_shape.log_width =
@@ -2381,6 +2427,9 @@ DEF_METHOD(NV097, SET_TEXGEN_Q)
 DEF_METHOD_INC(NV097, SET_TEXTURE_MATRIX_ENABLE)
 {
     int slot = (method - NV097_SET_TEXTURE_MATRIX_ENABLE) / 4;
+    if (pg->texture_matrix_enable[slot] != parameter) {
+        pg->shader_state_gen++;
+    }
     pg->texture_matrix_enable[slot] = parameter;
 }
 

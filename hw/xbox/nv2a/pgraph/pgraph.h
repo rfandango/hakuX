@@ -160,6 +160,9 @@ typedef struct PGRAPHState {
     bool texture_dirty[NV2A_MAX_TEXTURES];
     uint32_t texture_state_gen;
     uint32_t vertex_attr_gen;
+    uint32_t shader_state_gen;
+    uint32_t pipeline_state_gen;
+    uint32_t any_reg_gen;
 
     bool texture_matrix_enable[NV2A_MAX_TEXTURES];
 
@@ -299,6 +302,10 @@ extern NV2AState *g_nv2a;
 
 // FIXME: Add new function pgraph_is_texture_sampler_active()
 
+#define REG_CAT_SHADER   (1 << 0)
+#define REG_CAT_PIPELINE (1 << 1)
+extern uint8_t pgraph_reg_category_table[];
+
 static inline uint32_t pgraph_reg_r(PGRAPHState *pg, unsigned int r)
 {
     assert(r % 4 == 0);
@@ -310,6 +317,10 @@ static inline void pgraph_reg_w(PGRAPHState *pg, unsigned int r, uint32_t v)
     assert(r % 4 == 0);
     if (pg->regs_[r] != v) {
         bitmap_set(pg->regs_dirty, r / sizeof(uint32_t), 1);
+        uint8_t cat = pgraph_reg_category_table[r / 4];
+        if (cat & REG_CAT_SHADER)   pg->shader_state_gen++;
+        if (cat & REG_CAT_PIPELINE) pg->pipeline_state_gen++;
+        pg->any_reg_gen++;
     }
     pg->regs_[r] = v;
 }

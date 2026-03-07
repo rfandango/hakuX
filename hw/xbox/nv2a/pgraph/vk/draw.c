@@ -737,80 +737,25 @@ static bool check_pipeline_dirty(PGRAPHState *pg)
         return true;
     }
 
-#if OPT_DYNAMIC_STATES
-    const unsigned int regs[] = {
-        NV_PGRAPH_BLEND,     NV_PGRAPH_CONTROL_0,
-        NV_PGRAPH_CONTROL_2, NV_PGRAPH_CONTROL_3,
-    };
-#else
-    const unsigned int regs[] = {
-        NV_PGRAPH_BLEND,       NV_PGRAPH_CONTROL_0,
-        NV_PGRAPH_BLENDCOLOR,  NV_PGRAPH_CONTROL_2,
-        NV_PGRAPH_CONTROL_3,   NV_PGRAPH_SETUPRASTER,
-        NV_PGRAPH_ZOFFSETBIAS, NV_PGRAPH_ZOFFSETFACTOR,
-        NV_PGRAPH_CONTROL_1,
-    };
-#endif
-
-    for (int i = 0; i < ARRAY_SIZE(regs); i++) {
-        if (pgraph_is_reg_dirty(pg, regs[i])) {
-            return true;
-        }
+    if (pg->pipeline_state_gen != r->last_pipeline_state_gen) {
+        return true;
     }
 
-#if OPT_DYNAMIC_STATES
-    bool use_dyn_ds = OPT_DYNAMIC_DEPTH_STENCIL &&
-                      r->extended_dynamic_state_supported;
-    if (use_dyn_ds) {
-        if (pgraph_is_reg_dirty(pg, NV_PGRAPH_CONTROL_0)) {
-            uint32_t c0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
-            uint32_t c0_mask = ~(NV_PGRAPH_CONTROL_0_ZENABLE |
-                                 NV_PGRAPH_CONTROL_0_ZWRITEENABLE |
-                                 NV_PGRAPH_CONTROL_0_ZFUNC);
-            if ((c0 & c0_mask) != (r->pipeline_binding->key.regs[1] & c0_mask)) {
-                return true;
-            }
-        }
-        if (pgraph_is_reg_dirty(pg, NV_PGRAPH_CONTROL_2)) {
-            uint32_t c2 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_2);
-            uint32_t c2_mask = ~(NV_PGRAPH_CONTROL_2_STENCIL_OP_FAIL |
-                                 NV_PGRAPH_CONTROL_2_STENCIL_OP_ZFAIL |
-                                 NV_PGRAPH_CONTROL_2_STENCIL_OP_ZPASS);
-            if ((c2 & c2_mask) != (r->pipeline_binding->key.regs[2] & c2_mask)) {
-                return true;
-            }
-        }
-    }
-    if (pgraph_is_reg_dirty(pg, NV_PGRAPH_SETUPRASTER)) {
-        uint32_t sr = pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER);
-        uint32_t sr_mask = ~(NV_PGRAPH_SETUPRASTER_CULLENABLE |
-                             NV_PGRAPH_SETUPRASTER_CULLCTRL |
-                             NV_PGRAPH_SETUPRASTER_FRONTFACE);
-        if ((sr & sr_mask) != (r->pipeline_binding->key.regs[4] & sr_mask)) {
-            return true;
-        }
-    }
-    if (pgraph_is_reg_dirty(pg, NV_PGRAPH_CONTROL_1)) {
-        uint32_t c1 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1);
-        uint32_t c1_mask;
-        if (use_dyn_ds) {
-            c1_mask = ~(NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE |
-                        NV_PGRAPH_CONTROL_1_STENCIL_FUNC |
-                        NV_PGRAPH_CONTROL_1_STENCIL_REF |
-                        NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ |
-                        NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE);
-        } else {
-            c1_mask = ~(NV_PGRAPH_CONTROL_1_STENCIL_REF |
-                        NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ |
-                        NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE);
-        }
-        if ((c1 & c1_mask) != (r->pipeline_binding->key.regs[5] & c1_mask)) {
-            return true;
+#if OPT_VALIDATE_GEN_COUNTERS
+    {
+        const unsigned int vregs[] = {
+            NV_PGRAPH_BLEND,     NV_PGRAPH_CONTROL_0,
+            NV_PGRAPH_CONTROL_1, NV_PGRAPH_CONTROL_2,
+            NV_PGRAPH_CONTROL_3, NV_PGRAPH_SETUPRASTER,
+            NV_PGRAPH_BLENDCOLOR,
+            NV_PGRAPH_ZOFFSETBIAS, NV_PGRAPH_ZOFFSETFACTOR,
+        };
+        for (int i = 0; i < ARRAY_SIZE(vregs); i++) {
+            assert(!pgraph_is_reg_dirty(pg, vregs[i]));
         }
     }
 #endif
 
-    // FIXME: Use dirty bits instead
     if (memcmp(r->vertex_attribute_descriptions,
                r->pipeline_binding->key.attribute_descriptions,
                r->num_active_vertex_attribute_descriptions *
@@ -902,7 +847,9 @@ static void create_pipeline(PGRAPHState *pg)
         pg->texture_state_gen == r->last_texture_state_gen &&
         pgraph_vk_check_textures_fast_skip(pg) &&
         !check_render_pass_dirty(pg) &&
-        !pgraph_has_dirty_regs(pg)) {
+        pg->shader_state_gen == r->last_shader_state_gen &&
+        pg->pipeline_state_gen == r->last_pipeline_state_gen &&
+        pg->primitive_mode == r->shader_binding->state.geom.primitive_mode) {
         g_opt_stats.pipeline_early_hits++;
         NV2A_VK_DGROUP_END();
         return;
@@ -919,9 +866,19 @@ static void create_pipeline(PGRAPHState *pg)
     NV2A_PHASE_TIMER_END(pipe_bind_tex);
 
     NV2A_PHASE_TIMER_BEGIN(pipe_bind_shd);
+#if OPT_VALIDATE_GEN_COUNTERS
+    if (!pg->program_data_dirty && r->shader_binding &&
+        pg->shader_state_gen == r->last_shader_state_gen &&
+        pg->primitive_mode == r->shader_binding->state.geom.primitive_mode) {
+        assert(!pgraph_glsl_check_shader_state_dirty(pg,
+                                                     &r->shader_binding->state));
+    }
+#endif
     if (pg->program_data_dirty || !r->shader_binding ||
-        pgraph_glsl_check_shader_state_dirty(pg, &r->shader_binding->state)) {
+        pg->shader_state_gen != r->last_shader_state_gen ||
+        pg->primitive_mode != r->shader_binding->state.geom.primitive_mode) {
         pgraph_vk_bind_shaders(pg);
+        r->last_shader_state_gen = pg->shader_state_gen;
     } else {
         pgraph_vk_update_shader_uniforms(pg);
     }
@@ -933,7 +890,9 @@ static void create_pipeline(PGRAPHState *pg)
     bool pipeline_dirty = check_pipeline_dirty(pg);
 
     pgraph_clear_dirty_reg_map(pg);
-    // FIXME: We could clear less
+    r->last_pipeline_state_gen = pg->pipeline_state_gen;
+    r->last_shader_state_gen = pg->shader_state_gen;
+    r->last_any_reg_gen = pg->any_reg_gen;
 
     if (r->pipeline_binding && !pipeline_dirty) {
         NV2A_VK_DPRINTF("Cache hit");
@@ -1917,9 +1876,12 @@ static void begin_pre_draw(PGRAPHState *pg)
         r->descriptor_set_index > 0 &&
         pg->texture_state_gen == r->last_texture_state_gen &&
         pgraph_vk_check_textures_fast_skip(pg) &&
-        !pgraph_has_dirty_regs(pg) &&
+        pg->any_reg_gen == r->last_any_reg_gen &&
         !pg->program_data_dirty &&
         pg->vertex_attr_gen == r->pipeline_vertex_attr_gen) {
+#if OPT_VALIDATE_GEN_COUNTERS
+        assert(!pgraph_has_dirty_regs(pg));
+#endif
         g_opt_stats.super_fast_hits++;
         r->pre_draw_skipped = true;
         return;
@@ -1939,7 +1901,9 @@ static void begin_pre_draw(PGRAPHState *pg)
         r->descriptor_set_index > 0 &&
         pg->texture_state_gen == r->last_texture_state_gen &&
         pgraph_vk_check_textures_fast_skip(pg) &&
-        !pgraph_has_dirty_regs(pg) &&
+        pg->shader_state_gen == r->last_shader_state_gen &&
+        pg->pipeline_state_gen == r->last_pipeline_state_gen &&
+        pg->primitive_mode == r->shader_binding->state.geom.primitive_mode &&
         !pg->program_data_dirty &&
         pg->vertex_attr_gen == r->pipeline_vertex_attr_gen) {
         r->pre_draw_skipped = false;

@@ -71,6 +71,7 @@
 #define OPT_DESC_REBIND_SKIP    1
 #define OPT_PIPELINE_EARLY_EXIT 1
 #define OPT_MEDIUM_FAST_PATH    1
+#define OPT_VALIDATE_GEN_COUNTERS 0
 
 struct OptBisectStats {
     int super_fast_hits;
@@ -544,6 +545,9 @@ typedef struct PGRAPHVkState {
 
     uint32_t last_vertex_attr_gen;
     uint32_t pipeline_vertex_attr_gen;
+    uint32_t last_shader_state_gen;
+    uint32_t last_pipeline_state_gen;
+    uint32_t last_any_reg_gen;
     uint32_t sync_range_attr_gen;
     uint32_t sync_range_min;
     uint32_t sync_range_max;
