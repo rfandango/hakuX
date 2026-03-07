@@ -1235,6 +1235,16 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
         }
     }
 
+    if (binding_found && possibly_dirty && !surface_to_texture) {
+        bool vram_confirmed_clean =
+            snode->dirty_check_frame == pg->frame_time &&
+            !snode->dirty_check_result;
+        if (vram_confirmed_clean) {
+            snode->possibly_dirty = false;
+            possibly_dirty = false;
+        }
+    }
+
     void *texture_data = (char*)d->vram_ptr + texture_vram_offset;
     void *palette_data = (char*)d->vram_ptr + texture_palette_vram_offset;
 
@@ -1517,6 +1527,24 @@ void pgraph_vk_bind_textures(NV2AState *d)
     }
 
     for (int i = 0; i < NV2A_MAX_TEXTURES; i++) {
+        TextureBinding *b = r->texture_bindings[i];
+        if (b && b != &r->dummy_texture && b->possibly_dirty &&
+            b->dirty_check_frame != pg->frame_time) {
+            bool vram_dirty = check_texture_dirty(
+                d, b->key.texture_vram_offset, b->key.texture_length);
+            if (b->key.palette_length > 0) {
+                vram_dirty |= check_texture_dirty(
+                    d, b->key.palette_vram_offset, b->key.palette_length);
+            }
+            b->dirty_check_frame = pg->frame_time;
+            b->dirty_check_result = vram_dirty;
+            if (!vram_dirty) {
+                b->possibly_dirty = false;
+            }
+        }
+    }
+
+    for (int i = 0; i < NV2A_MAX_TEXTURES; i++) {
         if (!pgraph_is_texture_enabled(pg, i)) {
             if (r->texture_bindings[i] != &r->dummy_texture) {
                 r->texture_bindings[i] = &r->dummy_texture;
@@ -1530,6 +1558,16 @@ void pgraph_vk_bind_textures(NV2AState *d)
             r->texture_bindings[i] != &r->dummy_texture &&
             !r->texture_bindings[i]->possibly_dirty) {
             continue;
+        }
+
+        if (!pg->texture_dirty[i] && r->texture_bindings[i] &&
+            r->texture_bindings[i] != &r->dummy_texture &&
+            r->texture_bindings[i]->possibly_dirty) {
+            if (r->texture_bindings[i]->dirty_check_frame == pg->frame_time &&
+                !r->texture_bindings[i]->dirty_check_result) {
+                r->texture_bindings[i]->possibly_dirty = false;
+                continue;
+            }
         }
 
         if (pg->texture_dirty[i] && r->tex_reg_cache[i].valid &&
