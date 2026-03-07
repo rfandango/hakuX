@@ -86,6 +86,11 @@ struct OptBisectStats {
     int multi_draw_loop;
 };
 extern struct OptBisectStats g_opt_stats;
+#if NV2A_PERF_LOG
+#define OPT_STAT_INC(field) (g_opt_stats.field++)
+#else
+#define OPT_STAT_INC(field) do { } while (0)
+#endif
 #define OPT_SURF_TO_TEX_INLINE  1
 /*
  * DISABLED: OPT_SYNC_RANGE_SKIP skips sync_vertex_ram_buffer when the element

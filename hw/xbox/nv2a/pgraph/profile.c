@@ -240,7 +240,7 @@ void nv2a_profile_flip_stall(void)
     }
     prev_flip_us = now;
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) && NV2A_PERF_LOG
     if ((g_nv2a_stats.frame_count % 60) == 0) {
         char buf[512];
         nv2a_profile_get_phase_timing_str(buf, sizeof(buf));

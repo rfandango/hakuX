@@ -136,7 +136,7 @@ void pgraph_vk_bind_vertex_attributes(NV2AState *d, unsigned int min_element,
         r->cached_num_active_bindings = 0;
     } else if (pg->vertex_attr_gen == r->last_vertex_attr_gen &&
                r->cached_num_active_bindings > 0) {
-        g_opt_stats.vtx_cache_hits++;
+        OPT_STAT_INC(vtx_cache_hits);
         pg->compressed_attrs = r->cached_compressed_attrs;
         pg->uniform_attrs = r->cached_uniform_attrs;
         pg->swizzle_attrs = r->cached_swizzle_attrs;
@@ -161,7 +161,7 @@ void pgraph_vk_bind_vertex_attributes(NV2AState *d, unsigned int min_element,
         }
         return;
     }
-    g_opt_stats.vtx_cache_misses++;
+    OPT_STAT_INC(vtx_cache_misses);
 #endif
 
     if (inline_data) {

@@ -209,11 +209,11 @@ void pgraph_vk_update_descriptor_sets(PGRAPHState *pg)
     if (need_new_descriptor_set &&
         !r->shader_bindings_changed && !r->texture_bindings_changed &&
         r->descriptor_set_index > 0) {
-        g_opt_stats.desc_rebind_skips++;
+        OPT_STAT_INC(desc_rebind_skips);
         r->need_descriptor_rebind = false;
         return;
     }
-    g_opt_stats.desc_rebind_full++;
+    OPT_STAT_INC(desc_rebind_full);
 #endif
 
     if (r->descriptor_set_index >= r->descriptor_set_count) {
