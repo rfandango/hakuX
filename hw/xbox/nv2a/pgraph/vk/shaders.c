@@ -202,12 +202,16 @@ void pgraph_vk_update_descriptor_sets(PGRAPHState *pg)
         return;
     }
 
+#if OPT_DESC_REBIND_SKIP
     if (need_new_descriptor_set &&
         !r->shader_bindings_changed && !r->texture_bindings_changed &&
         r->descriptor_set_index > 0) {
+        g_opt_stats.desc_rebind_skips++;
         r->need_descriptor_rebind = false;
         return;
     }
+    g_opt_stats.desc_rebind_full++;
+#endif
 
     if (r->descriptor_set_index >= ARRAY_SIZE(r->descriptor_sets)) {
         pgraph_vk_finish(pg, VK_FINISH_REASON_NEED_BUFFER_SPACE);

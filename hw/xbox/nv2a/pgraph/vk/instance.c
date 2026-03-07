@@ -472,6 +472,14 @@ static void add_optional_device_extension_names(
     r->memory_budget_extension_enabled = add_extension_if_available(
         available_extensions, enabled_extension_names,
         VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+
+    if (r->device_props.apiVersion < VK_API_VERSION_1_3) {
+        r->extended_dynamic_state_supported = add_extension_if_available(
+            available_extensions, enabled_extension_names,
+            VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME);
+    } else {
+        r->extended_dynamic_state_supported = true;
+    }
 }
 
 static bool check_device_support_required_extensions(VkPhysicalDevice device)
@@ -765,6 +773,17 @@ static bool create_logical_device(PGRAPHState *pg, Error **errp)
     }
 
     void *next_struct = NULL;
+
+    VkPhysicalDeviceExtendedDynamicStateFeaturesEXT eds_features;
+    if (r->extended_dynamic_state_supported &&
+        r->device_props.apiVersion < VK_API_VERSION_1_3) {
+        memset(&eds_features, 0, sizeof(eds_features));
+        eds_features.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT;
+        eds_features.extendedDynamicState = VK_TRUE;
+        eds_features.pNext = next_struct;
+        next_struct = &eds_features;
+    }
 
     VkPhysicalDeviceVulkan13Features vk13_features;
     if (r->device_props.apiVersion >= VK_API_VERSION_1_3) {

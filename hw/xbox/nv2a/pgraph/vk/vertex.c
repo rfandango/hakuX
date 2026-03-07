@@ -132,16 +132,26 @@ void pgraph_vk_bind_vertex_attributes(NV2AState *d, unsigned int min_element,
     unsigned int num_elements = max_element - min_element + 1;
 
 #if OPT_VTX_ATTR_CACHE
-    if (!inline_data &&
-        pg->vertex_attr_gen == r->last_vertex_attr_gen &&
-        r->cached_num_active_bindings > 0) {
+    if (inline_data) {
+        r->cached_num_active_bindings = 0;
+    } else if (pg->vertex_attr_gen == r->last_vertex_attr_gen &&
+               r->cached_num_active_bindings > 0) {
+        g_opt_stats.vtx_cache_hits++;
+        pg->compressed_attrs = r->cached_compressed_attrs;
+        pg->uniform_attrs = r->cached_uniform_attrs;
+        pg->swizzle_attrs = r->cached_swizzle_attrs;
         r->num_active_vertex_attribute_descriptions = r->cached_num_active_attrs;
         r->num_active_vertex_binding_descriptions = r->cached_num_active_bindings;
+        memcpy(r->vertex_attribute_descriptions, r->cached_attr_descs,
+               sizeof(r->cached_attr_descs));
+        memcpy(r->vertex_binding_descriptions, r->cached_bind_descs,
+               sizeof(r->cached_bind_descs));
+        memcpy(r->vertex_attribute_to_description_location,
+               r->cached_attr_to_desc_loc,
+               sizeof(r->cached_attr_to_desc_loc));
+        memcpy(r->vertex_attribute_offsets, r->cached_attr_offsets,
+               sizeof(r->cached_attr_offsets));
         for (int i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
-            VertexAttribute *attr = &pg->vertex_attributes[i];
-            if (!attr->count || !attr->stride) {
-                continue;
-            }
             if (r->cached_attr_layout[i].stride) {
                 hwaddr start = r->cached_attr_layout[i].base_addr +
                                min_element * r->cached_attr_layout[i].stride;
@@ -151,6 +161,7 @@ void pgraph_vk_bind_vertex_attributes(NV2AState *d, unsigned int min_element,
         }
         return;
     }
+    g_opt_stats.vtx_cache_misses++;
 #endif
 
     if (inline_data) {
@@ -309,6 +320,20 @@ void pgraph_vk_bind_vertex_attributes(NV2AState *d, unsigned int min_element,
         r->last_vertex_attr_gen = pg->vertex_attr_gen;
         r->cached_num_active_bindings = r->num_active_vertex_binding_descriptions;
         r->cached_num_active_attrs = r->num_active_vertex_attribute_descriptions;
+#if OPT_VTX_ATTR_CACHE
+        memcpy(r->cached_attr_descs, r->vertex_attribute_descriptions,
+               sizeof(r->cached_attr_descs));
+        memcpy(r->cached_bind_descs, r->vertex_binding_descriptions,
+               sizeof(r->cached_bind_descs));
+        memcpy(r->cached_attr_to_desc_loc,
+               r->vertex_attribute_to_description_location,
+               sizeof(r->cached_attr_to_desc_loc));
+        memcpy(r->cached_attr_offsets, r->vertex_attribute_offsets,
+               sizeof(r->cached_attr_offsets));
+        r->cached_compressed_attrs = pg->compressed_attrs;
+        r->cached_uniform_attrs = pg->uniform_attrs;
+        r->cached_swizzle_attrs = pg->swizzle_attrs;
+#endif
     }
 
     NV2A_VK_DGROUP_END();
@@ -318,6 +343,10 @@ void pgraph_vk_bind_vertex_attributes_inline(NV2AState *d)
 {
     PGRAPHState *pg = &d->pgraph;
     PGRAPHVkState *r = pg->vk_renderer_state;
+
+#if OPT_VTX_ATTR_CACHE
+    r->cached_num_active_bindings = 0;
+#endif
 
     pg->compressed_attrs = 0;
     pg->uniform_attrs = 0;

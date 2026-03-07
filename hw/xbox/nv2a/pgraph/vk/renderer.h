@@ -67,6 +67,22 @@
 #define OPT_LARGER_STAGING      1
 #define OPT_VTX_ATTR_CACHE      1
 #define OPT_DYNAMIC_DEPTH_STENCIL 1
+#define OPT_DESC_REBIND_SKIP    1
+#define OPT_PIPELINE_EARLY_EXIT 1
+
+struct OptBisectStats {
+    int super_fast_hits;
+    int super_fast_misses;
+    int pipeline_early_hits;
+    int pipeline_early_misses;
+    int vtx_cache_hits;
+    int vtx_cache_misses;
+    int desc_rebind_skips;
+    int desc_rebind_full;
+    int multi_draw_indirect;
+    int multi_draw_loop;
+};
+extern struct OptBisectStats g_opt_stats;
 #define OPT_SURF_TO_TEX_INLINE  1
 
 #if OPT_ALWAYS_DEFERRED_FENCES
@@ -419,6 +435,7 @@ typedef struct PGRAPHVkState {
     bool debug_utils_extension_enabled;
     bool custom_border_color_extension_enabled;
     bool memory_budget_extension_enabled;
+    bool extended_dynamic_state_supported;
 
     VkPhysicalDevice physical_device;
     VkPhysicalDeviceFeatures enabled_physical_device_features;
@@ -506,12 +523,23 @@ typedef struct PGRAPHVkState {
     size_t bitmap_size;
 
     uint32_t last_vertex_attr_gen;
+    uint32_t pipeline_vertex_attr_gen;
     int cached_num_active_bindings;
     int cached_num_active_attrs;
     struct {
         hwaddr base_addr;
         size_t stride;
     } cached_attr_layout[NV2A_VERTEXSHADER_ATTRIBUTES];
+
+#if OPT_VTX_ATTR_CACHE
+    VkVertexInputAttributeDescription cached_attr_descs[NV2A_VERTEXSHADER_ATTRIBUTES];
+    VkVertexInputBindingDescription cached_bind_descs[NV2A_VERTEXSHADER_ATTRIBUTES];
+    int cached_attr_to_desc_loc[NV2A_VERTEXSHADER_ATTRIBUTES];
+    hwaddr cached_attr_offsets[NV2A_VERTEXSHADER_ATTRIBUTES];
+    uint32_t cached_compressed_attrs;
+    uint32_t cached_uniform_attrs;
+    uint32_t cached_swizzle_attrs;
+#endif
 
     ram_addr_t vram_ram_addr;
     VkDeviceSize vertex_ram_flush_min;
