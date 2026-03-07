@@ -62,7 +62,7 @@
 #define OPT_ALWAYS_DEFERRED_FENCES 1
 #define OPT_PRECISE_BARRIERS    1
 #define OPT_SYNC_EARLY_EXIT     1
-#define OPT_UNIFORM_SKIP        0
+#define OPT_UNIFORM_SKIP        1
 #define OPT_MULTI_DRAW          1
 #define OPT_SUPER_FAST_PATH     1
 #define OPT_LARGER_STAGING      1
@@ -70,6 +70,7 @@
 #define OPT_DYNAMIC_DEPTH_STENCIL 1
 #define OPT_DESC_REBIND_SKIP    1
 #define OPT_PIPELINE_EARLY_EXIT 1
+#define OPT_MEDIUM_FAST_PATH    1
 
 struct OptBisectStats {
     int super_fast_hits;
@@ -834,6 +835,7 @@ void pgraph_vk_init_shaders(PGRAPHState *pg);
 void pgraph_vk_finalize_shaders(PGRAPHState *pg);
 void pgraph_vk_update_descriptor_sets(PGRAPHState *pg);
 void pgraph_vk_bind_shaders(PGRAPHState *pg);
+void pgraph_vk_update_shader_uniforms(PGRAPHState *pg);
 
 // reports.c
 void pgraph_vk_init_reports(PGRAPHState *pg);

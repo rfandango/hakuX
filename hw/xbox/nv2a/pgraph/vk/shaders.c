@@ -547,7 +547,7 @@ static void apply_uniform_updates(ShaderUniformLayout *layout,
     }
 }
 
-static void update_shader_uniforms(PGRAPHState *pg)
+void pgraph_vk_update_shader_uniforms(PGRAPHState *pg)
 {
     NV2A_VK_DGROUP_BEGIN("%s", __func__);
 
@@ -561,12 +561,10 @@ static void update_shader_uniforms(PGRAPHState *pg)
     ShaderUniformLayout *psh_layout = &binding->psh.module_info->uniforms;
 
 #if OPT_UNIFORM_SKIP
-    uint8_t ubo_snap[8192];
-    size_t vsh_sz = MIN(vsh_layout->total_size, sizeof(ubo_snap));
-    size_t psh_sz = MIN(psh_layout->total_size,
-                        sizeof(ubo_snap) - vsh_sz);
-    memcpy(ubo_snap, vsh_layout->allocation, vsh_sz);
-    memcpy(ubo_snap + vsh_sz, psh_layout->allocation, psh_sz);
+    uint64_t vsh_hash_before = fast_hash(vsh_layout->allocation,
+                                         vsh_layout->total_size);
+    uint64_t psh_hash_before = fast_hash(psh_layout->allocation,
+                                         psh_layout->total_size);
 #endif
 
     VshUniformValues vsh_values;
@@ -598,8 +596,12 @@ static void update_shader_uniforms(PGRAPHState *pg)
                           PshUniform__COUNT);
 
 #if OPT_UNIFORM_SKIP
-    if (memcmp(ubo_snap, vsh_layout->allocation, vsh_sz) ||
-        memcmp(ubo_snap + vsh_sz, psh_layout->allocation, psh_sz)) {
+    uint64_t vsh_hash_after = fast_hash(vsh_layout->allocation,
+                                        vsh_layout->total_size);
+    uint64_t psh_hash_after = fast_hash(psh_layout->allocation,
+                                        psh_layout->total_size);
+    if (vsh_hash_before != vsh_hash_after ||
+        psh_hash_before != psh_hash_after) {
         r->uniforms_changed = true;
     }
 #else
@@ -630,7 +632,7 @@ void pgraph_vk_bind_shaders(PGRAPHState *pg)
         nv2a_profile_inc_counter(NV2A_PROF_SHADER_BIND_NOTDIRTY);
     }
 
-    update_shader_uniforms(pg);
+    pgraph_vk_update_shader_uniforms(pg);
 
     NV2A_VK_DGROUP_END();
 }

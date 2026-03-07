@@ -919,7 +919,12 @@ static void create_pipeline(PGRAPHState *pg)
     NV2A_PHASE_TIMER_END(pipe_bind_tex);
 
     NV2A_PHASE_TIMER_BEGIN(pipe_bind_shd);
-    pgraph_vk_bind_shaders(pg);
+    if (pg->program_data_dirty || !r->shader_binding ||
+        pgraph_glsl_check_shader_state_dirty(pg, &r->shader_binding->state)) {
+        pgraph_vk_bind_shaders(pg);
+    } else {
+        pgraph_vk_update_shader_uniforms(pg);
+    }
     NV2A_PHASE_TIMER_END(pipe_bind_shd);
 
     NV2A_PHASE_TIMER_BEGIN(pipe_lookup);
@@ -1921,6 +1926,33 @@ static void begin_pre_draw(PGRAPHState *pg)
     }
     g_opt_stats.super_fast_misses++;
 #endif
+
+#if OPT_MEDIUM_FAST_PATH
+    if (!pg->clearing &&
+        r->pipeline_binding &&
+        r->in_command_buffer && r->in_render_pass &&
+        r->framebuffer_index > 0 &&
+        !r->framebuffer_dirty &&
+        !r->shader_bindings_changed &&
+        !r->pipeline_state_dirty &&
+        !r->need_descriptor_rebind &&
+        r->descriptor_set_index > 0 &&
+        pg->texture_state_gen == r->last_texture_state_gen &&
+        pgraph_vk_check_textures_fast_skip(pg) &&
+        !pgraph_has_dirty_regs(pg) &&
+        !pg->program_data_dirty &&
+        pg->vertex_attr_gen == r->pipeline_vertex_attr_gen) {
+        r->pre_draw_skipped = false;
+        pgraph_vk_update_shader_uniforms(pg);
+        pgraph_vk_update_descriptor_sets(pg);
+        if (r->framebuffer_index == 0) {
+            create_frame_buffer(pg);
+        }
+        pgraph_vk_ensure_command_buffer(pg);
+        return;
+    }
+#endif
+
     r->pre_draw_skipped = false;
 
     NV2A_PHASE_TIMER_BEGIN(draw_pipeline);
