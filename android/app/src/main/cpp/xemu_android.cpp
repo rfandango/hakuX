@@ -35,6 +35,8 @@ extern "C" void xemu_set_fp_jit(bool enable);
 extern "C" bool xemu_get_fp_jit(void);
 extern "C" void xemu_set_draw_reorder(bool enable);
 extern "C" bool xemu_get_draw_reorder(void);
+extern "C" void xemu_set_submit_frames(int count);
+extern "C" int xemu_get_submit_frames(void);
 
 #ifdef CONFIG_VULKAN
 #include <adrenotools/driver.h>
@@ -759,6 +761,11 @@ static SetupFiles SyncSetupFiles() {
   xemu_set_draw_reorder(draw_reorder);
   __android_log_print(ANDROID_LOG_INFO, "xemu-android",
                       "draw reorder: %s", draw_reorder ? "ON" : "OFF");
+
+  int submit_frames = GetPrefInt(env, activity, "submit_frames", 3);
+  xemu_set_submit_frames(submit_frames);
+  __android_log_print(ANDROID_LOG_INFO, "xemu-android",
+                      "submit frames: %d", submit_frames);
   std::string filterPref = GetPrefString(env, activity, "filtering");
   if (!filterPref.empty()) ds.filtering = filterPref;
   std::string arPref = GetPrefString(env, activity, "aspect_ratio");
@@ -1255,6 +1262,18 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_rfandango_xemuandroid_SettingsActivity_nativeSetDrawReorder(JNIEnv *, jobject, jboolean enable)
 {
     xemu_set_draw_reorder(enable == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_rfandango_xemuandroid_SettingsActivity_nativeGetSubmitFrames(JNIEnv *, jobject)
+{
+    return static_cast<jint>(xemu_get_submit_frames());
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_rfandango_xemuandroid_SettingsActivity_nativeSetSubmitFrames(JNIEnv *, jobject, jint count)
+{
+    xemu_set_submit_frames(static_cast<int>(count));
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

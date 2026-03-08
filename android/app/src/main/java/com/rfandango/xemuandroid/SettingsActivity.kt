@@ -127,6 +127,8 @@ class SettingsActivity : AppCompatActivity() {
       try { nativeSetDrawReorder(checked) } catch (_: Throwable) {}
     }
 
+    setupSubmitFramesPicker()
+
     val switchValidation = findViewById<MaterialSwitch>(R.id.switch_validation_layers)
     switchValidation.isChecked = prefs.getBoolean("validation_layers", false)
     switchValidation.setOnCheckedChangeListener { _, checked ->
@@ -218,6 +220,33 @@ class SettingsActivity : AppCompatActivity() {
         .setTitle(R.string.settings_aspect_ratio)
         .setSingleChoiceItems(labels, sel) { dialog, which ->
           prefs.edit().putString("aspect_ratio", keys[which]).apply()
+          btn.text = labels[which]
+          dialog.dismiss()
+        }
+        .setNegativeButton(android.R.string.cancel, null)
+        .show()
+    }
+  }
+
+  private fun setupSubmitFramesPicker() {
+    val btn = findViewById<MaterialButton>(R.id.btn_submit_frames)
+    val labels = arrayOf("Single (1)", "Double (2)", "Triple (3)")
+    val values = intArrayOf(1, 2, 3)
+    var current = try { nativeGetSubmitFrames() } catch (_: Throwable) {
+      prefs.getInt("submit_frames", 3)
+    }
+    val idx = values.indexOf(current).coerceAtLeast(0)
+    btn.text = labels[idx]
+    btn.setOnClickListener {
+      val cur = try { nativeGetSubmitFrames() } catch (_: Throwable) {
+        prefs.getInt("submit_frames", 3)
+      }
+      val sel = values.indexOf(cur).coerceAtLeast(0)
+      MaterialAlertDialogBuilder(this)
+        .setTitle(R.string.settings_submit_frames)
+        .setSingleChoiceItems(labels, sel) { dialog, which ->
+          prefs.edit().putInt("submit_frames", values[which]).apply()
+          try { nativeSetSubmitFrames(values[which]) } catch (_: Throwable) {}
           btn.text = labels[which]
           dialog.dismiss()
         }
@@ -443,6 +472,8 @@ class SettingsActivity : AppCompatActivity() {
   private external fun nativeSetFastFences(enable: Boolean)
   private external fun nativeGetDrawReorder(): Boolean
   private external fun nativeSetDrawReorder(enable: Boolean)
+  private external fun nativeGetSubmitFrames(): Int
+  private external fun nativeSetSubmitFrames(count: Int)
 
   companion object {
     private const val FATX_SUPERBLOCK_SIZE = 4096

@@ -56,6 +56,7 @@ static void create_command_buffers(PGRAPHState *pg)
         vkAllocateCommandBuffers(r->device, &alloc_info, r->command_buffers));
 
     r->current_frame = 0;
+    r->num_active_frames = NUM_SUBMIT_FRAMES;
     r->command_buffer = r->command_buffers[0];
     r->aux_command_buffer = r->command_buffers[1];
     for (int i = 0; i < NUM_SUBMIT_FRAMES; i++) {

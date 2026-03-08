@@ -34,6 +34,7 @@
 
 static bool g_xemu_fast_fences = false;
 static bool g_xemu_draw_reorder = false;
+static int g_xemu_submit_frames = 3;
 
 struct OptBisectStats g_opt_stats;
 
@@ -117,6 +118,18 @@ void xemu_set_draw_reorder(bool enable)
 bool xemu_get_draw_reorder(void)
 {
     return g_xemu_draw_reorder;
+}
+
+void xemu_set_submit_frames(int count)
+{
+    if (count < 1) count = 1;
+    if (count > NUM_SUBMIT_FRAMES) count = NUM_SUBMIT_FRAMES;
+    g_xemu_submit_frames = count;
+}
+
+int xemu_get_submit_frames(void)
+{
+    return g_xemu_submit_frames;
 }
 
 void pgraph_vk_draw_begin(NV2AState *d)
@@ -1645,6 +1658,17 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
         opt_stats_log_and_reset();
     }
 
+    int desired_frames = g_xemu_submit_frames;
+    if (desired_frames != r->num_active_frames) {
+        pgraph_vk_flush_all_frames(pg);
+        r->num_active_frames = desired_frames;
+        r->current_frame = 0;
+        r->command_buffer = r->command_buffers[0];
+        r->aux_command_buffer = r->command_buffers[1];
+        r->command_buffer_semaphore = r->frame_semaphores[0];
+        r->command_buffer_fence = r->frame_fences[0];
+    }
+
     assert(!r->in_draw);
     assert(r->debug_depth == 0);
 
@@ -1773,7 +1797,7 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
             r->deferred_framebuffer_count[r->current_frame] = r->framebuffer_index;
             r->framebuffer_index = 0;
 
-            int next_frame = (r->current_frame + 1) % NUM_SUBMIT_FRAMES;
+            int next_frame = (r->current_frame + 1) % r->num_active_frames;
 
             {
                 static int dbg_advance_count = 0;
@@ -1816,7 +1840,7 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
                                      VK_TRUE, UINT64_MAX));
             r->frame_submitted[r->current_frame] = false;
 
-            int next_frame = (r->current_frame + 1) % NUM_SUBMIT_FRAMES;
+            int next_frame = (r->current_frame + 1) % r->num_active_frames;
             r->current_frame = next_frame;
             r->command_buffer = r->command_buffers[next_frame * 2];
             r->aux_command_buffer = r->command_buffers[next_frame * 2 + 1];
@@ -1829,7 +1853,7 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
                                  VK_TRUE, UINT64_MAX));
         r->frame_submitted[r->current_frame] = false;
 
-        int next_frame = (r->current_frame + 1) % NUM_SUBMIT_FRAMES;
+        int next_frame = (r->current_frame + 1) % r->num_active_frames;
         r->current_frame = next_frame;
         r->command_buffer = r->command_buffers[next_frame * 2];
         r->aux_command_buffer = r->command_buffers[next_frame * 2 + 1];

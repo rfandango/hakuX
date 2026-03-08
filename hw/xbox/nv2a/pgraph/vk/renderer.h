@@ -598,6 +598,7 @@ typedef struct PGRAPHVkState {
     uint32_t allocator_last_submit_index;
 
 #define NUM_SUBMIT_FRAMES (OPT_N_BUFFERED_SUBMIT ? (OPT_TRIPLE_BUFFERING ? 3 : 2) : 1)
+    int num_active_frames;
     VkQueue queue;
     VkCommandPool command_pool;
     VkCommandBuffer command_buffers[NUM_SUBMIT_FRAMES * 2];

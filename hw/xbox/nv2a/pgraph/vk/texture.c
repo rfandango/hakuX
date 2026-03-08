@@ -1316,7 +1316,7 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
         if (surface_to_texture) {
             if (surface->draw_time != snode->draw_time) {
 #if OPT_ALWAYS_DEFERRED_FENCES
-                if (snode->submit_time + NUM_SUBMIT_FRAMES > r->submit_count) {
+                if (snode->submit_time + r->num_active_frames > r->submit_count) {
                     pgraph_vk_flush_all_frames(pg);
                 }
 #endif
@@ -1325,7 +1325,7 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
         } else {
             if (possibly_dirty && content_hash != snode->hash) {
 #if OPT_ALWAYS_DEFERRED_FENCES
-                if (snode->submit_time + NUM_SUBMIT_FRAMES > r->submit_count) {
+                if (snode->submit_time + r->num_active_frames > r->submit_count) {
                     pgraph_vk_flush_all_frames(pg);
                 }
 #endif
@@ -1707,7 +1707,7 @@ static bool texture_cache_entry_pre_evict(Lru *lru, LruNode *node)
     }
 
 #if OPT_ALWAYS_DEFERRED_FENCES
-    if (snode->submit_time + NUM_SUBMIT_FRAMES > r->submit_count) {
+    if (snode->submit_time + r->num_active_frames > r->submit_count) {
         return false;
     }
 #else
@@ -1724,7 +1724,7 @@ static void texture_cache_entry_post_evict(Lru *lru, LruNode *node)
     PGRAPHVkState *r = container_of(lru, PGRAPHVkState, texture_cache);
     TextureBinding *snode = container_of(node, TextureBinding, node);
 #if OPT_ALWAYS_DEFERRED_FENCES
-    if (snode->submit_time + NUM_SUBMIT_FRAMES > r->submit_count) {
+    if (snode->submit_time + r->num_active_frames > r->submit_count) {
         VK_LOG_ERROR("DIAG: texture EVICTED while in-flight! "
                      "image=%p st=%u sc=%u",
                      (void *)snode->image,

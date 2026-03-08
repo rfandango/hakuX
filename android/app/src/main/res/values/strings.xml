@@ -147,6 +147,9 @@
   <string name="settings_draw_reorder">Draw reordering (reduce pipeline switches)</string>
   <string name="settings_draw_reorder_desc">Reorder safe draw calls within small windows to reduce GPU pipeline switches. Improves performance on tiled GPUs (Adreno). May cause minor visual artifacts in some titles. Takes effect immediately.</string>
 
+  <string name="settings_submit_frames">Submit frame buffering</string>
+  <string name="settings_submit_frames_desc">Number of GPU submission frames. Higher values increase parallelism but use more memory and add latency. Single = lowest memory, Triple = best throughput. Takes effect immediately.</string>
+
   <string name="settings_validation_layers">Vulkan validation layers</string>
   <string name="settings_validation_layers_desc">Enable Vulkan validation for graphics debugging. Significant performance impact. Requires app restart.</string>
 </resources>
