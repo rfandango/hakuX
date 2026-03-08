@@ -50,6 +50,7 @@
 #define OPT_N_BUFFERED_SUBMIT   1
 #define OPT_DEFERRED_FENCES     1
 #define OPT_DYNAMIC_STATES      1
+#define OPT_DYNAMIC_BLEND       1
 #define OPT_LOAD_OPS            1
 #define OPT_CLEAR_REFACTOR      1
 #define OPT_COMPUTE_SWIZZLE     1
@@ -560,6 +561,10 @@ typedef struct ReorderWindowEntry {
     uint32_t dyn_control_0;
     uint32_t dyn_control_1;
     uint32_t dyn_control_2;
+#if OPT_DYNAMIC_BLEND
+    uint32_t dyn_blend;
+    uint32_t dyn_color_write_control_0;
+#endif
     bool has_dynamic_line_width;
     float line_width;
 
@@ -605,6 +610,9 @@ typedef struct PGRAPHVkState {
     bool custom_border_color_extension_enabled;
     bool memory_budget_extension_enabled;
     bool extended_dynamic_state_supported;
+#if OPT_DYNAMIC_BLEND
+    bool eds3_blend_supported;
+#endif
 
     VkPhysicalDevice physical_device;
     VkPhysicalDeviceFeatures enabled_physical_device_features;
@@ -666,6 +674,10 @@ typedef struct PGRAPHVkState {
         uint32_t control_0;
         uint32_t control_1;
         uint32_t control_2;
+#if OPT_DYNAMIC_BLEND
+        uint32_t blend;
+        uint32_t color_write_control_0;
+#endif
         bool valid;
     } dyn_state;
 #endif

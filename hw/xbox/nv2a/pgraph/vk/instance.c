@@ -480,6 +480,12 @@ static void add_optional_device_extension_names(
     } else {
         r->extended_dynamic_state_supported = true;
     }
+
+#if OPT_DYNAMIC_BLEND
+    r->eds3_blend_supported = add_extension_if_available(
+        available_extensions, enabled_extension_names,
+        VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME);
+#endif
 }
 
 static bool check_device_support_required_extensions(VkPhysicalDevice device)
@@ -794,6 +800,36 @@ static bool create_logical_device(PGRAPHState *pg, Error **errp)
         vk13_features.pNext = next_struct;
         next_struct = &vk13_features;
     }
+
+#if OPT_DYNAMIC_BLEND
+    VkPhysicalDeviceExtendedDynamicState3FeaturesEXT eds3_features;
+    if (r->eds3_blend_supported) {
+        memset(&eds3_features, 0, sizeof(eds3_features));
+        eds3_features.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT;
+
+        VkPhysicalDeviceExtendedDynamicState3FeaturesEXT query = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT,
+        };
+        VkPhysicalDeviceFeatures2 features2 = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+            .pNext = &query,
+        };
+        vkGetPhysicalDeviceFeatures2(r->physical_device, &features2);
+
+        if (query.extendedDynamicState3ColorBlendEnable &&
+            query.extendedDynamicState3ColorBlendEquation &&
+            query.extendedDynamicState3ColorWriteMask) {
+            eds3_features.extendedDynamicState3ColorBlendEnable = VK_TRUE;
+            eds3_features.extendedDynamicState3ColorBlendEquation = VK_TRUE;
+            eds3_features.extendedDynamicState3ColorWriteMask = VK_TRUE;
+            eds3_features.pNext = next_struct;
+            next_struct = &eds3_features;
+        } else {
+            r->eds3_blend_supported = false;
+        }
+    }
+#endif
 
     VkPhysicalDeviceCustomBorderColorFeaturesEXT custom_border_features;
     if (r->custom_border_color_extension_enabled) {

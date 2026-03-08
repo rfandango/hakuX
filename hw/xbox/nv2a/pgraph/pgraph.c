@@ -84,8 +84,6 @@ static void pgraph_init_reg_category_table(void)
         NV_PGRAPH_BLEND,       NV_PGRAPH_CONTROL_0,
         NV_PGRAPH_CONTROL_1,   NV_PGRAPH_CONTROL_2,
         NV_PGRAPH_CONTROL_3,   NV_PGRAPH_SETUPRASTER,
-        NV_PGRAPH_BLENDCOLOR,
-        NV_PGRAPH_ZOFFSETBIAS, NV_PGRAPH_ZOFFSETFACTOR,
     };
     for (int i = 0; i < ARRAY_SIZE(pipeline_regs); i++)
         pgraph_reg_category_table[pipeline_regs[i] / 4] |= REG_CAT_PIPELINE;

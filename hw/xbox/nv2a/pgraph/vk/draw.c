@@ -834,8 +834,6 @@ static bool check_pipeline_dirty(PGRAPHState *pg)
             NV_PGRAPH_BLEND,     NV_PGRAPH_CONTROL_0,
             NV_PGRAPH_CONTROL_1, NV_PGRAPH_CONTROL_2,
             NV_PGRAPH_CONTROL_3, NV_PGRAPH_SETUPRASTER,
-            NV_PGRAPH_BLENDCOLOR,
-            NV_PGRAPH_ZOFFSETBIAS, NV_PGRAPH_ZOFFSETFACTOR,
         };
         for (int i = 0; i < ARRAY_SIZE(vregs); i++) {
             assert(!pgraph_is_reg_dirty(pg, vregs[i]));
@@ -903,6 +901,17 @@ static void init_pipeline_key(PGRAPHState *pg, PipelineKey *key)
                            NV_PGRAPH_CONTROL_2_STENCIL_OP_ZFAIL |
                            NV_PGRAPH_CONTROL_2_STENCIL_OP_ZPASS);
     }
+    key->regs[0] &= ~(NV_PGRAPH_BLEND_LOGICOP_ENABLE |
+                       NV_PGRAPH_BLEND_LOGICOP);
+#if OPT_DYNAMIC_BLEND
+    if (r->eds3_blend_supported) {
+        key->regs[0] = 0;
+        key->regs[1] &= ~(NV_PGRAPH_CONTROL_0_RED_WRITE_ENABLE |
+                           NV_PGRAPH_CONTROL_0_GREEN_WRITE_ENABLE |
+                           NV_PGRAPH_CONTROL_0_BLUE_WRITE_ENABLE |
+                           NV_PGRAPH_CONTROL_0_ALPHA_WRITE_ENABLE);
+    }
+#endif
     key->regs[4] &= ~(NV_PGRAPH_SETUPRASTER_CULLENABLE |
                        NV_PGRAPH_SETUPRASTER_CULLCTRL |
                        NV_PGRAPH_SETUPRASTER_FRONTFACE);
@@ -1026,6 +1035,11 @@ static void create_pipeline(PGRAPHState *pg)
 
     bool use_dyn_ds = OPT_DYNAMIC_STATES && OPT_DYNAMIC_DEPTH_STENCIL &&
                       r->extended_dynamic_state_supported;
+#if OPT_DYNAMIC_BLEND
+    bool use_eds3_blend = OPT_DYNAMIC_STATES && r->eds3_blend_supported;
+#else
+    bool use_eds3_blend = false;
+#endif
     uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
     bool depth_test = false, depth_write = false, stencil_test = false;
     if (!use_dyn_ds) {
@@ -1183,51 +1197,55 @@ static void create_pipeline(PGRAPHState *pg)
         }
     }
 
-    VkColorComponentFlags write_mask = 0;
-    if (control_0 & NV_PGRAPH_CONTROL_0_RED_WRITE_ENABLE)
-        write_mask |= VK_COLOR_COMPONENT_R_BIT;
-    if (control_0 & NV_PGRAPH_CONTROL_0_GREEN_WRITE_ENABLE)
-        write_mask |= VK_COLOR_COMPONENT_G_BIT;
-    if (control_0 & NV_PGRAPH_CONTROL_0_BLUE_WRITE_ENABLE)
-        write_mask |= VK_COLOR_COMPONENT_B_BIT;
-    if (control_0 & NV_PGRAPH_CONTROL_0_ALPHA_WRITE_ENABLE)
-        write_mask |= VK_COLOR_COMPONENT_A_BIT;
-
-    VkPipelineColorBlendAttachmentState color_blend_attachment = {
-        .colorWriteMask = write_mask,
-    };
-
+    VkPipelineColorBlendAttachmentState color_blend_attachment = { 0 };
     float blend_constant[4] = { 0, 0, 0, 0 };
 
-    if (pgraph_reg_r(pg, NV_PGRAPH_BLEND) & NV_PGRAPH_BLEND_EN) {
-        color_blend_attachment.blendEnable = VK_TRUE;
+    if (use_eds3_blend) {
+        color_blend_attachment.colorWriteMask =
+            VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+            VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    } else {
+        VkColorComponentFlags write_mask = 0;
+        if (control_0 & NV_PGRAPH_CONTROL_0_RED_WRITE_ENABLE)
+            write_mask |= VK_COLOR_COMPONENT_R_BIT;
+        if (control_0 & NV_PGRAPH_CONTROL_0_GREEN_WRITE_ENABLE)
+            write_mask |= VK_COLOR_COMPONENT_G_BIT;
+        if (control_0 & NV_PGRAPH_CONTROL_0_BLUE_WRITE_ENABLE)
+            write_mask |= VK_COLOR_COMPONENT_B_BIT;
+        if (control_0 & NV_PGRAPH_CONTROL_0_ALPHA_WRITE_ENABLE)
+            write_mask |= VK_COLOR_COMPONENT_A_BIT;
+        color_blend_attachment.colorWriteMask = write_mask;
 
-        uint32_t sfactor =
-            GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_BLEND), NV_PGRAPH_BLEND_SFACTOR);
-        uint32_t dfactor =
-            GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_BLEND), NV_PGRAPH_BLEND_DFACTOR);
-        assert(sfactor < ARRAY_SIZE(pgraph_blend_factor_vk_map));
-        assert(dfactor < ARRAY_SIZE(pgraph_blend_factor_vk_map));
-        color_blend_attachment.srcColorBlendFactor =
-            pgraph_blend_factor_vk_map[sfactor];
-        color_blend_attachment.dstColorBlendFactor =
-            pgraph_blend_factor_vk_map[dfactor];
-        color_blend_attachment.srcAlphaBlendFactor =
-            pgraph_blend_factor_vk_map[sfactor];
-        color_blend_attachment.dstAlphaBlendFactor =
-            pgraph_blend_factor_vk_map[dfactor];
+        if (pgraph_reg_r(pg, NV_PGRAPH_BLEND) & NV_PGRAPH_BLEND_EN) {
+            color_blend_attachment.blendEnable = VK_TRUE;
 
-        uint32_t equation =
-            GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_BLEND), NV_PGRAPH_BLEND_EQN);
-        assert(equation < ARRAY_SIZE(pgraph_blend_equation_vk_map));
+            uint32_t sfactor =
+                GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_BLEND), NV_PGRAPH_BLEND_SFACTOR);
+            uint32_t dfactor =
+                GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_BLEND), NV_PGRAPH_BLEND_DFACTOR);
+            assert(sfactor < ARRAY_SIZE(pgraph_blend_factor_vk_map));
+            assert(dfactor < ARRAY_SIZE(pgraph_blend_factor_vk_map));
+            color_blend_attachment.srcColorBlendFactor =
+                pgraph_blend_factor_vk_map[sfactor];
+            color_blend_attachment.dstColorBlendFactor =
+                pgraph_blend_factor_vk_map[dfactor];
+            color_blend_attachment.srcAlphaBlendFactor =
+                pgraph_blend_factor_vk_map[sfactor];
+            color_blend_attachment.dstAlphaBlendFactor =
+                pgraph_blend_factor_vk_map[dfactor];
 
-        color_blend_attachment.colorBlendOp =
-            pgraph_blend_equation_vk_map[equation];
-        color_blend_attachment.alphaBlendOp =
-            pgraph_blend_equation_vk_map[equation];
+            uint32_t equation =
+                GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_BLEND), NV_PGRAPH_BLEND_EQN);
+            assert(equation < ARRAY_SIZE(pgraph_blend_equation_vk_map));
 
-        uint32_t blend_color = pgraph_reg_r(pg, NV_PGRAPH_BLENDCOLOR);
-        pgraph_argb_pack32_to_rgba_float(blend_color, blend_constant);
+            color_blend_attachment.colorBlendOp =
+                pgraph_blend_equation_vk_map[equation];
+            color_blend_attachment.alphaBlendOp =
+                pgraph_blend_equation_vk_map[equation];
+
+            uint32_t blend_color = pgraph_reg_r(pg, NV_PGRAPH_BLENDCOLOR);
+            pgraph_argb_pack32_to_rgba_float(blend_color, blend_constant);
+        }
     }
 
     VkPipelineColorBlendStateCreateInfo color_blending = {
@@ -1242,7 +1260,7 @@ static void create_pipeline(PGRAPHState *pg)
         .blendConstants[3] = blend_constant[3],
     };
 
-    VkDynamicState dynamic_states[16] = {
+    VkDynamicState dynamic_states[20] = {
         VK_DYNAMIC_STATE_VIEWPORT,
         VK_DYNAMIC_STATE_SCISSOR,
 #if OPT_DYNAMIC_STATES
@@ -1261,6 +1279,11 @@ static void create_pipeline(PGRAPHState *pg)
         dynamic_states[num_dynamic_states++] = VK_DYNAMIC_STATE_DEPTH_COMPARE_OP;
         dynamic_states[num_dynamic_states++] = VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE;
         dynamic_states[num_dynamic_states++] = VK_DYNAMIC_STATE_STENCIL_OP;
+    }
+    if (use_eds3_blend) {
+        dynamic_states[num_dynamic_states++] = VK_DYNAMIC_STATE_COLOR_BLEND_ENABLE_EXT;
+        dynamic_states[num_dynamic_states++] = VK_DYNAMIC_STATE_COLOR_BLEND_EQUATION_EXT;
+        dynamic_states[num_dynamic_states++] = VK_DYNAMIC_STATE_COLOR_WRITE_MASK_EXT;
     }
 
     snode->has_dynamic_line_width =
@@ -2332,6 +2355,50 @@ static void begin_draw(PGRAPHState *pg)
             }
         }
 
+#if OPT_DYNAMIC_BLEND
+        if (r->eds3_blend_supported) {
+            uint32_t blend_reg = pgraph_reg_r(pg, NV_PGRAPH_BLEND);
+            uint32_t ctl0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
+            if (!r->dyn_state.valid ||
+                blend_reg != r->dyn_state.blend ||
+                ctl0 != r->dyn_state.color_write_control_0) {
+                VkBool32 blend_en =
+                    (blend_reg & NV_PGRAPH_BLEND_EN) ? VK_TRUE : VK_FALSE;
+                vkCmdSetColorBlendEnableEXT(r->command_buffer, 0, 1, &blend_en);
+
+                uint32_t sf = GET_MASK(blend_reg, NV_PGRAPH_BLEND_SFACTOR);
+                uint32_t df = GET_MASK(blend_reg, NV_PGRAPH_BLEND_DFACTOR);
+                uint32_t eq = GET_MASK(blend_reg, NV_PGRAPH_BLEND_EQN);
+                assert(sf < ARRAY_SIZE(pgraph_blend_factor_vk_map));
+                assert(df < ARRAY_SIZE(pgraph_blend_factor_vk_map));
+                assert(eq < ARRAY_SIZE(pgraph_blend_equation_vk_map));
+                VkColorBlendEquationEXT cbeq = {
+                    .srcColorBlendFactor = pgraph_blend_factor_vk_map[sf],
+                    .dstColorBlendFactor = pgraph_blend_factor_vk_map[df],
+                    .colorBlendOp = pgraph_blend_equation_vk_map[eq],
+                    .srcAlphaBlendFactor = pgraph_blend_factor_vk_map[sf],
+                    .dstAlphaBlendFactor = pgraph_blend_factor_vk_map[df],
+                    .alphaBlendOp = pgraph_blend_equation_vk_map[eq],
+                };
+                vkCmdSetColorBlendEquationEXT(r->command_buffer, 0, 1, &cbeq);
+
+                VkColorComponentFlags wmask = 0;
+                if (ctl0 & NV_PGRAPH_CONTROL_0_RED_WRITE_ENABLE)
+                    wmask |= VK_COLOR_COMPONENT_R_BIT;
+                if (ctl0 & NV_PGRAPH_CONTROL_0_GREEN_WRITE_ENABLE)
+                    wmask |= VK_COLOR_COMPONENT_G_BIT;
+                if (ctl0 & NV_PGRAPH_CONTROL_0_BLUE_WRITE_ENABLE)
+                    wmask |= VK_COLOR_COMPONENT_B_BIT;
+                if (ctl0 & NV_PGRAPH_CONTROL_0_ALPHA_WRITE_ENABLE)
+                    wmask |= VK_COLOR_COMPONENT_A_BIT;
+                vkCmdSetColorWriteMaskEXT(r->command_buffer, 0, 1, &wmask);
+
+                r->dyn_state.blend = blend_reg;
+                r->dyn_state.color_write_control_0 = ctl0;
+            }
+        }
+#endif
+
         r->dyn_state.valid = true;
 #endif
 
@@ -3020,6 +3087,10 @@ static void snapshot_dynamic_state(PGRAPHState *pg, ReorderWindowEntry *e)
     e->dyn_control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
     e->dyn_control_1 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1);
     e->dyn_control_2 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_2);
+#if OPT_DYNAMIC_BLEND
+    e->dyn_blend = pgraph_reg_r(pg, NV_PGRAPH_BLEND);
+    e->dyn_color_write_control_0 = e->dyn_control_0;
+#endif
 
     unsigned int vp_width = pg->surface_binding_dim.width,
                  vp_height = pg->surface_binding_dim.height;
@@ -3281,10 +3352,11 @@ static int compare_reorder_entries(const void *a, const void *b)
 }
 
 static void emit_reorder_entry(PGRAPHState *pg, ReorderWindowEntry *e,
-                                PipelineBinding *prev_pipeline)
+                                ReorderWindowEntry *prev)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
-    bool pipeline_changed = (e->pipeline_binding != prev_pipeline);
+    bool pipeline_changed = !prev ||
+                            e->pipeline_binding != prev->pipeline_binding;
 
     if (!r->in_render_pass) {
         begin_render_pass(pg);
@@ -3304,7 +3376,8 @@ static void emit_reorder_entry(PGRAPHState *pg, ReorderWindowEntry *e,
     }
 
 #if OPT_DYNAMIC_STATES
-    {
+    if (pipeline_changed ||
+        e->dyn_setupraster != prev->dyn_setupraster) {
         VkCullModeFlags cull = VK_CULL_MODE_NONE;
         if (e->dyn_setupraster & NV_PGRAPH_SETUPRASTER_CULLENABLE) {
             uint32_t cull_face = GET_MASK(e->dyn_setupraster,
@@ -3317,12 +3390,18 @@ static void emit_reorder_entry(PGRAPHState *pg, ReorderWindowEntry *e,
                           (e->dyn_setupraster & NV_PGRAPH_SETUPRASTER_FRONTFACE)
                               ? VK_FRONT_FACE_COUNTER_CLOCKWISE
                               : VK_FRONT_FACE_CLOCKWISE);
+    }
 
+    if (pipeline_changed ||
+        e->dyn_blendcolor != prev->dyn_blendcolor) {
         float blend_constant[4] = { 0, 0, 0, 0 };
         pgraph_argb_pack32_to_rgba_float(e->dyn_blendcolor, blend_constant);
         vkCmdSetBlendConstants(r->command_buffer, blend_constant);
+    }
 
-        if (OPT_DYNAMIC_DEPTH_STENCIL && r->extended_dynamic_state_supported) {
+    if (OPT_DYNAMIC_DEPTH_STENCIL && r->extended_dynamic_state_supported) {
+        if (pipeline_changed ||
+            e->dyn_control_0 != prev->dyn_control_0) {
             vkCmdSetDepthTestEnable(r->command_buffer,
                 (e->dyn_control_0 & NV_PGRAPH_CONTROL_0_ZENABLE) ? VK_TRUE
                                                                   : VK_FALSE);
@@ -3334,7 +3413,11 @@ static void emit_reorder_entry(PGRAPHState *pg, ReorderWindowEntry *e,
             assert(dfunc < ARRAY_SIZE(pgraph_depth_func_vk_map));
             vkCmdSetDepthCompareOp(r->command_buffer,
                                    pgraph_depth_func_vk_map[dfunc]);
+        }
 
+        if (pipeline_changed ||
+            e->dyn_control_1 != prev->dyn_control_1 ||
+            e->dyn_control_2 != prev->dyn_control_2) {
             bool sten = e->dyn_control_1 &
                         NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE;
             vkCmdSetStencilTestEnable(r->command_buffer,
@@ -3369,7 +3452,10 @@ static void emit_reorder_entry(PGRAPHState *pg, ReorderWindowEntry *e,
                               pgraph_stencil_op_vk_map[op_zpass],
                               pgraph_stencil_op_vk_map[op_zfail],
                               pgraph_stencil_func_vk_map[sfunc]);
-        } else {
+        }
+    } else {
+        if (pipeline_changed ||
+            e->dyn_control_1 != prev->dyn_control_1) {
             uint32_t sref = GET_MASK(e->dyn_control_1,
                                      NV_PGRAPH_CONTROL_1_STENCIL_REF);
             uint32_t mr = GET_MASK(e->dyn_control_1,
@@ -3384,22 +3470,76 @@ static void emit_reorder_entry(PGRAPHState *pg, ReorderWindowEntry *e,
                                      VK_STENCIL_FACE_FRONT_AND_BACK, sref);
         }
     }
+
+#if OPT_DYNAMIC_BLEND
+    if (r->eds3_blend_supported &&
+        (pipeline_changed ||
+         e->dyn_blend != prev->dyn_blend ||
+         e->dyn_color_write_control_0 != prev->dyn_color_write_control_0)) {
+        VkBool32 blend_en =
+            (e->dyn_blend & NV_PGRAPH_BLEND_EN) ? VK_TRUE : VK_FALSE;
+        vkCmdSetColorBlendEnableEXT(r->command_buffer, 0, 1, &blend_en);
+
+        uint32_t sf = GET_MASK(e->dyn_blend, NV_PGRAPH_BLEND_SFACTOR);
+        uint32_t df = GET_MASK(e->dyn_blend, NV_PGRAPH_BLEND_DFACTOR);
+        uint32_t eq = GET_MASK(e->dyn_blend, NV_PGRAPH_BLEND_EQN);
+        assert(sf < ARRAY_SIZE(pgraph_blend_factor_vk_map));
+        assert(df < ARRAY_SIZE(pgraph_blend_factor_vk_map));
+        assert(eq < ARRAY_SIZE(pgraph_blend_equation_vk_map));
+        VkColorBlendEquationEXT cbeq = {
+            .srcColorBlendFactor = pgraph_blend_factor_vk_map[sf],
+            .dstColorBlendFactor = pgraph_blend_factor_vk_map[df],
+            .colorBlendOp = pgraph_blend_equation_vk_map[eq],
+            .srcAlphaBlendFactor = pgraph_blend_factor_vk_map[sf],
+            .dstAlphaBlendFactor = pgraph_blend_factor_vk_map[df],
+            .alphaBlendOp = pgraph_blend_equation_vk_map[eq],
+        };
+        vkCmdSetColorBlendEquationEXT(r->command_buffer, 0, 1, &cbeq);
+
+        uint32_t ctl0 = e->dyn_color_write_control_0;
+        VkColorComponentFlags wmask = 0;
+        if (ctl0 & NV_PGRAPH_CONTROL_0_RED_WRITE_ENABLE)
+            wmask |= VK_COLOR_COMPONENT_R_BIT;
+        if (ctl0 & NV_PGRAPH_CONTROL_0_GREEN_WRITE_ENABLE)
+            wmask |= VK_COLOR_COMPONENT_G_BIT;
+        if (ctl0 & NV_PGRAPH_CONTROL_0_BLUE_WRITE_ENABLE)
+            wmask |= VK_COLOR_COMPONENT_B_BIT;
+        if (ctl0 & NV_PGRAPH_CONTROL_0_ALPHA_WRITE_ENABLE)
+            wmask |= VK_COLOR_COMPONENT_A_BIT;
+        vkCmdSetColorWriteMaskEXT(r->command_buffer, 0, 1, &wmask);
+    }
+#endif
 #endif
 
-    {
+    if (pipeline_changed ||
+        e->descriptor_set != prev->descriptor_set ||
+        e->dynamic_offsets[0] != prev->dynamic_offsets[0] ||
+        e->dynamic_offsets[1] != prev->dynamic_offsets[1]) {
         vkCmdBindDescriptorSets(r->command_buffer,
                                 VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 e->layout, 0, 1, &e->descriptor_set,
                                 2, e->dynamic_offsets);
-        if (e->use_push_constants && e->num_push_values > 0) {
-            vkCmdPushConstants(r->command_buffer, e->layout,
-                               VK_SHADER_STAGE_VERTEX_BIT, 0,
-                               e->num_push_values * 4 * sizeof(float),
-                               e->push_values);
-        }
     }
 
-    if (e->num_vertex_bindings > 0) {
+    if (e->use_push_constants && e->num_push_values > 0 &&
+        (pipeline_changed ||
+         !prev->use_push_constants ||
+         e->num_push_values != prev->num_push_values ||
+         memcmp(e->push_values, prev->push_values,
+                e->num_push_values * 4 * sizeof(float)) != 0)) {
+        vkCmdPushConstants(r->command_buffer, e->layout,
+                           VK_SHADER_STAGE_VERTEX_BIT, 0,
+                           e->num_push_values * 4 * sizeof(float),
+                           e->push_values);
+    }
+
+    if (e->num_vertex_bindings > 0 &&
+        (pipeline_changed ||
+         e->num_vertex_bindings != prev->num_vertex_bindings ||
+         memcmp(e->vertex_buffers, prev->vertex_buffers,
+                e->num_vertex_bindings * sizeof(VkBuffer)) != 0 ||
+         memcmp(e->vertex_offsets, prev->vertex_offsets,
+                e->num_vertex_bindings * sizeof(VkDeviceSize)) != 0)) {
         vkCmdBindVertexBuffers(r->command_buffer, 0,
                                e->num_vertex_bindings,
                                e->vertex_buffers, e->vertex_offsets);
@@ -3465,11 +3605,11 @@ static void flush_reorder_window_internal(NV2AState *d)
 
     r->dyn_state.valid = false;
 
-    PipelineBinding *prev_pipeline = NULL;
+    ReorderWindowEntry *prev = NULL;
     for (int i = 0; i < w->count; i++) {
         ReorderWindowEntry *e = &w->entries[i];
-        emit_reorder_entry(pg, e, prev_pipeline);
-        prev_pipeline = e->pipeline_binding;
+        emit_reorder_entry(pg, e, prev);
+        prev = e;
 
         pg->draw_time++;
         if (r->color_binding && e->color_write) {
@@ -3482,7 +3622,7 @@ static void flush_reorder_window_internal(NV2AState *d)
                                     e->depth_test || e->stencil_test);
     }
 
-    r->pipeline_binding = prev_pipeline;
+    r->pipeline_binding = prev ? prev->pipeline_binding : NULL;
     r->pipeline_binding_changed = false;
     r->color_drawn_in_cb = r->color_drawn_in_cb || (r->color_binding != NULL);
     r->zeta_drawn_in_cb = r->zeta_drawn_in_cb || (r->zeta_binding != NULL);
