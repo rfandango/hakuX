@@ -486,6 +486,16 @@ static void add_optional_device_extension_names(
         available_extensions, enabled_extension_names,
         VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME);
 #endif
+
+#if OPT_BINDLESS_TEXTURES
+    if (r->device_props.apiVersion >= VK_API_VERSION_1_2) {
+        r->bindless_textures_supported = true;
+    } else {
+        r->bindless_textures_supported = add_extension_if_available(
+            available_extensions, enabled_extension_names,
+            VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
+    }
+#endif
 }
 
 static bool check_device_support_required_extensions(VkPhysicalDevice device)
@@ -827,6 +837,81 @@ static bool create_logical_device(PGRAPHState *pg, Error **errp)
             next_struct = &eds3_features;
         } else {
             r->eds3_blend_supported = false;
+        }
+    }
+#endif
+
+#if OPT_BINDLESS_TEXTURES
+    VkPhysicalDeviceDescriptorIndexingFeatures di_features;
+    if (r->bindless_textures_supported) {
+        VkPhysicalDeviceDescriptorIndexingFeatures di_query = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES,
+        };
+        VkPhysicalDeviceDescriptorIndexingProperties di_props = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES,
+        };
+        VkPhysicalDeviceFeatures2 features2 = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+            .pNext = &di_query,
+        };
+        VkPhysicalDeviceProperties2 props2 = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+            .pNext = &di_props,
+        };
+        vkGetPhysicalDeviceFeatures2(r->physical_device, &features2);
+        vkGetPhysicalDeviceProperties2(r->physical_device, &props2);
+
+        bool have_all =
+            di_query.descriptorBindingPartiallyBound &&
+            di_query.descriptorBindingSampledImageUpdateAfterBind &&
+            di_query.descriptorBindingVariableDescriptorCount &&
+            di_query.runtimeDescriptorArray &&
+            di_props.maxPerStageDescriptorUpdateAfterBindSampledImages >=
+                MAX_BINDLESS_TEXTURES;
+
+        if (have_all) {
+            memset(&di_features, 0, sizeof(di_features));
+            di_features.sType =
+                VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+            di_features.descriptorBindingPartiallyBound = VK_TRUE;
+            di_features.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+            di_features.descriptorBindingVariableDescriptorCount = VK_TRUE;
+            di_features.runtimeDescriptorArray = VK_TRUE;
+            di_features.pNext = next_struct;
+            next_struct = &di_features;
+
+            uint32_t max_push = r->device_props.limits.maxPushConstantsSize;
+            if (max_push >= 272) {
+                r->tex_push_offset = 256;
+                r->max_vertex_push_attrs = NV2A_VERTEXSHADER_ATTRIBUTES;
+            } else {
+                r->tex_push_offset = 0;
+                r->max_vertex_push_attrs = NV2A_VERTEXSHADER_ATTRIBUTES - 1;
+            }
+
+            fprintf(stderr, "Bindless textures: enabled (push offset=%u, "
+                    "max vertex attrs=%d, max update-after-bind samplers=%u)\n",
+                    r->tex_push_offset, r->max_vertex_push_attrs,
+                    di_props.maxPerStageDescriptorUpdateAfterBindSampledImages);
+#ifdef __ANDROID__
+            __android_log_print(ANDROID_LOG_INFO, "xemu-android",
+                "Bindless textures: enabled (push_offset=%u, max_vtx_attrs=%d)",
+                r->tex_push_offset, r->max_vertex_push_attrs);
+#endif
+        } else {
+            r->bindless_textures_supported = false;
+            fprintf(stderr, "Bindless textures: disabled (missing features: "
+                    "partiallyBound=%d, updateAfterBind=%d, variableCount=%d, "
+                    "runtimeArray=%d, maxSamplers=%u)\n",
+                    di_query.descriptorBindingPartiallyBound,
+                    di_query.descriptorBindingSampledImageUpdateAfterBind,
+                    di_query.descriptorBindingVariableDescriptorCount,
+                    di_query.runtimeDescriptorArray,
+                    di_props.maxPerStageDescriptorUpdateAfterBindSampledImages);
+#ifdef __ANDROID__
+            __android_log_print(ANDROID_LOG_INFO, "xemu-android",
+                "Bindless textures: disabled (missing features)");
+#endif
         }
     }
 #endif

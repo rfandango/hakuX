@@ -105,6 +105,8 @@ typedef struct GenVshGlslOptions {
     bool prefix_outputs;
     bool use_push_constants_for_uniform_attrs;
     int ubo_binding;
+    int ubo_set;
+    int vertex_push_offset;
 } GenVshGlslOptions;
 
 MString *pgraph_glsl_gen_vsh(const VshState *state,

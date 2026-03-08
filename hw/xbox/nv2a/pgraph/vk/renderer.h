@@ -78,6 +78,8 @@
 #define OPT_VALIDATE_GEN_COUNTERS 0
 #define OPT_REORDER_SAFE_WINDOWS 1
 #define REORDER_WINDOW_MAX       64
+#define OPT_BINDLESS_TEXTURES    1
+#define MAX_BINDLESS_TEXTURES    1024
 
 struct OptBisectStats {
     int super_fast_hits;
@@ -98,6 +100,7 @@ struct OptBisectStats {
     int sfp_miss_prog_dirty;
     int sfp_miss_vtx_gen;
     int sfp_miss_tex_vram;
+    int bindless_tex_fast;
     int pipeline_early_hits;
     int pipeline_early_misses;
     int vtx_cache_hits;
@@ -371,6 +374,10 @@ typedef struct TextureBinding {
     uint32_t submit_time;
     unsigned int dirty_check_frame;
     bool dirty_check_result;
+#if OPT_BINDLESS_TEXTURES
+    uint32_t bindless_slot;
+    uint32_t bindless_binding;
+#endif
 } TextureBinding;
 
 typedef struct QueryReport {
@@ -576,6 +583,10 @@ typedef struct ReorderWindowEntry {
     bool use_push_constants;
     VkPipelineLayout layout;
 
+#if OPT_BINDLESS_TEXTURES
+    uint32_t tex_indices[NV2A_MAX_TEXTURES];
+#endif
+
     bool pre_draw_skipped;
 
     int sequence_number;
@@ -613,6 +624,11 @@ typedef struct PGRAPHVkState {
 #if OPT_DYNAMIC_BLEND
     bool eds3_blend_supported;
 #endif
+#if OPT_BINDLESS_TEXTURES
+    bool bindless_textures_supported;
+    uint32_t tex_push_offset;
+    int max_vertex_push_attrs;
+#endif
 
     VkPhysicalDevice physical_device;
     VkPhysicalDeviceFeatures enabled_physical_device_features;
@@ -636,6 +652,9 @@ typedef struct PGRAPHVkState {
     VkFence command_buffer_fence;
     unsigned int command_buffer_start_time;
     bool in_command_buffer;
+#if OPT_BINDLESS_TEXTURES
+    bool bindless_set_bound;
+#endif
     uint32_t submit_count;
 
     VkCommandBuffer aux_command_buffer;
@@ -688,6 +707,18 @@ typedef struct PGRAPHVkState {
     int descriptor_set_count;
     int descriptor_set_index;
     bool need_descriptor_rebind;
+
+#if OPT_BINDLESS_TEXTURES
+    VkDescriptorSetLayout bindless_set_layout;
+    VkDescriptorPool bindless_descriptor_pool;
+    VkDescriptorSet bindless_descriptor_set;
+    VkDescriptorSetLayout ubo_set_layout;
+    VkDescriptorPool ubo_descriptor_pool;
+    VkDescriptorSet *ubo_descriptor_sets;
+    int ubo_descriptor_set_count;
+    int ubo_descriptor_set_index;
+    uint64_t bindless_slot_bitmap[MAX_BINDLESS_TEXTURES / 64];
+#endif
 
     StorageBuffer storage_buffers[BUFFER_COUNT];
     PrimRewriteBuf prim_rewrite_buf;

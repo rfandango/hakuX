@@ -99,7 +99,10 @@ typedef struct GenPshGlslOptions {
     bool gles;
     int gles_version;
     int ubo_binding;
+    int ubo_set;
     int tex_binding;
+    bool bindless;
+    int tex_push_offset;
 } GenPshGlslOptions;
 
 MString *pgraph_glsl_gen_psh(const PshState *state, GenPshGlslOptions opts);

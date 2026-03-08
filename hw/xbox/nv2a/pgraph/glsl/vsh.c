@@ -451,21 +451,37 @@ MString *pgraph_glsl_gen_vsh(const VshState *state, GenVshGlslOptions opts)
                                opts.gles_version);
 
     if (opts.vulkan) {
-        // FIXME: Optimize uniforms
         if (num_uniform_attrs > 0 &&
             opts.use_push_constants_for_uniform_attrs) {
-            mstring_append_fmt(output,
-                               "layout(push_constant) uniform PushConstants {\n"
-                               "    vec4 inlineValue[%d];\n"
-                               "};\n\n",
-                               num_uniform_attrs);
+            if (opts.vertex_push_offset > 0) {
+                mstring_append_fmt(output,
+                    "layout(push_constant) uniform PushConstants {\n"
+                    "    layout(offset = %d) vec4 inlineValue[%d];\n"
+                    "};\n\n",
+                    opts.vertex_push_offset, num_uniform_attrs);
+            } else {
+                mstring_append_fmt(output,
+                    "layout(push_constant) uniform PushConstants {\n"
+                    "    vec4 inlineValue[%d];\n"
+                    "};\n\n",
+                    num_uniform_attrs);
+            }
         }
-        mstring_append_fmt(
-            output,
-            "layout(binding = %d, std140) uniform VshUniforms {\n"
-            "%s"
-            "};\n\n",
-            opts.ubo_binding, mstring_get_str(uniforms));
+        if (opts.ubo_set > 0) {
+            mstring_append_fmt(
+                output,
+                "layout(set = %d, binding = %d, std140) uniform VshUniforms {\n"
+                "%s"
+                "};\n\n",
+                opts.ubo_set, opts.ubo_binding, mstring_get_str(uniforms));
+        } else {
+            mstring_append_fmt(
+                output,
+                "layout(binding = %d, std140) uniform VshUniforms {\n"
+                "%s"
+                "};\n\n",
+                opts.ubo_binding, mstring_get_str(uniforms));
+        }
     } else {
         mstring_append(
             output, mstring_get_str(uniforms));
