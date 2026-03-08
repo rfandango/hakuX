@@ -44,6 +44,26 @@ static void opt_stats_log_and_reset(void)
     static int frame_counter = 0;
     if (++frame_counter % 60 == 0) {
 #ifdef __ANDROID__
+        __android_log_print(ANDROID_LOG_INFO, "xemu-sfp",
+                "SFP:%d/%d miss: clr%d noPl%d noCb%d noRp%d noFb%d fbD%d shC%d piD%d dsR%d uni%d noDs%d tG%d rG%d prD%d vG%d tV%d",
+                g_opt_stats.super_fast_hits,
+                g_opt_stats.super_fast_misses,
+                g_opt_stats.sfp_miss_clearing,
+                g_opt_stats.sfp_miss_no_pipeline,
+                g_opt_stats.sfp_miss_no_cmdbuf,
+                g_opt_stats.sfp_miss_no_rp,
+                g_opt_stats.sfp_miss_no_fb,
+                g_opt_stats.sfp_miss_fb_dirty,
+                g_opt_stats.sfp_miss_shader_changed,
+                g_opt_stats.sfp_miss_pipe_dirty,
+                g_opt_stats.sfp_miss_desc_rebind,
+                g_opt_stats.sfp_miss_uniforms,
+                g_opt_stats.sfp_miss_no_desc,
+                g_opt_stats.sfp_miss_tex_gen,
+                g_opt_stats.sfp_miss_reg_gen,
+                g_opt_stats.sfp_miss_prog_dirty,
+                g_opt_stats.sfp_miss_vtx_gen,
+                g_opt_stats.sfp_miss_tex_vram);
         __android_log_print(ANDROID_LOG_INFO, "xemu-rw",
                 "RW:%d/%d/%d Safe:%d(L%d/LE%d) Rej:Bl%d Cw%d Dp%d Zw%d Zf%d St%d Al%d Ak%d Rt%d Fb%d Zp%d",
                 g_opt_stats.reorder_windows_flushed,
@@ -1969,49 +1989,54 @@ static void begin_pre_draw(PGRAPHState *pg)
     assert(!r->zeta_binding || r->zeta_binding->initialized);
 
 #if OPT_SUPER_FAST_PATH
-    if (!pg->clearing &&
-        r->pipeline_binding &&
-        r->in_command_buffer &&
-        r->in_render_pass &&
-        r->framebuffer_index > 0 &&
-        !r->framebuffer_dirty &&
-        !r->shader_bindings_changed &&
-        !r->pipeline_state_dirty &&
-        !r->need_descriptor_rebind &&
-        !r->uniforms_changed &&
-        r->descriptor_set_index > 0 &&
-        pg->texture_state_gen == r->last_texture_state_gen &&
-        pg->any_reg_gen == r->last_any_reg_gen &&
-        !pg->program_data_dirty &&
-        pg->vertex_attr_gen == r->pipeline_vertex_attr_gen) {
+    {
+        bool sfp_ok = true;
+        if (pg->clearing)                { OPT_STAT_INC(sfp_miss_clearing); sfp_ok = false; }
+        else if (!r->pipeline_binding)   { OPT_STAT_INC(sfp_miss_no_pipeline); sfp_ok = false; }
+        else if (!r->in_command_buffer)  { OPT_STAT_INC(sfp_miss_no_cmdbuf); sfp_ok = false; }
+        else if (!r->in_render_pass)     { OPT_STAT_INC(sfp_miss_no_rp); sfp_ok = false; }
+        else if (r->framebuffer_index <= 0) { OPT_STAT_INC(sfp_miss_no_fb); sfp_ok = false; }
+        else if (r->framebuffer_dirty)   { OPT_STAT_INC(sfp_miss_fb_dirty); sfp_ok = false; }
+        else if (r->shader_bindings_changed) { OPT_STAT_INC(sfp_miss_shader_changed); sfp_ok = false; }
+        else if (r->pipeline_state_dirty) { OPT_STAT_INC(sfp_miss_pipe_dirty); sfp_ok = false; }
+        else if (r->need_descriptor_rebind) { OPT_STAT_INC(sfp_miss_desc_rebind); sfp_ok = false; }
+        else if (r->uniforms_changed)    { OPT_STAT_INC(sfp_miss_uniforms); sfp_ok = false; }
+        else if (r->descriptor_set_index <= 0) { OPT_STAT_INC(sfp_miss_no_desc); sfp_ok = false; }
+        else if (pg->texture_state_gen != r->last_texture_state_gen) { OPT_STAT_INC(sfp_miss_tex_gen); sfp_ok = false; }
+        else if (pg->any_reg_gen != r->last_any_reg_gen) { OPT_STAT_INC(sfp_miss_reg_gen); sfp_ok = false; }
+        else if (pg->program_data_dirty) { OPT_STAT_INC(sfp_miss_prog_dirty); sfp_ok = false; }
+        else if (pg->vertex_attr_gen != r->pipeline_vertex_attr_gen) { OPT_STAT_INC(sfp_miss_vtx_gen); sfp_ok = false; }
 
-        bool tex_vram_clean = (r->texture_vram_gen == r->last_texture_vram_gen);
-        if (!tex_vram_clean) {
-            tex_vram_clean = true;
-            for (int i = 0; i < NV2A_MAX_TEXTURES; i++) {
-                TextureBinding *b = r->texture_bindings[i];
-                if (b && b != &r->dummy_texture && b->possibly_dirty) {
-                    if (b->dirty_check_frame == pg->frame_time &&
-                        !b->dirty_check_result) {
-                        b->possibly_dirty = false;
-                    } else {
-                        tex_vram_clean = false;
-                        break;
+        if (sfp_ok) {
+            bool tex_vram_clean = (r->texture_vram_gen == r->last_texture_vram_gen);
+            if (!tex_vram_clean) {
+                tex_vram_clean = true;
+                for (int i = 0; i < NV2A_MAX_TEXTURES; i++) {
+                    TextureBinding *b = r->texture_bindings[i];
+                    if (b && b != &r->dummy_texture && b->possibly_dirty) {
+                        if (b->dirty_check_frame == pg->frame_time &&
+                            !b->dirty_check_result) {
+                            b->possibly_dirty = false;
+                        } else {
+                            tex_vram_clean = false;
+                            break;
+                        }
                     }
                 }
+                if (tex_vram_clean) {
+                    r->last_texture_vram_gen = r->texture_vram_gen;
+                }
             }
-            if (tex_vram_clean) {
-                r->last_texture_vram_gen = r->texture_vram_gen;
-            }
-        }
 
-        if (tex_vram_clean) {
+            if (tex_vram_clean) {
 #if OPT_VALIDATE_GEN_COUNTERS
-            assert(!pgraph_has_dirty_regs(pg));
+                assert(!pgraph_has_dirty_regs(pg));
 #endif
-            OPT_STAT_INC(super_fast_hits);
-            r->pre_draw_skipped = true;
-            return;
+                OPT_STAT_INC(super_fast_hits);
+                r->pre_draw_skipped = true;
+                return;
+            }
+            OPT_STAT_INC(sfp_miss_tex_vram);
         }
     }
     OPT_STAT_INC(super_fast_misses);
@@ -3087,7 +3112,6 @@ static bool try_snapshot_draw_arrays(NV2AState *d, ReorderWindowEntry *e)
                             sizeof(VkDrawIndirectCommand));
     }
 
-    r->need_descriptor_rebind = true;
     begin_pre_draw(pg);
     copy_remapped_attributes_to_inline_buffer(pg, remap, 0, max_element);
 
@@ -3209,7 +3233,6 @@ static bool try_snapshot_inline_elements(NV2AState *d, ReorderWindowEntry *e)
 #endif
     VertexBufferRemap remap = remap_unaligned_attributes(pg, max_element + 1);
 
-    r->need_descriptor_rebind = true;
     begin_pre_draw(pg);
     copy_remapped_attributes_to_inline_buffer(pg, remap, 0, max_element + 1);
 

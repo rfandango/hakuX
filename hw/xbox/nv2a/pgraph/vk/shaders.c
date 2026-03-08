@@ -717,6 +717,7 @@ void pgraph_vk_bind_shaders(PGRAPHState *pg)
                                              &new_state)) {
             r->shader_binding = get_shader_binding_for_state(r, &new_state);
             r->shader_bindings_changed = true;
+            r->uniforms_changed = true;
             r->pipeline_state_dirty = true;
         }
     } else {

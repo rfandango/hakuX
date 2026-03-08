@@ -81,6 +81,22 @@
 struct OptBisectStats {
     int super_fast_hits;
     int super_fast_misses;
+    int sfp_miss_clearing;
+    int sfp_miss_no_pipeline;
+    int sfp_miss_no_cmdbuf;
+    int sfp_miss_no_rp;
+    int sfp_miss_no_fb;
+    int sfp_miss_fb_dirty;
+    int sfp_miss_shader_changed;
+    int sfp_miss_pipe_dirty;
+    int sfp_miss_desc_rebind;
+    int sfp_miss_uniforms;
+    int sfp_miss_no_desc;
+    int sfp_miss_tex_gen;
+    int sfp_miss_reg_gen;
+    int sfp_miss_prog_dirty;
+    int sfp_miss_vtx_gen;
+    int sfp_miss_tex_vram;
     int pipeline_early_hits;
     int pipeline_early_misses;
     int vtx_cache_hits;
