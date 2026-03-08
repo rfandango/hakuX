@@ -75,6 +75,8 @@
 #define OPT_INDEXED_DRAW_MERGING 1
 #define OPT_DRAW_MERGE_MAX      128
 #define OPT_VALIDATE_GEN_COUNTERS 0
+#define OPT_REORDER_SAFE_WINDOWS 1
+#define REORDER_WINDOW_MAX       64
 
 struct OptBisectStats {
     int super_fast_hits;
@@ -87,6 +89,23 @@ struct OptBisectStats {
     int desc_rebind_full;
     int multi_draw_indirect;
     int multi_draw_loop;
+    int reorder_windows_flushed;
+    int reorder_draws_reordered;
+    int reorder_pipeline_switches_saved;
+    int reorder_safe_draws;
+    int reorder_reject_blend;
+    int reorder_reject_no_depth;
+    int reorder_reject_no_zwrite;
+    int reorder_reject_stencil;
+    int reorder_reject_alpha;
+    int reorder_reject_alphakill;
+    int reorder_reject_rtt;
+    int reorder_reject_zfunc;
+    int reorder_reject_no_color_write;
+    int reorder_reject_fb_dirty;
+    int reorder_reject_zpass;
+    int reorder_safe_zfunc_less;
+    int reorder_safe_zfunc_lequal;
 };
 extern struct OptBisectStats g_opt_stats;
 #if NV2A_PERF_LOG
@@ -496,6 +515,71 @@ typedef struct DrawQueue {
 } DrawQueue;
 #endif
 
+#if OPT_REORDER_SAFE_WINDOWS
+
+typedef enum ReorderDrawMode {
+    RW_DRAW_INDEXED,
+    RW_DRAW_INDIRECT,
+    RW_DRAW_DIRECT,
+} ReorderDrawMode;
+
+typedef struct ReorderWindowEntry {
+    PipelineBinding *pipeline_binding;
+
+    VkDescriptorSet descriptor_set;
+    uint32_t dynamic_offsets[2];
+
+    VkBuffer vertex_buffers[NV2A_VERTEXSHADER_ATTRIBUTES];
+    VkDeviceSize vertex_offsets[NV2A_VERTEXSHADER_ATTRIBUTES];
+    int num_vertex_bindings;
+
+    ReorderDrawMode draw_mode;
+    VkDeviceSize index_indirect_offset;
+    uint32_t draw_count;
+    uint32_t vertex_count;
+    int32_t first_vertex;
+
+    uint32_t dyn_setupraster;
+    uint32_t dyn_blendcolor;
+    uint32_t dyn_control_0;
+    uint32_t dyn_control_1;
+    uint32_t dyn_control_2;
+    bool has_dynamic_line_width;
+    float line_width;
+
+    VkViewport viewport;
+    VkRect2D scissor;
+
+    float push_values[NV2A_VERTEXSHADER_ATTRIBUTES * 4];
+    int num_push_values;
+    bool use_push_constants;
+    VkPipelineLayout layout;
+
+    bool pre_draw_skipped;
+
+    int sequence_number;
+    int group_order;
+
+    bool color_write;
+    bool depth_test;
+    bool stencil_test;
+} ReorderWindowEntry;
+
+#define REORDER_MAX_PIPELINES 32
+
+typedef struct ReorderWindow {
+    ReorderWindowEntry entries[REORDER_WINDOW_MAX];
+    int count;
+    bool active;
+
+    PipelineBinding *seen_pipelines[REORDER_MAX_PIPELINES];
+    int seen_pipeline_group[REORDER_MAX_PIPELINES];
+    int num_seen_pipelines;
+    int next_group;
+} ReorderWindow;
+
+#endif
+
 typedef struct PGRAPHVkState {
     VkInstance instance;
     VkDebugUtilsMessengerEXT debug_messenger;
@@ -581,6 +665,10 @@ typedef struct PGRAPHVkState {
 
 #if OPT_DRAW_MERGING
     DrawQueue draw_queue;
+#endif
+
+#if OPT_REORDER_SAFE_WINDOWS
+    ReorderWindow reorder_window;
 #endif
 
 #if OPT_ALWAYS_DEFERRED_FENCES
@@ -928,6 +1016,7 @@ void pgraph_vk_flush_all_frames(PGRAPHState *pg);
 #endif
 void pgraph_vk_flush_draw(NV2AState *d);
 void pgraph_vk_flush_draw_queue(NV2AState *d);
+void pgraph_vk_flush_reorder_window(NV2AState *d);
 void pgraph_vk_begin_command_buffer(PGRAPHState *pg);
 void pgraph_vk_ensure_command_buffer(PGRAPHState *pg);
 void pgraph_vk_ensure_not_in_render_pass(PGRAPHState *pg);

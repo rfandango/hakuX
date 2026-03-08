@@ -116,6 +116,17 @@ class SettingsActivity : AppCompatActivity() {
       try { nativeSetFastFences(checked) } catch (_: Throwable) {}
     }
 
+    val switchDrawReorder = findViewById<MaterialSwitch>(R.id.switch_draw_reorder)
+    try {
+      switchDrawReorder.isChecked = nativeGetDrawReorder()
+    } catch (_: Throwable) {
+      switchDrawReorder.isChecked = prefs.getBoolean("draw_reorder", false)
+    }
+    switchDrawReorder.setOnCheckedChangeListener { _, checked ->
+      prefs.edit().putBoolean("draw_reorder", checked).apply()
+      try { nativeSetDrawReorder(checked) } catch (_: Throwable) {}
+    }
+
     val switchValidation = findViewById<MaterialSwitch>(R.id.switch_validation_layers)
     switchValidation.isChecked = prefs.getBoolean("validation_layers", false)
     switchValidation.setOnCheckedChangeListener { _, checked ->
@@ -430,6 +441,8 @@ class SettingsActivity : AppCompatActivity() {
   private external fun nativeSetFpJit(enable: Boolean)
   private external fun nativeGetFastFences(): Boolean
   private external fun nativeSetFastFences(enable: Boolean)
+  private external fun nativeGetDrawReorder(): Boolean
+  private external fun nativeSetDrawReorder(enable: Boolean)
 
   companion object {
     private const val FATX_SUPERBLOCK_SIZE = 4096

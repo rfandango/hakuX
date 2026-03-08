@@ -33,6 +33,8 @@ extern "C" void xemu_set_fast_fences(bool enable);
 extern "C" bool xemu_get_fast_fences(void);
 extern "C" void xemu_set_fp_jit(bool enable);
 extern "C" bool xemu_get_fp_jit(void);
+extern "C" void xemu_set_draw_reorder(bool enable);
+extern "C" bool xemu_get_draw_reorder(void);
 
 #ifdef CONFIG_VULKAN
 #include <adrenotools/driver.h>
@@ -752,6 +754,11 @@ static SetupFiles SyncSetupFiles() {
   xemu_set_fast_fences(fast_fences);
   __android_log_print(ANDROID_LOG_INFO, "xemu-android",
                       "fast fences: %s", fast_fences ? "ON" : "OFF");
+
+  bool draw_reorder = GetPrefBool(env, activity, "draw_reorder", false);
+  xemu_set_draw_reorder(draw_reorder);
+  __android_log_print(ANDROID_LOG_INFO, "xemu-android",
+                      "draw reorder: %s", draw_reorder ? "ON" : "OFF");
   std::string filterPref = GetPrefString(env, activity, "filtering");
   if (!filterPref.empty()) ds.filtering = filterPref;
   std::string arPref = GetPrefString(env, activity, "aspect_ratio");
@@ -1236,6 +1243,18 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_rfandango_xemuandroid_SettingsActivity_nativeSetFastFences(JNIEnv *, jobject, jboolean enable)
 {
     xemu_set_fast_fences(enable == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_rfandango_xemuandroid_SettingsActivity_nativeGetDrawReorder(JNIEnv *, jobject)
+{
+    return xemu_get_draw_reorder() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_rfandango_xemuandroid_SettingsActivity_nativeSetDrawReorder(JNIEnv *, jobject, jboolean enable)
+{
+    xemu_set_draw_reorder(enable == JNI_TRUE);
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

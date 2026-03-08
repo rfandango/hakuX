@@ -244,6 +244,7 @@ static void pgraph_vk_flush(NV2AState *d)
 {
     PGRAPHState *pg = &d->pgraph;
 
+    pgraph_vk_flush_reorder_window(d);
     pgraph_vk_flush_draw_queue(d);
     pgraph_vk_finish(pg, VK_FINISH_REASON_FLUSH);
     pgraph_vk_surface_flush(d);

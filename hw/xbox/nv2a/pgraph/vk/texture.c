@@ -622,6 +622,12 @@ static void copy_zeta_surface_to_texture(PGRAPHState *pg, SurfaceBinding *surfac
 
     PGRAPHVkState *r = pg->vk_renderer_state;
 
+#if OPT_REORDER_SAFE_WINDOWS
+    if (r->reorder_window.count > 0) {
+        NV2AState *d = container_of(pg, NV2AState, pgraph);
+        pgraph_vk_flush_reorder_window(d);
+    }
+#endif
 #if OPT_DRAW_MERGING
     if (r->draw_queue.count > 0) {
         NV2AState *d = container_of(pg, NV2AState, pgraph);
@@ -859,6 +865,12 @@ static void copy_surface_to_texture(PGRAPHState *pg, SurfaceBinding *surface,
 
     PGRAPHVkState *r = pg->vk_renderer_state;
 
+#if OPT_REORDER_SAFE_WINDOWS
+    if (r->reorder_window.count > 0) {
+        NV2AState *d = container_of(pg, NV2AState, pgraph);
+        pgraph_vk_flush_reorder_window(d);
+    }
+#endif
 #if OPT_DRAW_MERGING
     if (r->draw_queue.count > 0) {
         NV2AState *d = container_of(pg, NV2AState, pgraph);

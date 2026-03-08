@@ -33,6 +33,7 @@
 #endif
 
 static bool g_xemu_fast_fences = false;
+static bool g_xemu_draw_reorder = false;
 
 struct OptBisectStats g_opt_stats;
 
@@ -40,8 +41,31 @@ static void opt_stats_log_and_reset(void)
 {
 #if NV2A_PERF_LOG
     static int frame_counter = 0;
-    if (++frame_counter % 300 == 0) {
-        DBG_LOG("[OPT-STATS] SFP:%d/%d PEX:%d/%d VTC:%d/%d DRS:%d/%d MDI:%d/%d",
+    if (++frame_counter % 60 == 0) {
+#ifdef __ANDROID__
+        __android_log_print(ANDROID_LOG_INFO, "xemu-rw",
+                "RW:%d/%d/%d Safe:%d(L%d/LE%d) Rej:Bl%d Cw%d Dp%d Zw%d Zf%d St%d Al%d Ak%d Rt%d Fb%d Zp%d",
+                g_opt_stats.reorder_windows_flushed,
+                g_opt_stats.reorder_draws_reordered,
+                g_opt_stats.reorder_pipeline_switches_saved,
+                g_opt_stats.reorder_safe_draws,
+                g_opt_stats.reorder_safe_zfunc_less,
+                g_opt_stats.reorder_safe_zfunc_lequal,
+                g_opt_stats.reorder_reject_blend,
+                g_opt_stats.reorder_reject_no_color_write,
+                g_opt_stats.reorder_reject_no_depth,
+                g_opt_stats.reorder_reject_no_zwrite,
+                g_opt_stats.reorder_reject_zfunc,
+                g_opt_stats.reorder_reject_stencil,
+                g_opt_stats.reorder_reject_alpha,
+                g_opt_stats.reorder_reject_alphakill,
+                g_opt_stats.reorder_reject_rtt,
+                g_opt_stats.reorder_reject_fb_dirty,
+                g_opt_stats.reorder_reject_zpass);
+#else
+        DBG_LOG("[OPT-STATS] SFP:%d/%d PEX:%d/%d VTC:%d/%d DRS:%d/%d MDI:%d/%d"
+                " RW:%d/%d/%d"
+                " RWSafe:%d Rej:Bl%d Cw%d Dp%d Zw%d Zf%d St%d Al%d Ak%d Rt%d Fb%d Zp%d",
                 g_opt_stats.super_fast_hits,
                 g_opt_stats.super_fast_misses,
                 g_opt_stats.pipeline_early_hits,
@@ -51,10 +75,28 @@ static void opt_stats_log_and_reset(void)
                 g_opt_stats.desc_rebind_skips,
                 g_opt_stats.desc_rebind_full,
                 g_opt_stats.multi_draw_indirect,
-                g_opt_stats.multi_draw_loop);
-    }
+                g_opt_stats.multi_draw_loop,
+                g_opt_stats.reorder_windows_flushed,
+                g_opt_stats.reorder_draws_reordered,
+                g_opt_stats.reorder_pipeline_switches_saved,
+                g_opt_stats.reorder_safe_draws,
+                g_opt_stats.reorder_reject_blend,
+                g_opt_stats.reorder_reject_no_color_write,
+                g_opt_stats.reorder_reject_no_depth,
+                g_opt_stats.reorder_reject_no_zwrite,
+                g_opt_stats.reorder_reject_zfunc,
+                g_opt_stats.reorder_reject_stencil,
+                g_opt_stats.reorder_reject_alpha,
+                g_opt_stats.reorder_reject_alphakill,
+                g_opt_stats.reorder_reject_rtt,
+                g_opt_stats.reorder_reject_fb_dirty,
+                g_opt_stats.reorder_reject_zpass);
 #endif
+        memset(&g_opt_stats, 0, sizeof(g_opt_stats));
+    }
+#else
     memset(&g_opt_stats, 0, sizeof(g_opt_stats));
+#endif
 }
 
 void xemu_set_fast_fences(bool enable)
@@ -65,6 +107,16 @@ void xemu_set_fast_fences(bool enable)
 bool xemu_get_fast_fences(void)
 {
     return g_xemu_fast_fences;
+}
+
+void xemu_set_draw_reorder(bool enable)
+{
+    g_xemu_draw_reorder = enable;
+}
+
+bool xemu_get_draw_reorder(void)
+{
+    return g_xemu_draw_reorder;
 }
 
 void pgraph_vk_draw_begin(NV2AState *d)
@@ -1548,12 +1600,25 @@ void pgraph_vk_flush_all_frames(PGRAPHState *pg)
 }
 #endif
 
+#if OPT_REORDER_SAFE_WINDOWS
+static void flush_reorder_window_internal(NV2AState *d);
+#endif
 #if OPT_DRAW_MERGING
 static void flush_draw_queue_internal(NV2AState *d);
 #endif
 
 void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
 {
+#if OPT_REORDER_SAFE_WINDOWS
+    {
+        PGRAPHVkState *r_rw = pg->vk_renderer_state;
+        if (r_rw->reorder_window.count > 0) {
+            NV2AState *d = container_of(pg, NV2AState, pgraph);
+            flush_reorder_window_internal(d);
+        }
+        r_rw->reorder_window.active = false;
+    }
+#endif
 #if OPT_DRAW_MERGING
     PGRAPHVkState *r_pre = pg->vk_renderer_state;
     if (r_pre->draw_queue.count > 0) {
@@ -2265,7 +2330,7 @@ static void copy_remapped_attributes_to_inline_buffer(PGRAPHState *pg,
 static void bind_vertex_buffer(PGRAPHState *pg, uint16_t inline_map,
                                VkDeviceSize offset);
 
-#if OPT_DRAW_MERGING
+#if OPT_DRAW_MERGING || OPT_REORDER_SAFE_WINDOWS
 static bool check_rt_as_texture_hazard(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
@@ -2294,7 +2359,90 @@ static bool check_rt_as_texture_hazard(PGRAPHState *pg)
     }
     return false;
 }
+#endif
 
+#if OPT_REORDER_SAFE_WINDOWS
+static bool classify_draw_safe(PGRAPHState *pg)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
+    uint32_t blend = pgraph_reg_r(pg, NV_PGRAPH_BLEND);
+    uint32_t control_1 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1);
+
+    if (blend & NV_PGRAPH_BLEND_EN) {
+        uint32_t src = GET_MASK(blend, NV_PGRAPH_BLEND_SFACTOR);
+        uint32_t dst = GET_MASK(blend, NV_PGRAPH_BLEND_DFACTOR);
+        if (src != NV_PGRAPH_BLEND_SFACTOR_ONE ||
+            dst != NV_PGRAPH_BLEND_DFACTOR_ZERO) {
+            OPT_STAT_INC(reorder_reject_blend);
+            return false;
+        }
+    }
+
+    if ((control_0 & (NV_PGRAPH_CONTROL_0_RED_WRITE_ENABLE |
+                      NV_PGRAPH_CONTROL_0_GREEN_WRITE_ENABLE |
+                      NV_PGRAPH_CONTROL_0_BLUE_WRITE_ENABLE |
+                      NV_PGRAPH_CONTROL_0_ALPHA_WRITE_ENABLE)) !=
+                     (NV_PGRAPH_CONTROL_0_RED_WRITE_ENABLE |
+                      NV_PGRAPH_CONTROL_0_GREEN_WRITE_ENABLE |
+                      NV_PGRAPH_CONTROL_0_BLUE_WRITE_ENABLE |
+                      NV_PGRAPH_CONTROL_0_ALPHA_WRITE_ENABLE)) {
+        OPT_STAT_INC(reorder_reject_no_color_write);
+        return false;
+    }
+
+    if (!(control_0 & NV_PGRAPH_CONTROL_0_ZENABLE)) {
+        OPT_STAT_INC(reorder_reject_no_depth);
+        return false;
+    }
+    if (!(control_0 & NV_PGRAPH_CONTROL_0_ZWRITEENABLE)) {
+        OPT_STAT_INC(reorder_reject_no_zwrite);
+        return false;
+    }
+
+    uint32_t zfunc = GET_MASK(control_0, NV_PGRAPH_CONTROL_0_ZFUNC);
+    if (zfunc != NV_PGRAPH_CONTROL_0_ZFUNC_LESS &&
+        zfunc != NV_PGRAPH_CONTROL_0_ZFUNC_LEQUAL) {
+        OPT_STAT_INC(reorder_reject_zfunc);
+        return false;
+    }
+
+    if (control_1 & NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE) {
+        OPT_STAT_INC(reorder_reject_stencil);
+        return false;
+    }
+
+    if (control_0 & NV_PGRAPH_CONTROL_0_ALPHATESTENABLE) {
+        uint32_t afunc = GET_MASK(control_0, NV_PGRAPH_CONTROL_0_ALPHAFUNC);
+        uint32_t aref  = GET_MASK(control_0, NV_PGRAPH_CONTROL_0_ALPHAREF);
+        bool safe_alpha = (afunc == ALPHA_FUNC_ALWAYS) ||
+                          (afunc == ALPHA_FUNC_GREATER && aref == 0);
+        if (!safe_alpha) {
+            OPT_STAT_INC(reorder_reject_alpha);
+            return false;
+        }
+    }
+
+    /* Alphakill (texture.a == 0.0 → discard) is theoretically safe:
+     * discarded fragments write nothing, survivors write color+depth,
+     * depth test resolves order. Kept open for investigation. */
+
+    if (check_rt_as_texture_hazard(pg)) {
+        OPT_STAT_INC(reorder_reject_rtt);
+        return false;
+    }
+
+    OPT_STAT_INC(reorder_safe_draws);
+    if (zfunc == NV_PGRAPH_CONTROL_0_ZFUNC_LESS) {
+        OPT_STAT_INC(reorder_safe_zfunc_less);
+    } else {
+        OPT_STAT_INC(reorder_safe_zfunc_lequal);
+    }
+    return true;
+}
+#endif
+
+#if OPT_DRAW_MERGING
 static bool check_draw_mergeable(PGRAPHState *pg, DrawQueue *q)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
@@ -2800,6 +2948,517 @@ void pgraph_vk_flush_draw_queue(NV2AState *d)
 #endif
 }
 
+#if OPT_REORDER_SAFE_WINDOWS
+
+static void snapshot_vertex_buffers(PGRAPHState *pg, ReorderWindowEntry *e,
+                                    uint16_t inline_map, VkDeviceSize offset)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    e->num_vertex_bindings = r->num_active_vertex_binding_descriptions;
+    for (int i = 0; i < e->num_vertex_bindings; i++) {
+        int attr_idx = r->vertex_attribute_descriptions[i].location;
+        int buffer_idx = (inline_map & (1 << attr_idx)) ? BUFFER_VERTEX_INLINE :
+                                                          BUFFER_VERTEX_RAM;
+        e->vertex_buffers[i] = r->storage_buffers[buffer_idx].buffer;
+        e->vertex_offsets[i] = offset + r->vertex_attribute_offsets[attr_idx];
+    }
+}
+
+static void snapshot_dynamic_state(PGRAPHState *pg, ReorderWindowEntry *e)
+{
+    e->dyn_setupraster = pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER);
+    e->dyn_blendcolor = pgraph_reg_r(pg, NV_PGRAPH_BLENDCOLOR);
+    e->dyn_control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
+    e->dyn_control_1 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1);
+    e->dyn_control_2 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_2);
+
+    unsigned int vp_width = pg->surface_binding_dim.width,
+                 vp_height = pg->surface_binding_dim.height;
+    pgraph_apply_scaling_factor(pg, &vp_width, &vp_height);
+    e->viewport = (VkViewport){
+        .width = vp_width, .height = vp_height,
+        .minDepth = 0.0, .maxDepth = 1.0,
+    };
+
+    unsigned int xmin = pg->surface_shape.clip_x,
+                 ymin = pg->surface_shape.clip_y;
+    unsigned int sw = pg->surface_shape.clip_width,
+                 sh = pg->surface_shape.clip_height;
+    pgraph_apply_anti_aliasing_factor(pg, &xmin, &ymin);
+    pgraph_apply_anti_aliasing_factor(pg, &sw, &sh);
+    pgraph_apply_scaling_factor(pg, &xmin, &ymin);
+    pgraph_apply_scaling_factor(pg, &sw, &sh);
+    e->scissor = (VkRect2D){
+        .offset = { .x = xmin, .y = ymin },
+        .extent = { .width = sw, .height = sh },
+    };
+}
+
+static void snapshot_push_constants(PGRAPHState *pg, ReorderWindowEntry *e)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    e->use_push_constants = r->use_push_constants_for_uniform_attrs;
+    e->num_push_values = 0;
+    if (!e->use_push_constants || !r->shader_binding) {
+        return;
+    }
+    float values[NV2A_VERTEXSHADER_ATTRIBUTES][4];
+    int num = 0;
+    pgraph_get_inline_values(pg, r->shader_binding->state.vsh.uniform_attrs,
+                             values, &num);
+    e->num_push_values = num;
+    if (num > 0) {
+        memcpy(e->push_values, values, num * 4 * sizeof(float));
+    }
+}
+
+static bool try_snapshot_draw_arrays(NV2AState *d, ReorderWindowEntry *e)
+{
+    PGRAPHState *pg = &d->pgraph;
+    PGRAPHVkState *r = pg->vk_renderer_state;
+
+    if (!(r->color_binding || r->zeta_binding)) {
+        return false;
+    }
+
+    nv2a_profile_inc_counter(NV2A_PROF_DRAW_ARRAYS);
+    r->num_vertex_ram_buffer_syncs = 0;
+
+    PrimAssemblyState assembly = {
+        .primitive_mode = pg->primitive_mode,
+        .polygon_mode = (enum ShaderPolygonMode)GET_MASK(
+            pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
+            NV_PGRAPH_SETUPRASTER_FRONTFACEMODE),
+        .last_provoking = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
+                                   NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX) ==
+                          NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX_LAST,
+        .flat_shading = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
+                                 NV_PGRAPH_CONTROL_3_SHADEMODE) ==
+                        NV_PGRAPH_CONTROL_3_SHADEMODE_FLAT,
+    };
+
+    pgraph_vk_bind_vertex_attributes(d, pg->draw_arrays_min_start,
+                                     pg->draw_arrays_max_count - 1, false,
+                                     0, pg->draw_arrays_max_count - 1);
+    uint32_t max_element = 0;
+    for (int i = 0; i < pg->draw_arrays_length; i++) {
+        max_element = MAX(max_element,
+                         pg->draw_arrays_start[i] + pg->draw_arrays_count[i]);
+    }
+
+    sync_vertex_ram_buffer(pg);
+    VertexBufferRemap remap = remap_unaligned_attributes(pg, max_element);
+
+    PrimRewrite prim_rw = pgraph_prim_rewrite_ranges(
+        &r->prim_rewrite_buf, assembly,
+        pg->draw_arrays_start, pg->draw_arrays_count,
+        pg->draw_arrays_length);
+
+    if (prim_rw.num_indices > 0) {
+        ensure_buffer_space(pg, BUFFER_INDEX_STAGING,
+                            prim_rw.num_indices * sizeof(uint32_t));
+    } else if (pg->draw_arrays_length > 1) {
+        ensure_buffer_space(pg, BUFFER_INDEX_STAGING,
+                            pg->draw_arrays_length *
+                            sizeof(VkDrawIndirectCommand));
+    }
+
+    r->need_descriptor_rebind = true;
+    begin_pre_draw(pg);
+    copy_remapped_attributes_to_inline_buffer(pg, remap, 0, max_element);
+
+    e->pipeline_binding = r->pipeline_binding;
+    e->layout = r->pipeline_binding->layout;
+    e->has_dynamic_line_width = r->pipeline_binding->has_dynamic_line_width;
+    if (e->has_dynamic_line_width) {
+        e->line_width =
+            clamp_line_width_to_device_limits(pg, pg->surface_scale_factor);
+    }
+
+    e->descriptor_set = r->descriptor_sets[r->descriptor_set_index - 1];
+    e->dynamic_offsets[0] = (uint32_t)r->uniform_buffer_offsets[0];
+    e->dynamic_offsets[1] = (uint32_t)r->uniform_buffer_offsets[1];
+    e->pre_draw_skipped = false;
+
+    snapshot_vertex_buffers(pg, e, remap.attributes, 0);
+    snapshot_dynamic_state(pg, e);
+    snapshot_push_constants(pg, e);
+
+    if (prim_rw.num_indices > 0) {
+        e->draw_mode = RW_DRAW_INDEXED;
+        e->draw_count = prim_rw.num_indices;
+        e->index_indirect_offset = pgraph_vk_update_index_buffer(
+            pg, prim_rw.indices, prim_rw.num_indices * sizeof(uint32_t));
+    } else if (pg->draw_arrays_length > 1) {
+        e->draw_mode = RW_DRAW_INDIRECT;
+        VkDrawIndirectCommand cmds[pg->draw_arrays_length];
+        for (int i = 0; i < pg->draw_arrays_length; i++) {
+            cmds[i] = (VkDrawIndirectCommand){
+                .vertexCount = pg->draw_arrays_count[i],
+                .instanceCount = 1,
+                .firstVertex = pg->draw_arrays_start[i],
+                .firstInstance = 0,
+            };
+        }
+        size_t indirect_size =
+            pg->draw_arrays_length * sizeof(VkDrawIndirectCommand);
+        e->draw_count = pg->draw_arrays_length;
+        e->index_indirect_offset =
+            pgraph_vk_update_index_buffer(pg, cmds, indirect_size);
+    } else {
+        e->draw_mode = RW_DRAW_DIRECT;
+        e->vertex_count = pg->draw_arrays_count[0];
+        e->first_vertex = pg->draw_arrays_start[0];
+        e->draw_count = 1;
+    }
+
+    uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
+    e->color_write =
+        (control_0 & NV_PGRAPH_CONTROL_0_ALPHA_WRITE_ENABLE) ||
+        (control_0 & NV_PGRAPH_CONTROL_0_RED_WRITE_ENABLE) ||
+        (control_0 & NV_PGRAPH_CONTROL_0_GREEN_WRITE_ENABLE) ||
+        (control_0 & NV_PGRAPH_CONTROL_0_BLUE_WRITE_ENABLE);
+    e->depth_test = !!(control_0 & NV_PGRAPH_CONTROL_0_ZENABLE);
+    e->stencil_test = !!(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1) &
+                         NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE);
+
+    return true;
+}
+
+static bool try_snapshot_inline_elements(NV2AState *d, ReorderWindowEntry *e)
+{
+    PGRAPHState *pg = &d->pgraph;
+    PGRAPHVkState *r = pg->vk_renderer_state;
+
+    if (!(r->color_binding || r->zeta_binding)) {
+        return false;
+    }
+
+    nv2a_profile_inc_counter(NV2A_PROF_INLINE_ELEMENTS);
+
+    PrimAssemblyState assembly = {
+        .primitive_mode = pg->primitive_mode,
+        .polygon_mode = (enum ShaderPolygonMode)GET_MASK(
+            pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
+            NV_PGRAPH_SETUPRASTER_FRONTFACEMODE),
+        .last_provoking = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
+                                   NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX) ==
+                          NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX_LAST,
+        .flat_shading = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
+                                 NV_PGRAPH_CONTROL_3_SHADEMODE) ==
+                        NV_PGRAPH_CONTROL_3_SHADEMODE_FLAT,
+    };
+
+    uint32_t *draw_indices = pg->inline_elements;
+    unsigned int draw_index_count = pg->inline_elements_length;
+    PrimRewrite prim_rw = pgraph_prim_rewrite_indexed(
+        &r->prim_rewrite_buf, assembly,
+        pg->inline_elements, pg->inline_elements_length);
+    if (prim_rw.num_indices > 0) {
+        draw_indices = prim_rw.indices;
+        draw_index_count = prim_rw.num_indices;
+    }
+
+    size_t index_data_size = draw_index_count * sizeof(uint32_t);
+    ensure_buffer_space(pg, BUFFER_INDEX_STAGING, index_data_size);
+
+    uint32_t min_element = (uint32_t)-1;
+    uint32_t max_element = 0;
+    for (unsigned int i = 0; i < draw_index_count; i++) {
+        max_element = MAX(draw_indices[i], max_element);
+        min_element = MIN(draw_indices[i], min_element);
+    }
+
+    pgraph_vk_bind_vertex_attributes(
+        d, min_element, max_element, false, 0,
+        draw_indices[draw_index_count - 1]);
+
+#if OPT_SYNC_RANGE_SKIP
+    if (sync_range_covers(r, pg->vertex_attr_gen, min_element, max_element)) {
+        r->num_vertex_ram_buffer_syncs = 0;
+    } else {
+        sync_vertex_ram_buffer(pg);
+        sync_range_update(r, pg->vertex_attr_gen, min_element, max_element);
+    }
+#else
+    sync_vertex_ram_buffer(pg);
+#endif
+    VertexBufferRemap remap = remap_unaligned_attributes(pg, max_element + 1);
+
+    r->need_descriptor_rebind = true;
+    begin_pre_draw(pg);
+    copy_remapped_attributes_to_inline_buffer(pg, remap, 0, max_element + 1);
+
+    e->pipeline_binding = r->pipeline_binding;
+    e->layout = r->pipeline_binding->layout;
+    e->has_dynamic_line_width = r->pipeline_binding->has_dynamic_line_width;
+    if (e->has_dynamic_line_width) {
+        e->line_width =
+            clamp_line_width_to_device_limits(pg, pg->surface_scale_factor);
+    }
+
+    e->descriptor_set = r->descriptor_sets[r->descriptor_set_index - 1];
+    e->dynamic_offsets[0] = (uint32_t)r->uniform_buffer_offsets[0];
+    e->dynamic_offsets[1] = (uint32_t)r->uniform_buffer_offsets[1];
+    e->pre_draw_skipped = false;
+
+    snapshot_vertex_buffers(pg, e, remap.attributes, 0);
+    snapshot_dynamic_state(pg, e);
+    snapshot_push_constants(pg, e);
+
+    e->draw_mode = RW_DRAW_INDEXED;
+    e->draw_count = draw_index_count;
+    e->index_indirect_offset = pgraph_vk_update_index_buffer(
+        pg, draw_indices, index_data_size);
+
+    uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
+    e->color_write =
+        (control_0 & NV_PGRAPH_CONTROL_0_ALPHA_WRITE_ENABLE) ||
+        (control_0 & NV_PGRAPH_CONTROL_0_RED_WRITE_ENABLE) ||
+        (control_0 & NV_PGRAPH_CONTROL_0_GREEN_WRITE_ENABLE) ||
+        (control_0 & NV_PGRAPH_CONTROL_0_BLUE_WRITE_ENABLE);
+    e->depth_test = !!(control_0 & NV_PGRAPH_CONTROL_0_ZENABLE);
+    e->stencil_test = !!(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1) &
+                         NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE);
+
+    return true;
+}
+
+static int compare_reorder_entries(const void *a, const void *b)
+{
+    const ReorderWindowEntry *ea = a;
+    const ReorderWindowEntry *eb = b;
+    if (ea->group_order < eb->group_order) return -1;
+    if (ea->group_order > eb->group_order) return 1;
+    return ea->sequence_number - eb->sequence_number;
+}
+
+static void emit_reorder_entry(PGRAPHState *pg, ReorderWindowEntry *e,
+                                PipelineBinding *prev_pipeline)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    bool pipeline_changed = (e->pipeline_binding != prev_pipeline);
+
+    if (!r->in_render_pass) {
+        begin_render_pass(pg);
+        pipeline_changed = true;
+    }
+
+    if (pipeline_changed) {
+        nv2a_profile_inc_counter(NV2A_PROF_PIPELINE_BIND);
+        vkCmdBindPipeline(r->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          e->pipeline_binding->pipeline);
+        e->pipeline_binding->draw_time = pg->draw_time;
+        vkCmdSetViewport(r->command_buffer, 0, 1, &e->viewport);
+        vkCmdSetScissor(r->command_buffer, 0, 1, &e->scissor);
+        if (e->has_dynamic_line_width) {
+            vkCmdSetLineWidth(r->command_buffer, e->line_width);
+        }
+    }
+
+#if OPT_DYNAMIC_STATES
+    {
+        VkCullModeFlags cull = VK_CULL_MODE_NONE;
+        if (e->dyn_setupraster & NV_PGRAPH_SETUPRASTER_CULLENABLE) {
+            uint32_t cull_face = GET_MASK(e->dyn_setupraster,
+                                          NV_PGRAPH_SETUPRASTER_CULLCTRL);
+            assert(cull_face < ARRAY_SIZE(pgraph_cull_face_vk_map));
+            cull = pgraph_cull_face_vk_map[cull_face];
+        }
+        vkCmdSetCullMode(r->command_buffer, cull);
+        vkCmdSetFrontFace(r->command_buffer,
+                          (e->dyn_setupraster & NV_PGRAPH_SETUPRASTER_FRONTFACE)
+                              ? VK_FRONT_FACE_COUNTER_CLOCKWISE
+                              : VK_FRONT_FACE_CLOCKWISE);
+
+        float blend_constant[4] = { 0, 0, 0, 0 };
+        pgraph_argb_pack32_to_rgba_float(e->dyn_blendcolor, blend_constant);
+        vkCmdSetBlendConstants(r->command_buffer, blend_constant);
+
+        if (OPT_DYNAMIC_DEPTH_STENCIL && r->extended_dynamic_state_supported) {
+            vkCmdSetDepthTestEnable(r->command_buffer,
+                (e->dyn_control_0 & NV_PGRAPH_CONTROL_0_ZENABLE) ? VK_TRUE
+                                                                  : VK_FALSE);
+            vkCmdSetDepthWriteEnable(r->command_buffer,
+                (e->dyn_control_0 & NV_PGRAPH_CONTROL_0_ZWRITEENABLE)
+                    ? VK_TRUE : VK_FALSE);
+            uint32_t dfunc = GET_MASK(e->dyn_control_0,
+                                      NV_PGRAPH_CONTROL_0_ZFUNC);
+            assert(dfunc < ARRAY_SIZE(pgraph_depth_func_vk_map));
+            vkCmdSetDepthCompareOp(r->command_buffer,
+                                   pgraph_depth_func_vk_map[dfunc]);
+
+            bool sten = e->dyn_control_1 &
+                        NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE;
+            vkCmdSetStencilTestEnable(r->command_buffer,
+                                      sten ? VK_TRUE : VK_FALSE);
+            uint32_t sfunc = GET_MASK(e->dyn_control_1,
+                                      NV_PGRAPH_CONTROL_1_STENCIL_FUNC);
+            assert(sfunc < ARRAY_SIZE(pgraph_stencil_func_vk_map));
+            uint32_t sref = GET_MASK(e->dyn_control_1,
+                                     NV_PGRAPH_CONTROL_1_STENCIL_REF);
+            uint32_t mr = GET_MASK(e->dyn_control_1,
+                                   NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ);
+            uint32_t mw = GET_MASK(e->dyn_control_1,
+                                   NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE);
+            vkCmdSetStencilCompareMask(r->command_buffer,
+                                       VK_STENCIL_FACE_FRONT_AND_BACK, mr);
+            vkCmdSetStencilWriteMask(r->command_buffer,
+                                     VK_STENCIL_FACE_FRONT_AND_BACK, mw);
+            vkCmdSetStencilReference(r->command_buffer,
+                                     VK_STENCIL_FACE_FRONT_AND_BACK, sref);
+            uint32_t op_fail = GET_MASK(e->dyn_control_2,
+                                        NV_PGRAPH_CONTROL_2_STENCIL_OP_FAIL);
+            uint32_t op_zfail = GET_MASK(e->dyn_control_2,
+                                         NV_PGRAPH_CONTROL_2_STENCIL_OP_ZFAIL);
+            uint32_t op_zpass = GET_MASK(e->dyn_control_2,
+                                         NV_PGRAPH_CONTROL_2_STENCIL_OP_ZPASS);
+            assert(op_fail < ARRAY_SIZE(pgraph_stencil_op_vk_map));
+            assert(op_zfail < ARRAY_SIZE(pgraph_stencil_op_vk_map));
+            assert(op_zpass < ARRAY_SIZE(pgraph_stencil_op_vk_map));
+            vkCmdSetStencilOp(r->command_buffer,
+                              VK_STENCIL_FACE_FRONT_AND_BACK,
+                              pgraph_stencil_op_vk_map[op_fail],
+                              pgraph_stencil_op_vk_map[op_zpass],
+                              pgraph_stencil_op_vk_map[op_zfail],
+                              pgraph_stencil_func_vk_map[sfunc]);
+        } else {
+            uint32_t sref = GET_MASK(e->dyn_control_1,
+                                     NV_PGRAPH_CONTROL_1_STENCIL_REF);
+            uint32_t mr = GET_MASK(e->dyn_control_1,
+                                   NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ);
+            uint32_t mw = GET_MASK(e->dyn_control_1,
+                                   NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE);
+            vkCmdSetStencilCompareMask(r->command_buffer,
+                                       VK_STENCIL_FACE_FRONT_AND_BACK, mr);
+            vkCmdSetStencilWriteMask(r->command_buffer,
+                                     VK_STENCIL_FACE_FRONT_AND_BACK, mw);
+            vkCmdSetStencilReference(r->command_buffer,
+                                     VK_STENCIL_FACE_FRONT_AND_BACK, sref);
+        }
+    }
+#endif
+
+    {
+        vkCmdBindDescriptorSets(r->command_buffer,
+                                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                e->layout, 0, 1, &e->descriptor_set,
+                                2, e->dynamic_offsets);
+        if (e->use_push_constants && e->num_push_values > 0) {
+            vkCmdPushConstants(r->command_buffer, e->layout,
+                               VK_SHADER_STAGE_VERTEX_BIT, 0,
+                               e->num_push_values * 4 * sizeof(float),
+                               e->push_values);
+        }
+    }
+
+    if (e->num_vertex_bindings > 0) {
+        vkCmdBindVertexBuffers(r->command_buffer, 0,
+                               e->num_vertex_bindings,
+                               e->vertex_buffers, e->vertex_offsets);
+    }
+
+    switch (e->draw_mode) {
+    case RW_DRAW_INDEXED:
+        vkCmdBindIndexBuffer(r->command_buffer,
+                             r->storage_buffers[BUFFER_INDEX].buffer,
+                             e->index_indirect_offset, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(r->command_buffer, e->draw_count, 1, 0, 0, 0);
+        break;
+    case RW_DRAW_INDIRECT:
+        vkCmdDrawIndirect(r->command_buffer,
+                          r->storage_buffers[BUFFER_INDEX].buffer,
+                          e->index_indirect_offset, e->draw_count,
+                          sizeof(VkDrawIndirectCommand));
+        break;
+    case RW_DRAW_DIRECT:
+        vkCmdDraw(r->command_buffer, e->vertex_count, 1, e->first_vertex, 0);
+        break;
+    }
+}
+
+static void flush_reorder_window_internal(NV2AState *d)
+{
+    PGRAPHState *pg = &d->pgraph;
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    ReorderWindow *w = &r->reorder_window;
+
+    if (w->count == 0) {
+        return;
+    }
+
+    int original_switches = 0;
+    for (int i = 1; i < w->count; i++) {
+        if (w->entries[i].pipeline_binding !=
+            w->entries[i - 1].pipeline_binding) {
+            original_switches++;
+        }
+    }
+
+    qsort(w->entries, w->count, sizeof(ReorderWindowEntry),
+          compare_reorder_entries);
+
+    int sorted_switches = 0;
+    for (int i = 1; i < w->count; i++) {
+        if (w->entries[i].pipeline_binding !=
+            w->entries[i - 1].pipeline_binding) {
+            sorted_switches++;
+        }
+    }
+
+    OPT_STAT_INC(reorder_windows_flushed);
+    g_opt_stats.reorder_draws_reordered += w->count;
+    g_opt_stats.reorder_pipeline_switches_saved +=
+        (original_switches - sorted_switches);
+
+    nv2a_profile_inc_counter(NV2A_PROF_REORDER_WINDOW_FLUSH);
+    g_nv2a_stats.frame_working.counters[NV2A_PROF_REORDER_DRAWS] += w->count;
+
+    pgraph_vk_ensure_command_buffer(pg);
+
+    r->dyn_state.valid = false;
+
+    PipelineBinding *prev_pipeline = NULL;
+    for (int i = 0; i < w->count; i++) {
+        ReorderWindowEntry *e = &w->entries[i];
+        emit_reorder_entry(pg, e, prev_pipeline);
+        prev_pipeline = e->pipeline_binding;
+
+        pg->draw_time++;
+        if (r->color_binding && e->color_write) {
+            r->color_binding->draw_time = pg->draw_time;
+        }
+        if (r->zeta_binding && (e->depth_test || e->stencil_test)) {
+            r->zeta_binding->draw_time = pg->draw_time;
+        }
+        pgraph_vk_set_surface_dirty(pg, e->color_write,
+                                    e->depth_test || e->stencil_test);
+    }
+
+    r->pipeline_binding = prev_pipeline;
+    r->pipeline_binding_changed = false;
+    r->color_drawn_in_cb = r->color_drawn_in_cb || (r->color_binding != NULL);
+    r->zeta_drawn_in_cb = r->zeta_drawn_in_cb || (r->zeta_binding != NULL);
+
+    w->count = 0;
+    w->active = false;
+    w->num_seen_pipelines = 0;
+    w->next_group = 0;
+}
+
+#endif
+
+void pgraph_vk_flush_reorder_window(NV2AState *d)
+{
+#if OPT_REORDER_SAFE_WINDOWS
+    PGRAPHVkState *r = d->pgraph.vk_renderer_state;
+    if (r->reorder_window.count > 0) {
+        flush_reorder_window_internal(d);
+    }
+    r->reorder_window.active = false;
+#endif
+}
+
 void pgraph_vk_draw_end(NV2AState *d)
 {
     PGRAPHState *pg = &d->pgraph;
@@ -2820,6 +3479,66 @@ void pgraph_vk_draw_end(NV2AState *d)
         NV2A_VK_DPRINTF("nop draw!\n");
         return;
     }
+
+#if OPT_REORDER_SAFE_WINDOWS
+    if (g_xemu_draw_reorder &&
+        (pg->draw_arrays_length || pg->inline_elements_length) && !pg->clearing) {
+        ReorderWindow *w = &r->reorder_window;
+        bool is_safe = classify_draw_safe(pg);
+        if (is_safe && r->framebuffer_dirty) {
+            OPT_STAT_INC(reorder_reject_fb_dirty);
+            is_safe = false;
+        }
+        if (is_safe && pg->zpass_pixel_count_enable) {
+            OPT_STAT_INC(reorder_reject_zpass);
+            is_safe = false;
+        }
+
+        if (is_safe && w->count < REORDER_WINDOW_MAX) {
+            pgraph_vk_flush_draw_queue(d);
+
+            ReorderWindowEntry *e = &w->entries[w->count];
+            bool ok;
+            if (pg->draw_arrays_length) {
+                ok = try_snapshot_draw_arrays(d, e);
+            } else {
+                ok = try_snapshot_inline_elements(d, e);
+            }
+            if (ok) {
+                e->sequence_number = w->count;
+
+                int grp = -1;
+                for (int i = 0; i < w->num_seen_pipelines; i++) {
+                    if (w->seen_pipelines[i] == e->pipeline_binding) {
+                        grp = w->seen_pipeline_group[i];
+                        break;
+                    }
+                }
+                if (grp < 0) {
+                    if (w->num_seen_pipelines < REORDER_MAX_PIPELINES) {
+                        w->seen_pipelines[w->num_seen_pipelines] = e->pipeline_binding;
+                        w->seen_pipeline_group[w->num_seen_pipelines] = w->next_group;
+                        w->num_seen_pipelines++;
+                    }
+                    grp = w->next_group++;
+                }
+                e->group_order = grp;
+
+                w->count++;
+                w->active = true;
+                return;
+            }
+        }
+
+        if (w->count > 0) {
+            flush_reorder_window_internal(d);
+        }
+        w->active = false;
+    } else if (r->reorder_window.count > 0) {
+        flush_reorder_window_internal(d);
+        r->reorder_window.active = false;
+    }
+#endif
 
 #if OPT_DRAW_MERGING
     if (pg->draw_arrays_length && !pg->clearing) {
@@ -3114,6 +3833,12 @@ void pgraph_vk_clear_surface(NV2AState *d, uint32_t parameter)
     PGRAPHState *pg = &d->pgraph;
     PGRAPHVkState *r = pg->vk_renderer_state;
 
+#if OPT_REORDER_SAFE_WINDOWS
+    if (r->reorder_window.count > 0) {
+        flush_reorder_window_internal(d);
+    }
+    r->reorder_window.active = false;
+#endif
 #if OPT_DRAW_MERGING
     if (r->draw_queue.count > 0) {
         flush_draw_queue_internal(d);

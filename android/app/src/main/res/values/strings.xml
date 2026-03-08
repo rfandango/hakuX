@@ -144,6 +144,9 @@
   <string name="settings_fast_fences">Fast fences (reduce GPU stalls)</string>
   <string name="settings_fast_fences_desc">Defer GPU fence waits for buffer-space and vertex-dirty flushes. Significantly reduces frame time but may cause geometry popping or flickering. Takes effect immediately.</string>
 
+  <string name="settings_draw_reorder">Draw reordering (reduce pipeline switches)</string>
+  <string name="settings_draw_reorder_desc">Reorder safe draw calls within small windows to reduce GPU pipeline switches. Improves performance on tiled GPUs (Adreno). May cause minor visual artifacts in some titles. Takes effect immediately.</string>
+
   <string name="settings_validation_layers">Vulkan validation layers</string>
   <string name="settings_validation_layers_desc">Enable Vulkan validation for graphics debugging. Significant performance impact. Requires app restart.</string>
 </resources>
