@@ -182,17 +182,19 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
         .buffer_size = r->storage_buffers[BUFFER_VERTEX_INLINE].buffer_size,
     };
 
+    extern int xemu_get_submit_frames(void);
+    int nframes = xemu_get_submit_frames();
+
+    size_t uniform_size;
+    if (nframes >= 3)      uniform_size = 32 * mib;
+    else if (nframes == 2) uniform_size = 16 * mib;
+    else                   uniform_size = 8 * mib;
+
     r->storage_buffers[BUFFER_UNIFORM] = (StorageBuffer){
         .alloc_info = device_alloc_create_info,
         .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                  VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-#if OPT_LARGER_STAGING
-        .buffer_size = 32 * 1024 * 1024,
-#elif OPT_LARGER_POOLS
-        .buffer_size = 16 * 1024 * 1024,
-#else
-        .buffer_size = 8 * 1024 * 1024,
-#endif
+        .buffer_size = uniform_size,
     };
 
     r->storage_buffers[BUFFER_UNIFORM_STAGING] = (StorageBuffer){
@@ -236,28 +238,35 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
     }
 
 #if OPT_ALWAYS_DEFERRED_FENCES
+    size_t idx_max, vtx_max, uni_max, stg_max;
+    if (nframes >= 3) {
+        idx_max = 16 * mib;
+        vtx_max = 64 * mib;
+        uni_max = 32 * mib;
+        stg_max = 64 * mib;
+    } else if (nframes == 2) {
+        idx_max = 8 * mib;
+        vtx_max = 32 * mib;
+        uni_max = 16 * mib;
+        stg_max = 32 * mib;
+    } else {
+        idx_max = 4 * mib;
+        vtx_max = 16 * mib;
+        uni_max = 8 * mib;
+        stg_max = 16 * mib;
+    }
+
     for (int i = 0; i < NUM_SUBMIT_FRAMES; i++) {
         FrameStagingState *fs = &r->frame_staging[i];
 
-#if OPT_LARGER_STAGING
         size_t idx_cap = MIN(r->storage_buffers[BUFFER_INDEX].buffer_size,
-                             16 * mib);
+                             idx_max);
         size_t vtx_cap = MIN(r->storage_buffers[BUFFER_VERTEX_INLINE].buffer_size,
-                             64 * mib);
+                             vtx_max);
         size_t uni_cap = MIN(r->storage_buffers[BUFFER_UNIFORM].buffer_size,
-                             32 * mib);
+                             uni_max);
         size_t stg_cap = MIN(r->storage_buffers[BUFFER_STAGING_SRC].buffer_size,
-                             64 * mib);
-#else
-        size_t idx_cap = MIN(r->storage_buffers[BUFFER_INDEX].buffer_size,
-                             8 * mib);
-        size_t vtx_cap = MIN(r->storage_buffers[BUFFER_VERTEX_INLINE].buffer_size,
-                             32 * mib);
-        size_t uni_cap = MIN(r->storage_buffers[BUFFER_UNIFORM].buffer_size,
-                             16 * mib);
-        size_t stg_cap = MIN(r->storage_buffers[BUFFER_STAGING_SRC].buffer_size,
-                             32 * mib);
-#endif
+                             stg_max);
 
         fs->index_staging = (StorageBuffer){
             .alloc_info = host_alloc_create_info,
@@ -311,8 +320,10 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
         }
         bitmap_clear(fs->uploaded_bitmap, 0, r->bitmap_size);
     }
-    VK_LOG_ERROR("buffer_init: per-frame staging buffers created (%d frames)",
-                 NUM_SUBMIT_FRAMES);
+    VK_LOG_ERROR("buffer_init: per-frame staging created (%d frames, "
+                 "idx=%zuMB vtx=%zuMB uni=%zuMB stg=%zuMB per-frame)",
+                 nframes, idx_max >> 20, vtx_max >> 20, uni_max >> 20,
+                 stg_max >> 20);
 #endif
 
     pgraph_prim_rewrite_init(&r->prim_rewrite_buf);

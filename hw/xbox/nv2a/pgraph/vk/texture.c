@@ -1379,9 +1379,58 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
         .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
     };
 
-    VK_CHECK(vmaCreateImage(r->allocator, &image_create_info,
-                            &alloc_create_info, &snode->image,
-                            &snode->allocation, NULL));
+    VkResult create_result = vmaCreateImage(r->allocator, &image_create_info,
+                                            &alloc_create_info, &snode->image,
+                                            &snode->allocation, NULL);
+    if (create_result == VK_ERROR_OUT_OF_DEVICE_MEMORY ||
+        create_result == VK_ERROR_OUT_OF_HOST_MEMORY) {
+        const VkPhysicalDeviceMemoryProperties *props;
+        vmaGetMemoryProperties(r->allocator, &props);
+        VmaBudget budgets[VK_MAX_MEMORY_HEAPS];
+        vmaGetHeapBudgets(r->allocator, budgets);
+        for (uint32_t i = 0; i < props->memoryHeapCount; i++) {
+            VmaBudget *b = &budgets[i];
+            VK_LOG_ERROR("OOM DIAG heap[%u]: alloc=%uMB usage=%uMB budget=%uMB "
+                         "blockBytes=%uMB flags=0x%x",
+                         i,
+                         (unsigned)(b->statistics.allocationBytes >> 20),
+                         (unsigned)(b->usage >> 20),
+                         (unsigned)(b->budget >> 20),
+                         (unsigned)(b->statistics.blockBytes >> 20),
+                         props->memoryHeaps[i].flags);
+        }
+        VK_LOG_ERROR("OOM creating texture: %ux%ux%u fmt=%d mips=%u layers=%u "
+                     "(result=%d)",
+                     image_create_info.extent.width,
+                     image_create_info.extent.height,
+                     image_create_info.extent.depth,
+                     image_create_info.format,
+                     image_create_info.mipLevels,
+                     image_create_info.arrayLayers,
+                     create_result);
+
+        pgraph_vk_flush_all_frames(pg);
+
+        for (int evict_pass = 0; evict_pass < 64; evict_pass++) {
+            if (!lru_try_evict_one(&r->texture_cache)) break;
+        }
+
+        create_result = vmaCreateImage(r->allocator, &image_create_info,
+                                       &alloc_create_info, &snode->image,
+                                       &snode->allocation, NULL);
+        if (create_result != VK_SUCCESS) {
+            VK_LOG_ERROR("OOM retry FAILED (result=%d), flushing all textures",
+                         create_result);
+            lru_flush(&r->texture_cache);
+            create_result = vmaCreateImage(r->allocator, &image_create_info,
+                                           &alloc_create_info, &snode->image,
+                                           &snode->allocation, NULL);
+        }
+    }
+    if (create_result != VK_SUCCESS) {
+        VK_LOG_ERROR("vmaCreateImage FATAL: result=%d", create_result);
+    }
+    assert(create_result == VK_SUCCESS && "vmaCreateImage failed");
 
     VkImageViewCreateInfo image_view_create_info = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,

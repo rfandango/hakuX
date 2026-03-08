@@ -55,8 +55,9 @@ static void create_command_buffers(PGRAPHState *pg)
     VK_CHECK(
         vkAllocateCommandBuffers(r->device, &alloc_info, r->command_buffers));
 
+    extern int xemu_get_submit_frames(void);
     r->current_frame = 0;
-    r->num_active_frames = NUM_SUBMIT_FRAMES;
+    r->num_active_frames = xemu_get_submit_frames();
     r->command_buffer = r->command_buffers[0];
     r->aux_command_buffer = r->command_buffers[1];
     for (int i = 0; i < NUM_SUBMIT_FRAMES; i++) {
