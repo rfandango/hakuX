@@ -1884,10 +1884,10 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
         {
             static int dbg_finish_count = 0;
             bool deferred = (finish_reason == VK_FINISH_REASON_FLIP_STALL ||
-                             finish_reason == VK_FINISH_REASON_PRESENTING ||
-                             finish_reason == VK_FINISH_REASON_NEED_BUFFER_SPACE);
+                             finish_reason == VK_FINISH_REASON_PRESENTING);
             if (g_xemu_fast_fences) {
                 deferred = deferred ||
+                    finish_reason == VK_FINISH_REASON_NEED_BUFFER_SPACE ||
                     finish_reason == VK_FINISH_REASON_VERTEX_BUFFER_DIRTY;
             }
             if (dbg_finish_count < 200) {
@@ -2004,6 +2004,7 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
 #endif
 #endif
         r->need_descriptor_rebind = true;
+        r->uniforms_changed = true;
         r->in_command_buffer = false;
         r->color_drawn_in_cb = false;
         r->zeta_drawn_in_cb = false;
