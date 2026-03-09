@@ -41,6 +41,54 @@
     } while (0)
 
 uint8_t pgraph_reg_category_table[0x2000 / 4] = { 0 };
+uint32_t pgraph_reg_dynamic_mask_table[0x2000 / 4] = { 0 };
+
+void pgraph_init_reg_dynamic_masks(bool eds1, bool eds3)
+{
+    memset(pgraph_reg_dynamic_mask_table, 0,
+           sizeof(pgraph_reg_dynamic_mask_table));
+
+    pgraph_reg_dynamic_mask_table[NV_PGRAPH_SETUPRASTER / 4] |=
+        NV_PGRAPH_SETUPRASTER_CULLENABLE |
+        NV_PGRAPH_SETUPRASTER_CULLCTRL |
+        NV_PGRAPH_SETUPRASTER_FRONTFACE;
+
+    pgraph_reg_dynamic_mask_table[NV_PGRAPH_BLENDCOLOR / 4] = 0xFFFFFFFF;
+
+    pgraph_reg_dynamic_mask_table[NV_PGRAPH_BLEND / 4] |=
+        NV_PGRAPH_BLEND_LOGICOP_ENABLE | NV_PGRAPH_BLEND_LOGICOP;
+
+    if (eds1) {
+        pgraph_reg_dynamic_mask_table[NV_PGRAPH_CONTROL_0 / 4] |=
+            NV_PGRAPH_CONTROL_0_ZENABLE |
+            NV_PGRAPH_CONTROL_0_ZWRITEENABLE |
+            NV_PGRAPH_CONTROL_0_ZFUNC;
+        pgraph_reg_dynamic_mask_table[NV_PGRAPH_CONTROL_1 / 4] |=
+            NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE |
+            NV_PGRAPH_CONTROL_1_STENCIL_FUNC |
+            NV_PGRAPH_CONTROL_1_STENCIL_REF |
+            NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ |
+            NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE;
+        pgraph_reg_dynamic_mask_table[NV_PGRAPH_CONTROL_2 / 4] |=
+            NV_PGRAPH_CONTROL_2_STENCIL_OP_FAIL |
+            NV_PGRAPH_CONTROL_2_STENCIL_OP_ZFAIL |
+            NV_PGRAPH_CONTROL_2_STENCIL_OP_ZPASS;
+    } else {
+        pgraph_reg_dynamic_mask_table[NV_PGRAPH_CONTROL_1 / 4] |=
+            NV_PGRAPH_CONTROL_1_STENCIL_REF |
+            NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ |
+            NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE;
+    }
+
+    if (eds3) {
+        pgraph_reg_dynamic_mask_table[NV_PGRAPH_BLEND / 4] = 0xFFFFFFFF;
+        pgraph_reg_dynamic_mask_table[NV_PGRAPH_CONTROL_0 / 4] |=
+            NV_PGRAPH_CONTROL_0_RED_WRITE_ENABLE |
+            NV_PGRAPH_CONTROL_0_GREEN_WRITE_ENABLE |
+            NV_PGRAPH_CONTROL_0_BLUE_WRITE_ENABLE |
+            NV_PGRAPH_CONTROL_0_ALPHA_WRITE_ENABLE;
+    }
+}
 
 static void pgraph_init_reg_category_table(void)
 {
@@ -1700,6 +1748,8 @@ DEF_METHOD(NV097, SET_SURFACE_FORMAT)
         GET_MASK(parameter, NV097_SET_SURFACE_FORMAT_ZETA);
     if (pg->surface_shape.zeta_format != old_zeta_format) {
         pg->shader_state_gen++;
+        pg->non_dynamic_reg_gen++;
+        pg->any_reg_gen++;
     }
     pg->surface_shape.anti_aliasing =
         GET_MASK(parameter, NV097_SET_SURFACE_FORMAT_ANTI_ALIASING);
@@ -2434,6 +2484,8 @@ DEF_METHOD_INC(NV097, SET_TEXTURE_MATRIX_ENABLE)
     int slot = (method - NV097_SET_TEXTURE_MATRIX_ENABLE) / 4;
     if (pg->texture_matrix_enable[slot] != parameter) {
         pg->shader_state_gen++;
+        pg->non_dynamic_reg_gen++;
+        pg->any_reg_gen++;
     }
     pg->texture_matrix_enable[slot] = parameter;
 }
@@ -2645,6 +2697,8 @@ DEF_METHOD_INC(NV097, SET_SPECULAR_PARAMS)
         float new_power = reconstruct_specular_power(pg->specular_params);
         if (pg->specular_power != new_power) {
             pg->shader_state_gen++;
+            pg->non_dynamic_reg_gen++;
+            pg->any_reg_gen++;
         }
         pg->specular_power = new_power;
     }
@@ -2673,6 +2727,8 @@ DEF_METHOD_INC(NV097, SET_POINT_PARAMS)
     float new_val = *(float *)&parameter;
     if (pg->point_params[slot] != new_val) {
         pg->shader_state_gen++;
+        pg->non_dynamic_reg_gen++;
+        pg->any_reg_gen++;
     }
     pg->point_params[slot] = new_val;
 }
@@ -3692,6 +3748,8 @@ DEF_METHOD_INC(NV097, SET_SPECULAR_PARAMS_BACK)
         float new_power = reconstruct_specular_power(pg->specular_params_back);
         if (pg->specular_power_back != new_power) {
             pg->shader_state_gen++;
+            pg->non_dynamic_reg_gen++;
+            pg->any_reg_gen++;
         }
         pg->specular_power_back = new_power;
     }

@@ -163,6 +163,7 @@ typedef struct PGRAPHState {
     uint32_t shader_state_gen;
     uint32_t pipeline_state_gen;
     uint32_t any_reg_gen;
+    uint32_t non_dynamic_reg_gen;
 
     bool texture_matrix_enable[NV2A_MAX_TEXTURES];
 
@@ -306,6 +307,8 @@ extern NV2AState *g_nv2a;
 #define REG_CAT_PIPELINE (1 << 1)
 #define REG_CAT_TEXTURE  (1 << 2)
 extern uint8_t pgraph_reg_category_table[];
+extern uint32_t pgraph_reg_dynamic_mask_table[];
+void pgraph_init_reg_dynamic_masks(bool eds1, bool eds3);
 
 static inline uint32_t pgraph_reg_r(PGRAPHState *pg, unsigned int r)
 {
@@ -319,9 +322,18 @@ static inline void pgraph_reg_w(PGRAPHState *pg, unsigned int r, uint32_t v)
     if (pg->regs_[r] != v) {
         bitmap_set(pg->regs_dirty, r / sizeof(uint32_t), 1);
         uint8_t cat = pgraph_reg_category_table[r / 4];
-        if (cat & REG_CAT_SHADER)   pg->shader_state_gen++;
-        if (cat & REG_CAT_PIPELINE) pg->pipeline_state_gen++;
+        uint32_t dyn_mask = pgraph_reg_dynamic_mask_table[r / 4];
+        uint32_t non_dyn_changed = (pg->regs_[r] ^ v) & ~dyn_mask;
+        if (cat & REG_CAT_SHADER) {
+            if (non_dyn_changed) pg->shader_state_gen++;
+        }
+        if (cat & REG_CAT_PIPELINE) {
+            if (non_dyn_changed) pg->pipeline_state_gen++;
+        }
         if (cat & REG_CAT_TEXTURE)  pg->texture_state_gen++;
+        bool tex_only = cat && !(cat & ~REG_CAT_TEXTURE);
+        if (non_dyn_changed && !tex_only)
+            pg->non_dynamic_reg_gen++;
         pg->any_reg_gen++;
     }
     pg->regs_[r] = v;

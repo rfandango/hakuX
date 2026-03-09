@@ -965,6 +965,12 @@ static bool create_logical_device(PGRAPHState *pg, Error **errp)
                         "vk init stage: vkCreateDevice done");
 #endif
 
+#if OPT_DYNAMIC_REG_FILTER
+    pgraph_init_reg_dynamic_masks(
+        OPT_DYNAMIC_DEPTH_STENCIL && r->extended_dynamic_state_supported,
+        OPT_DYNAMIC_BLEND && r->eds3_blend_supported);
+#endif
+
     vkGetDeviceQueue(r->device, indices.queue_family, 0, &r->queue);
     return true;
 }

@@ -78,6 +78,7 @@
 #define OPT_VALIDATE_GEN_COUNTERS 0
 #define OPT_REORDER_SAFE_WINDOWS 1
 #define REORDER_WINDOW_MAX       64
+#define OPT_DYNAMIC_REG_FILTER   1
 #define OPT_BINDLESS_TEXTURES    1
 #define MAX_BINDLESS_TEXTURES    1024
 
@@ -745,6 +746,7 @@ typedef struct PGRAPHVkState {
     uint32_t last_shader_state_gen;
     uint32_t last_pipeline_state_gen;
     uint32_t last_any_reg_gen;
+    uint32_t last_non_dynamic_reg_gen;
     uint32_t sync_range_attr_gen;
     uint32_t sync_range_min;
     uint32_t sync_range_max;

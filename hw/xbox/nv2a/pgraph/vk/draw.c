@@ -45,7 +45,7 @@ static void opt_stats_log_and_reset(void)
     if (++frame_counter % 60 == 0) {
 #ifdef __ANDROID__
         __android_log_print(ANDROID_LOG_INFO, "xemu-sfp",
-                "SFP:%d/%d BLtx:%d miss: clr%d noPl%d noCb%d noRp%d noFb%d fbD%d shC%d piD%d dsR%d uni%d noDs%d tG%d rG%d prD%d vG%d tV%d",
+                "SFP:%d/%d BLtx:%d miss: clr%d noPl%d noCb%d noRp%d noFb%d fbD%d shC%d piD%d dsR%d uni%d noDs%d tG%d ndG%d prD%d vG%d tV%d",
                 g_opt_stats.super_fast_hits,
                 g_opt_stats.super_fast_misses,
                 g_opt_stats.bindless_tex_fast,
@@ -991,6 +991,7 @@ static void create_pipeline(PGRAPHState *pg)
     r->last_pipeline_state_gen = pg->pipeline_state_gen;
     r->last_shader_state_gen = pg->shader_state_gen;
     r->last_any_reg_gen = pg->any_reg_gen;
+    r->last_non_dynamic_reg_gen = pg->non_dynamic_reg_gen;
     r->last_texture_vram_gen = r->texture_vram_gen;
 
     if (r->pipeline_binding && !pipeline_dirty) {
@@ -2130,7 +2131,11 @@ static void begin_pre_draw(PGRAPHState *pg)
 #else
         else if (pg->texture_state_gen != r->last_texture_state_gen) { OPT_STAT_INC(sfp_miss_tex_gen); sfp_ok = false; }
 #endif
+#if OPT_DYNAMIC_REG_FILTER
+        else if (pg->non_dynamic_reg_gen != r->last_non_dynamic_reg_gen) { OPT_STAT_INC(sfp_miss_reg_gen); sfp_ok = false; }
+#else
         else if (pg->any_reg_gen != r->last_any_reg_gen) { OPT_STAT_INC(sfp_miss_reg_gen); sfp_ok = false; }
+#endif
         else if (pg->program_data_dirty) { OPT_STAT_INC(sfp_miss_prog_dirty); sfp_ok = false; }
         else if (pg->vertex_attr_gen != r->pipeline_vertex_attr_gen) { OPT_STAT_INC(sfp_miss_vtx_gen); sfp_ok = false; }
 
@@ -2167,13 +2172,15 @@ static void begin_pre_draw(PGRAPHState *pg)
                     OPT_STAT_INC(bindless_tex_fast);
                 }
 #if OPT_VALIDATE_GEN_COUNTERS
-                else {
+                else if (!r->bindless_textures_supported) {
                     assert(!pgraph_has_dirty_regs(pg));
                 }
 #endif
 #elif OPT_VALIDATE_GEN_COUNTERS
                 assert(!pgraph_has_dirty_regs(pg));
 #endif
+                r->last_any_reg_gen = pg->any_reg_gen;
+                r->last_non_dynamic_reg_gen = pg->non_dynamic_reg_gen;
                 OPT_STAT_INC(super_fast_hits);
                 r->pre_draw_skipped = true;
                 return;
@@ -2197,8 +2204,7 @@ static void begin_pre_draw(PGRAPHState *pg)
         !r->uniforms_changed &&
         !pg->program_data_dirty &&
         pg->vertex_attr_gen == r->pipeline_vertex_attr_gen &&
-        pg->shader_state_gen == r->last_shader_state_gen &&
-        pg->pipeline_state_gen == r->last_pipeline_state_gen &&
+        pg->non_dynamic_reg_gen == r->last_non_dynamic_reg_gen &&
         (pg->texture_state_gen != r->last_texture_state_gen ||
          r->texture_vram_gen != r->last_texture_vram_gen)) {
         NV2A_VK_DGROUP_BEGIN("bindless-tex-fast-path");
@@ -2207,6 +2213,7 @@ static void begin_pre_draw(PGRAPHState *pg)
         r->last_texture_state_gen = pg->texture_state_gen;
         r->last_texture_vram_gen = r->texture_vram_gen;
         r->last_any_reg_gen = pg->any_reg_gen;
+        r->last_non_dynamic_reg_gen = pg->non_dynamic_reg_gen;
         push_texture_indices(pg);
         r->pre_draw_skipped = true;
         NV2A_VK_DGROUP_END();
