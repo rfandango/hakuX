@@ -812,7 +812,7 @@ void pgraph_gl_init_textures(NV2AState *d)
     PGRAPHGLState *r = pg->gl_renderer_state;
 
     const size_t texture_cache_size = 512;
-    lru_init(&r->texture_cache);
+    lru_init(&r->texture_cache, 1024);
     r->texture_cache_entries = malloc(texture_cache_size * sizeof(TextureLruNode));
     assert(r->texture_cache_entries != NULL);
     for (int i = 0; i < texture_cache_size; i++) {
@@ -833,6 +833,7 @@ void pgraph_gl_finalize_textures(PGRAPHState *pg)
     }
 
     lru_flush(&r->texture_cache);
+    lru_destroy(&r->texture_cache);
     free(r->texture_cache_entries);
 
     r->texture_cache_entries = NULL;

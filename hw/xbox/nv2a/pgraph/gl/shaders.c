@@ -551,7 +551,7 @@ void pgraph_gl_init_shaders(PGRAPHState *pg)
 
     /* FIXME: Make this configurable */
     const size_t shader_cache_size = 50*1024;
-    lru_init(&r->shader_cache);
+    lru_init(&r->shader_cache, 1 << 16);
     r->shader_cache_entries = malloc(shader_cache_size * sizeof(ShaderBinding));
     assert(r->shader_cache_entries != NULL);
     for (int i = 0; i < shader_cache_size; i++) {
@@ -567,7 +567,7 @@ void pgraph_gl_init_shaders(PGRAPHState *pg)
 
     /* FIXME: Make this configurable */
     const size_t shader_module_cache_size = 50*1024;
-    lru_init(&r->shader_module_cache);
+    lru_init(&r->shader_module_cache, 1 << 16);
     r->shader_module_cache_entries =
         g_malloc_n(shader_module_cache_size, sizeof(ShaderModuleCacheEntry));
     assert(r->shader_module_cache_entries != NULL);
@@ -586,10 +586,12 @@ void pgraph_gl_finalize_shaders(PGRAPHState *pg)
 
     // Clear out shader cache
     pgraph_gl_shader_write_cache_reload_list(pg); // FIXME: also flushes, rename for clarity
+    lru_destroy(&r->shader_cache);
     free(r->shader_cache_entries);
     r->shader_cache_entries = NULL;
 
     lru_flush(&r->shader_module_cache);
+    lru_destroy(&r->shader_module_cache);
     g_free(r->shader_module_cache_entries);
     r->shader_module_cache_entries = NULL;
 

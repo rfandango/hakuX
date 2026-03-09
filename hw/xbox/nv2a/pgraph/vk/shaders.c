@@ -726,7 +726,7 @@ static void shader_cache_init(PGRAPHState *pg)
     PGRAPHVkState *r = pg->vk_renderer_state;
 
     const size_t shader_cache_size = 1024;
-    lru_init(&r->shader_cache);
+    lru_init(&r->shader_cache, 2048);
     r->shader_cache_entries = g_malloc_n(shader_cache_size, sizeof(ShaderBinding));
     assert(r->shader_cache_entries != NULL);
     for (int i = 0; i < shader_cache_size; i++) {
@@ -738,7 +738,7 @@ static void shader_cache_init(PGRAPHState *pg)
 
     /* FIXME: Make this configurable */
     const size_t shader_module_cache_size = 50 * 1024;
-    lru_init(&r->shader_module_cache);
+    lru_init(&r->shader_module_cache, 1 << 16);
     r->shader_module_cache_entries =
         g_malloc_n(shader_module_cache_size, sizeof(ShaderModuleCacheEntry));
     assert(r->shader_module_cache_entries != NULL);
@@ -786,10 +786,12 @@ static void shader_cache_finalize(PGRAPHState *pg)
     PGRAPHVkState *r = pg->vk_renderer_state;
 
     lru_flush(&r->shader_cache);
+    lru_destroy(&r->shader_cache);
     g_free(r->shader_cache_entries);
     r->shader_cache_entries = NULL;
 
     lru_flush(&r->shader_module_cache);
+    lru_destroy(&r->shader_module_cache);
     g_free(r->shader_module_cache_entries);
     r->shader_module_cache_entries = NULL;
 }

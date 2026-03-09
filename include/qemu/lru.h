@@ -27,9 +27,10 @@
 
 #include <assert.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include "qemu/queue.h"
 
-#define LRU_NUM_BINS (1<<16)
+typedef QTAILQ_HEAD(, LruNode) LruBinHead;
 
 typedef struct LruNode {
 	QTAILQ_ENTRY(LruNode) next_global;
@@ -41,7 +42,8 @@ typedef struct Lru Lru;
 
 struct Lru {
 	QTAILQ_HEAD(, LruNode) global;
-	QTAILQ_HEAD(, LruNode) bins[LRU_NUM_BINS];
+	LruBinHead *bins;
+	unsigned int num_bins;
 	int num_used;
 	int num_free;
 
@@ -59,10 +61,14 @@ struct Lru {
 };
 
 static inline
-void lru_init(Lru *lru)
+void lru_init(Lru *lru, unsigned int num_bins)
 {
+	assert(num_bins > 0);
 	QTAILQ_INIT(&lru->global);
-	for (unsigned int i = 0; i < LRU_NUM_BINS; i++) {
+	lru->num_bins = num_bins;
+	lru->bins = (LruBinHead *)calloc(num_bins, sizeof(LruBinHead));
+	assert(lru->bins != NULL);
+	for (unsigned int i = 0; i < num_bins; i++) {
 		QTAILQ_INIT(&lru->bins[i]);
 	}
 	lru->init_node = NULL;
@@ -71,6 +77,14 @@ void lru_init(Lru *lru)
 	lru->post_node_evict = NULL;
 	lru->num_free = 0;
 	lru->num_used = 0;
+}
+
+static inline
+void lru_destroy(Lru *lru)
+{
+	free(lru->bins);
+	lru->bins = NULL;
+	lru->num_bins = 0;
 }
 
 static inline
@@ -84,7 +98,7 @@ void lru_add_free(Lru *lru, LruNode *node)
 static inline
 unsigned int lru_hash_to_bin(Lru *lru, uint64_t hash)
 {
-	return hash % LRU_NUM_BINS;
+	return hash % lru->num_bins;
 }
 
 static inline
@@ -217,7 +231,7 @@ void lru_flush(Lru *lru)
 {
 	LruNode *iter, *iter_next;
 
-	for (unsigned int bin = 0; bin < LRU_NUM_BINS; bin++) {
+	for (unsigned int bin = 0; bin < lru->num_bins; bin++) {
 		QTAILQ_FOREACH_SAFE(iter, &lru->bins[bin], next_bin, iter_next) {
 			bool can_evict = true;
 			if (lru->pre_node_evict) {
@@ -239,7 +253,7 @@ void lru_visit_active(Lru *lru, LruNodeVisitorFunc visitor_func, void *opaque)
 {
 	LruNode *iter, *iter_next;
 
-	for (unsigned int bin = 0; bin < LRU_NUM_BINS; bin++) {
+	for (unsigned int bin = 0; bin < lru->num_bins; bin++) {
 		QTAILQ_FOREACH_SAFE(iter, &lru->bins[bin], next_bin, iter_next) {
 			visitor_func(lru, iter, opaque);
 		}

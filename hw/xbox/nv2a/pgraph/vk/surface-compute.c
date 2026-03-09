@@ -686,8 +686,8 @@ static bool pipeline_cache_entry_compare(Lru *lru, LruNode *node,
 
 static void pipeline_cache_init(PGRAPHVkState *r)
 {
-    const size_t pipeline_cache_size = 100; // FIXME: Trim
-    lru_init(&r->compute.pipeline_cache);
+    const size_t pipeline_cache_size = 100;
+    lru_init(&r->compute.pipeline_cache, 256);
     r->compute.pipeline_cache_entries = g_malloc_n(pipeline_cache_size, sizeof(ComputePipeline));
     assert(r->compute.pipeline_cache_entries != NULL);
     for (int i = 0; i < pipeline_cache_size; i++) {
@@ -701,6 +701,7 @@ static void pipeline_cache_init(PGRAPHVkState *r)
 static void pipeline_cache_finalize(PGRAPHVkState *r)
 {
     lru_flush(&r->compute.pipeline_cache);
+    lru_destroy(&r->compute.pipeline_cache);
     g_free(r->compute.pipeline_cache_entries);
     r->compute.pipeline_cache_entries = NULL;
 }

@@ -252,7 +252,7 @@ void pgraph_gl_init_buffers(NV2AState *d)
     PGRAPHState *pg = &d->pgraph;
     PGRAPHGLState *r = pg->gl_renderer_state;
 
-    lru_init(&r->element_cache);
+    lru_init(&r->element_cache, 1 << 16);
     r->element_cache_entries = g_malloc_n(element_cache_size, sizeof(VertexLruNode));
     assert(r->element_cache_entries != NULL);
     GLuint element_cache_buffers[element_cache_size];
@@ -295,6 +295,7 @@ void pgraph_gl_finalize_buffers(PGRAPHState *pg)
     }
     glDeleteBuffers(element_cache_size, element_cache_buffers);
     lru_flush(&r->element_cache);
+    lru_destroy(&r->element_cache);
 
     g_free(r->element_cache_entries);
     r->element_cache_entries = NULL;

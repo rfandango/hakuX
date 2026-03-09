@@ -270,7 +270,7 @@ static void init_pipeline_cache(PGRAPHState *pg)
     g_free(initial_data);
 
     const size_t pipeline_cache_size = 2048;
-    lru_init(&r->pipeline_cache);
+    lru_init(&r->pipeline_cache, 4096);
     r->pipeline_cache_entries =
         g_malloc_n(pipeline_cache_size, sizeof(PipelineBinding));
     assert(r->pipeline_cache_entries != NULL);
@@ -329,6 +329,7 @@ static void finalize_pipeline_cache(PGRAPHState *pg)
     }
 
     lru_flush(&r->pipeline_cache);
+    lru_destroy(&r->pipeline_cache);
     g_free(r->pipeline_cache_entries);
     r->pipeline_cache_entries = NULL;
 

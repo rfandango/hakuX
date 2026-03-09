@@ -1876,7 +1876,7 @@ static bool texture_cache_entry_compare(Lru *lru, LruNode *node,
 static void texture_cache_init(PGRAPHVkState *r)
 {
     const size_t texture_cache_size = 1024;
-    lru_init(&r->texture_cache);
+    lru_init(&r->texture_cache, 2048);
     QTAILQ_INIT(&r->texture_active_list);
     r->texture_cache_entries = g_malloc_n(texture_cache_size, sizeof(TextureBinding));
     assert(r->texture_cache_entries != NULL);
@@ -1893,6 +1893,7 @@ static void texture_cache_init(PGRAPHVkState *r)
 static void texture_cache_finalize(PGRAPHVkState *r)
 {
     lru_flush(&r->texture_cache);
+    lru_destroy(&r->texture_cache);
     g_free(r->texture_cache_entries);
     r->texture_cache_entries = NULL;
 }
