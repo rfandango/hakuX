@@ -162,8 +162,6 @@ static void create_bindless_descriptor_resources(PGRAPHState *pg)
             VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
             VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
     }
-    bl_flags[2] |= VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
-
     VkDescriptorSetLayoutBindingFlagsCreateInfo flags_info = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
         .bindingCount = 3,
@@ -218,15 +216,8 @@ static void create_bindless_descriptor_resources(PGRAPHState *pg)
                                     &r->bindless_descriptor_pool));
 
     /* Allocate the single bindless descriptor set */
-    uint32_t variable_count = MAX_BINDLESS_TEXTURES;
-    VkDescriptorSetVariableDescriptorCountAllocateInfo var_count_info = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO,
-        .descriptorSetCount = 1,
-        .pDescriptorCounts = &variable_count,
-    };
     VkDescriptorSetAllocateInfo bl_alloc = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .pNext = &var_count_info,
         .descriptorPool = r->bindless_descriptor_pool,
         .descriptorSetCount = 1,
         .pSetLayouts = &r->bindless_set_layout,

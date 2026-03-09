@@ -35,6 +35,8 @@ extern "C" void xemu_set_fp_jit(bool enable);
 extern "C" bool xemu_get_fp_jit(void);
 extern "C" void xemu_set_draw_reorder(bool enable);
 extern "C" bool xemu_get_draw_reorder(void);
+extern "C" void xemu_set_bindless_textures(bool enable);
+extern "C" bool xemu_get_bindless_textures(void);
 extern "C" void xemu_set_submit_frames(int count);
 extern "C" int xemu_get_submit_frames(void);
 
@@ -762,6 +764,11 @@ static SetupFiles SyncSetupFiles() {
   __android_log_print(ANDROID_LOG_INFO, "xemu-android",
                       "draw reorder: %s", draw_reorder ? "ON" : "OFF");
 
+  bool bindless_tex = GetPrefBool(env, activity, "bindless_textures", false);
+  xemu_set_bindless_textures(bindless_tex);
+  __android_log_print(ANDROID_LOG_INFO, "xemu-android",
+                      "bindless textures: %s", bindless_tex ? "ON" : "OFF");
+
   int submit_frames = GetPrefInt(env, activity, "submit_frames", 3);
   xemu_set_submit_frames(submit_frames);
   __android_log_print(ANDROID_LOG_INFO, "xemu-android",
@@ -1262,6 +1269,18 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_rfandango_xemuandroid_SettingsActivity_nativeSetDrawReorder(JNIEnv *, jobject, jboolean enable)
 {
     xemu_set_draw_reorder(enable == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_rfandango_xemuandroid_SettingsActivity_nativeGetBindlessTextures(JNIEnv *, jobject)
+{
+    return xemu_get_bindless_textures() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_rfandango_xemuandroid_SettingsActivity_nativeSetBindlessTextures(JNIEnv *, jobject, jboolean enable)
+{
+    xemu_set_bindless_textures(enable == JNI_TRUE);
 }
 
 extern "C" JNIEXPORT jint JNICALL

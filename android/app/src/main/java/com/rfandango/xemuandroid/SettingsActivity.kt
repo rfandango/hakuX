@@ -127,6 +127,17 @@ class SettingsActivity : AppCompatActivity() {
       try { nativeSetDrawReorder(checked) } catch (_: Throwable) {}
     }
 
+    val switchBindless = findViewById<MaterialSwitch>(R.id.switch_bindless_textures)
+    try {
+      switchBindless.isChecked = nativeGetBindlessTextures()
+    } catch (_: Throwable) {
+      switchBindless.isChecked = prefs.getBoolean("bindless_textures", false)
+    }
+    switchBindless.setOnCheckedChangeListener { _, checked ->
+      prefs.edit().putBoolean("bindless_textures", checked).apply()
+      try { nativeSetBindlessTextures(checked) } catch (_: Throwable) {}
+    }
+
     setupSubmitFramesPicker()
 
     val switchValidation = findViewById<MaterialSwitch>(R.id.switch_validation_layers)
@@ -472,6 +483,8 @@ class SettingsActivity : AppCompatActivity() {
   private external fun nativeSetFastFences(enable: Boolean)
   private external fun nativeGetDrawReorder(): Boolean
   private external fun nativeSetDrawReorder(enable: Boolean)
+  private external fun nativeGetBindlessTextures(): Boolean
+  private external fun nativeSetBindlessTextures(enable: Boolean)
   private external fun nativeGetSubmitFrames(): Int
   private external fun nativeSetSubmitFrames(count: Int)
 

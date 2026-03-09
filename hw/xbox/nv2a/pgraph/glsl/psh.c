@@ -852,9 +852,9 @@ static MString* psh_convert(struct PixelShader *ps)
 
     if (ps->opts.bindless) {
         mstring_append(preflight,
-            "layout(set = 0, binding = 0) uniform sampler2D texArray2D[];\n"
-            "layout(set = 0, binding = 1) uniform sampler3D texArray3D[];\n"
-            "layout(set = 0, binding = 2) uniform samplerCube texArrayCube[];\n");
+            "layout(set = 0, binding = 0) uniform sampler2D texArray2D[1024];\n"
+            "layout(set = 0, binding = 1) uniform sampler3D texArray3D[1024];\n"
+            "layout(set = 0, binding = 2) uniform samplerCube texArrayCube[1024];\n");
         mstring_append_fmt(preflight,
             "layout(push_constant) uniform TexPushData {\n"
             "    layout(offset = %d) uint texIdx[4];\n"
@@ -1541,10 +1541,6 @@ static MString* psh_convert(struct PixelShader *ps)
     MString *final = mstring_new();
     pgraph_glsl_append_version(final, ps->opts.vulkan, ps->opts.gles,
                                ps->opts.gles_version);
-    if (ps->opts.bindless) {
-        mstring_append(final,
-            "#extension GL_EXT_nonuniform_qualifier : enable\n\n");
-    }
     mstring_append(final, mstring_get_str(preflight));
     mstring_append(final, "void main() {\n");
     mstring_append(final, mstring_get_str(clip));

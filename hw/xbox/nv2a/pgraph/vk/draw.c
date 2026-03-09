@@ -34,6 +34,7 @@
 
 static bool g_xemu_fast_fences = false;
 static bool g_xemu_draw_reorder = false;
+static bool g_xemu_bindless_textures = false;
 static int g_xemu_submit_frames = 3;
 
 struct OptBisectStats g_opt_stats;
@@ -139,6 +140,16 @@ void xemu_set_draw_reorder(bool enable)
 bool xemu_get_draw_reorder(void)
 {
     return g_xemu_draw_reorder;
+}
+
+void xemu_set_bindless_textures(bool enable)
+{
+    g_xemu_bindless_textures = enable;
+}
+
+bool xemu_get_bindless_textures(void)
+{
+    return g_xemu_bindless_textures;
 }
 
 void xemu_set_submit_frames(int count)
