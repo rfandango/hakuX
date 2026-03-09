@@ -321,11 +321,9 @@ void nv2a_profile_get_cpu_timing_str(char *buf, int bufsize)
     float spin_pct = p->kick_count > 0
                      ? p->kick_count_spun / p->kick_count * 100.0f
                      : 0.0f;
-    float parse_ms = p->pusher_run_ms - p->puller_total_ms;
     snprintf(buf, bufsize,
              "CPU: K:%.0f W:%.1fK M:%.0f(Fh:%.0f Ni:%.0f) "
              "Lock:%.1fms Push:%.1fms "
-             "[Prs:%.1f Plr:%.1f(Lk:%.1f Mth:%.1f)] "
              "SpH:%.0f%% TbH:%.1f%%",
              p->kick_count,
              p->pusher_words / 1000.0f,
@@ -334,10 +332,6 @@ void nv2a_profile_get_cpu_timing_str(char *buf, int bufsize)
              p->method_noninc_words,
              p->lock_wait_ms,
              p->pusher_run_ms,
-             parse_ms,
-             p->puller_total_ms,
-             p->puller_lock_ms,
-             p->puller_method_ms,
              spin_pct,
              p->tb_hit_pct);
 }

@@ -346,24 +346,30 @@ void nv2a_profile_get_surf_timing_str(char *buf, int bufsize);
 void nv2a_profile_get_workload_str(char *buf, int bufsize);
 
 #ifndef NV2A_PERF_LOG
-#define NV2A_PERF_LOG 1
+#define NV2A_PERF_LOG 0
 #endif
 
 /*
  * Fast nanosecond clock for per-frame phase timing.
- * On ARM64, reads the generic timer directly (~10ns) instead of going
- * through clock_gettime (~100ns+).  The frequency is read once and cached.
+ * On ARM64, reads the generic timer directly via cntvct_el0.
+ * A fixed-point multiplier (precomputed from cntfrq_el0) converts ticks
+ * to nanoseconds with a single multiply + shift, avoiding a costly
+ * 64-bit udiv on every call.
  */
 #if defined(__aarch64__)
 static inline int64_t nv2a_clock_ns(void)
 {
-    static uint64_t freq;
-    if (__builtin_expect(!freq, 0)) {
+    static uint64_t ns_mult;
+    static unsigned int ns_shift;
+    if (__builtin_expect(!ns_mult, 0)) {
+        uint64_t freq;
         asm volatile("mrs %0, cntfrq_el0" : "=r"(freq));
+        ns_shift = 32;
+        ns_mult = ((uint64_t)1000000000ULL << ns_shift) / freq;
     }
     uint64_t cnt;
     asm volatile("mrs %0, cntvct_el0" : "=r"(cnt));
-    return (int64_t)(cnt * 1000000000ULL / freq);
+    return (int64_t)(((__uint128_t)cnt * ns_mult) >> ns_shift);
 }
 #else
 static inline int64_t nv2a_clock_ns(void)
