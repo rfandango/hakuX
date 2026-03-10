@@ -138,6 +138,17 @@ class SettingsActivity : AppCompatActivity() {
       try { nativeSetBindlessTextures(checked) } catch (_: Throwable) {}
     }
 
+    val switchAsyncCompile = findViewById<MaterialSwitch>(R.id.switch_async_compile)
+    try {
+      switchAsyncCompile.isChecked = nativeGetAsyncCompile()
+    } catch (_: Throwable) {
+      switchAsyncCompile.isChecked = prefs.getBoolean("async_compile", false)
+    }
+    switchAsyncCompile.setOnCheckedChangeListener { _, checked ->
+      prefs.edit().putBoolean("async_compile", checked).apply()
+      try { nativeSetAsyncCompile(checked) } catch (_: Throwable) {}
+    }
+
     setupSubmitFramesPicker()
 
     val switchValidation = findViewById<MaterialSwitch>(R.id.switch_validation_layers)
@@ -485,6 +496,8 @@ class SettingsActivity : AppCompatActivity() {
   private external fun nativeSetDrawReorder(enable: Boolean)
   private external fun nativeGetBindlessTextures(): Boolean
   private external fun nativeSetBindlessTextures(enable: Boolean)
+  private external fun nativeGetAsyncCompile(): Boolean
+  private external fun nativeSetAsyncCompile(enable: Boolean)
   private external fun nativeGetSubmitFrames(): Int
   private external fun nativeSetSubmitFrames(count: Int)
 

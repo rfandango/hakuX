@@ -23,6 +23,10 @@
 #include "renderer.h"
 #include "ui/xemu-settings.h"
 
+#if OPT_ASYNC_COMPILE
+extern bool xemu_get_async_compile(void);
+#endif
+
 #define VSH_UBO_BINDING 0
 #define PSH_UBO_BINDING 1
 #define PSH_TEX_BINDING 2
@@ -286,6 +290,13 @@ void pgraph_vk_update_descriptor_sets(PGRAPHState *pg)
     PGRAPHVkState *r = pg->vk_renderer_state;
 
     ShaderBinding *binding = r->shader_binding;
+
+#if OPT_ASYNC_COMPILE
+    if (!qatomic_read(&binding->ready)) {
+        return;
+    }
+#endif
+
     ShaderUniformLayout *layouts[] = { &binding->vsh.module_info->uniforms,
                                        &binding->psh.module_info->uniforms };
 
@@ -548,17 +559,109 @@ static int compare_shader_module_key(const ShaderModuleCacheKey *a,
     }
 }
 
+static ShaderModuleCacheEntry *
+get_shader_module_entry_for_key(PGRAPHVkState *r,
+                                const ShaderModuleCacheKey *key)
+{
+    uint64_t hash = hash_shader_module_key(key);
+    LruNode *node = lru_lookup(&r->shader_module_cache, hash, key);
+    return container_of(node, ShaderModuleCacheEntry, node);
+}
+
 static ShaderModuleInfo *
 get_and_ref_shader_module_for_key(PGRAPHVkState *r,
                                   const ShaderModuleCacheKey *key)
 {
-    uint64_t hash = hash_shader_module_key(key);
-    LruNode *node = lru_lookup(&r->shader_module_cache, hash, key);
-    ShaderModuleCacheEntry *module =
-        container_of(node, ShaderModuleCacheEntry, node);
-    pgraph_vk_ref_shader_module(module->module_info);
-    return module->module_info;
+    ShaderModuleCacheEntry *entry = get_shader_module_entry_for_key(r, key);
+    pgraph_vk_ref_shader_module(entry->module_info);
+    return entry->module_info;
 }
+
+static void shader_binding_build_module_keys(
+    PGRAPHVkState *r, ShaderBinding *binding,
+    ShaderModuleCacheKey *vsh_key, ShaderModuleCacheKey *geom_key,
+    ShaderModuleCacheKey *psh_key, bool *need_geom)
+{
+    *need_geom = pgraph_glsl_need_geom(&binding->state.geom);
+
+    if (*need_geom) {
+        memset(geom_key, 0, sizeof(*geom_key));
+        geom_key->kind = VK_SHADER_STAGE_GEOMETRY_BIT;
+        geom_key->geom.state = binding->state.geom;
+        geom_key->geom.glsl_opts.vulkan = true;
+    }
+
+    memset(vsh_key, 0, sizeof(*vsh_key));
+    vsh_key->kind = VK_SHADER_STAGE_VERTEX_BIT;
+    vsh_key->vsh.state = binding->state.vsh;
+    vsh_key->vsh.glsl_opts.vulkan = true;
+    vsh_key->vsh.glsl_opts.prefix_outputs = *need_geom;
+    vsh_key->vsh.glsl_opts.use_push_constants_for_uniform_attrs =
+        r->use_push_constants_for_uniform_attrs;
+#if OPT_BINDLESS_TEXTURES
+    if (r->bindless_textures_supported) {
+        vsh_key->vsh.glsl_opts.ubo_binding = 0;
+        vsh_key->vsh.glsl_opts.ubo_set = 1;
+        vsh_key->vsh.glsl_opts.vertex_push_offset =
+            (r->tex_push_offset == 0)
+                ? (int)(NV2A_MAX_TEXTURES * sizeof(uint32_t))
+                : 0;
+    } else
+#endif
+    {
+        vsh_key->vsh.glsl_opts.ubo_binding = VSH_UBO_BINDING;
+    }
+
+    memset(psh_key, 0, sizeof(*psh_key));
+    psh_key->kind = VK_SHADER_STAGE_FRAGMENT_BIT;
+    psh_key->psh.state = binding->state.psh;
+    psh_key->psh.glsl_opts.vulkan = true;
+#if OPT_BINDLESS_TEXTURES
+    if (r->bindless_textures_supported) {
+        psh_key->psh.glsl_opts.ubo_binding = 1;
+        psh_key->psh.glsl_opts.ubo_set = 1;
+        psh_key->psh.glsl_opts.bindless = true;
+        psh_key->psh.glsl_opts.tex_push_offset = r->tex_push_offset;
+    } else
+#endif
+    {
+        psh_key->psh.glsl_opts.ubo_binding = PSH_UBO_BINDING;
+    }
+    psh_key->psh.glsl_opts.tex_binding = PSH_TEX_BINDING;
+}
+
+#if OPT_ASYNC_COMPILE
+static bool try_finalize_shader_binding(PGRAPHVkState *r,
+                                        ShaderBinding *binding)
+{
+    ShaderModuleCacheEntry *vsh_entry = binding->pending_vsh_entry;
+    ShaderModuleCacheEntry *geom_entry = binding->pending_geom_entry;
+    ShaderModuleCacheEntry *psh_entry = binding->pending_psh_entry;
+
+    if (!qatomic_read(&vsh_entry->ready)) return false;
+    if (geom_entry && !qatomic_read(&geom_entry->ready)) return false;
+    if (!qatomic_read(&psh_entry->ready)) return false;
+
+    pgraph_vk_ref_shader_module(vsh_entry->module_info);
+    binding->vsh.module_info = vsh_entry->module_info;
+    if (geom_entry) {
+        pgraph_vk_ref_shader_module(geom_entry->module_info);
+        binding->geom.module_info = geom_entry->module_info;
+    } else {
+        binding->geom.module_info = NULL;
+    }
+    pgraph_vk_ref_shader_module(psh_entry->module_info);
+    binding->psh.module_info = psh_entry->module_info;
+
+    update_shader_uniform_locs(binding);
+
+    binding->pending_vsh_entry = NULL;
+    binding->pending_geom_entry = NULL;
+    binding->pending_psh_entry = NULL;
+    qatomic_set(&binding->ready, true);
+    return true;
+}
+#endif
 
 static void shader_cache_entry_init(Lru *lru, LruNode *node, const void *state)
 {
@@ -570,58 +673,59 @@ static void shader_cache_entry_init(Lru *lru, LruNode *node, const void *state)
     nv2a_profile_inc_counter(NV2A_PROF_SHADER_GEN);
     g_nv2a_stats.shader_stats.shader_cache_misses++;
 
-    ShaderModuleCacheKey key;
+    ShaderModuleCacheKey vsh_key, geom_key, psh_key;
+    bool need_geom;
+    shader_binding_build_module_keys(r, binding, &vsh_key, &geom_key,
+                                     &psh_key, &need_geom);
 
-    bool need_geometry_shader = pgraph_glsl_need_geom(&binding->state.geom);
-    if (need_geometry_shader) {
-        memset(&key, 0, sizeof(key));
-        key.kind = VK_SHADER_STAGE_GEOMETRY_BIT;
-        key.geom.state = binding->state.geom;
-        key.geom.glsl_opts.vulkan = true;
-        binding->geom.module_info = get_and_ref_shader_module_for_key(r, &key);
+#if OPT_ASYNC_COMPILE
+    if (xemu_get_async_compile()) {
+        ShaderModuleCacheEntry *vsh_entry =
+            get_shader_module_entry_for_key(r, &vsh_key);
+        ShaderModuleCacheEntry *geom_entry = need_geom
+            ? get_shader_module_entry_for_key(r, &geom_key)
+            : NULL;
+        ShaderModuleCacheEntry *psh_entry =
+            get_shader_module_entry_for_key(r, &psh_key);
+
+        bool all_ready = qatomic_read(&vsh_entry->ready) &&
+                         (!geom_entry || qatomic_read(&geom_entry->ready)) &&
+                         qatomic_read(&psh_entry->ready);
+
+        if (all_ready) {
+            pgraph_vk_ref_shader_module(vsh_entry->module_info);
+            binding->vsh.module_info = vsh_entry->module_info;
+            if (geom_entry) {
+                pgraph_vk_ref_shader_module(geom_entry->module_info);
+                binding->geom.module_info = geom_entry->module_info;
+            } else {
+                binding->geom.module_info = NULL;
+            }
+            pgraph_vk_ref_shader_module(psh_entry->module_info);
+            binding->psh.module_info = psh_entry->module_info;
+            update_shader_uniform_locs(binding);
+            binding->ready = true;
+        } else {
+            binding->vsh.module_info = NULL;
+            binding->geom.module_info = NULL;
+            binding->psh.module_info = NULL;
+            binding->pending_vsh_entry = vsh_entry;
+            binding->pending_geom_entry = geom_entry;
+            binding->pending_psh_entry = psh_entry;
+            binding->ready = false;
+        }
+        return;
+    }
+    binding->ready = true;
+#endif
+
+    if (need_geom) {
+        binding->geom.module_info = get_and_ref_shader_module_for_key(r, &geom_key);
     } else {
         binding->geom.module_info = NULL;
     }
-
-    memset(&key, 0, sizeof(key));
-    key.kind = VK_SHADER_STAGE_VERTEX_BIT;
-    key.vsh.state = binding->state.vsh;
-    key.vsh.glsl_opts.vulkan = true;
-    key.vsh.glsl_opts.prefix_outputs = need_geometry_shader;
-    key.vsh.glsl_opts.use_push_constants_for_uniform_attrs =
-        r->use_push_constants_for_uniform_attrs;
-#if OPT_BINDLESS_TEXTURES
-    if (r->bindless_textures_supported) {
-        key.vsh.glsl_opts.ubo_binding = 0;
-        key.vsh.glsl_opts.ubo_set = 1;
-        key.vsh.glsl_opts.vertex_push_offset =
-            (r->tex_push_offset == 0)
-                ? (int)(NV2A_MAX_TEXTURES * sizeof(uint32_t))
-                : 0;
-    } else
-#endif
-    {
-        key.vsh.glsl_opts.ubo_binding = VSH_UBO_BINDING;
-    }
-    binding->vsh.module_info = get_and_ref_shader_module_for_key(r, &key);
-
-    memset(&key, 0, sizeof(key));
-    key.kind = VK_SHADER_STAGE_FRAGMENT_BIT;
-    key.psh.state = binding->state.psh;
-    key.psh.glsl_opts.vulkan = true;
-#if OPT_BINDLESS_TEXTURES
-    if (r->bindless_textures_supported) {
-        key.psh.glsl_opts.ubo_binding = 1;
-        key.psh.glsl_opts.ubo_set = 1;
-        key.psh.glsl_opts.bindless = true;
-        key.psh.glsl_opts.tex_push_offset = r->tex_push_offset;
-    } else
-#endif
-    {
-        key.psh.glsl_opts.ubo_binding = PSH_UBO_BINDING;
-    }
-    key.psh.glsl_opts.tex_binding = PSH_TEX_BINDING;
-    binding->psh.module_info = get_and_ref_shader_module_for_key(r, &key);
+    binding->vsh.module_info = get_and_ref_shader_module_for_key(r, &vsh_key);
+    binding->psh.module_info = get_and_ref_shader_module_for_key(r, &psh_key);
 
     update_shader_uniform_locs(binding);
 }
@@ -651,7 +755,7 @@ static bool shader_cache_entry_compare(Lru *lru, LruNode *node, const void *key)
 
 static bool shader_module_warmup_in_progress;
 
-static void shader_module_key_persist(const ShaderModuleCacheKey *key)
+void shader_module_key_persist(const ShaderModuleCacheKey *key)
 {
     if (!g_config.perf.cache_shaders || shader_module_warmup_in_progress) {
         return;
@@ -668,14 +772,9 @@ static void shader_module_key_persist(const ShaderModuleCacheKey *key)
     g_free(path);
 }
 
-static void shader_module_cache_entry_init(Lru *lru, LruNode *node,
-                                           const void *key)
+static void shader_module_compile_sync(PGRAPHVkState *r,
+                                       ShaderModuleCacheEntry *module)
 {
-    PGRAPHVkState *r = container_of(lru, PGRAPHVkState, shader_module_cache);
-    ShaderModuleCacheEntry *module =
-        container_of(node, ShaderModuleCacheEntry, node);
-    memcpy(&module->key, key, sizeof(ShaderModuleCacheKey));
-
     MString *code;
 
     switch (module->key.kind) {
@@ -704,13 +803,56 @@ static void shader_module_cache_entry_init(Lru *lru, LruNode *node,
     shader_module_key_persist(&module->key);
 }
 
+static void shader_module_cache_entry_init(Lru *lru, LruNode *node,
+                                           const void *key)
+{
+    PGRAPHVkState *r = container_of(lru, PGRAPHVkState, shader_module_cache);
+    ShaderModuleCacheEntry *module =
+        container_of(node, ShaderModuleCacheEntry, node);
+    memcpy(&module->key, key, sizeof(ShaderModuleCacheKey));
+
+#if OPT_ASYNC_COMPILE
+    if (xemu_get_async_compile()) {
+        module->module_info = NULL;
+        module->ready = false;
+
+        CompileJob *job = g_malloc0(sizeof(CompileJob));
+        job->type = COMPILE_JOB_SHADER_MODULE;
+        job->shader_module.target = module;
+        memcpy(&job->shader_module.key, key, sizeof(ShaderModuleCacheKey));
+        pgraph_vk_compile_worker_enqueue(r, job);
+        return;
+    }
+    module->ready = true;
+#endif
+
+    shader_module_compile_sync(r, module);
+}
+
+#if OPT_ASYNC_COMPILE
+static bool shader_module_cache_pre_evict(Lru *lru, LruNode *node)
+{
+    ShaderModuleCacheEntry *module =
+        container_of(node, ShaderModuleCacheEntry, node);
+    return qatomic_read(&module->ready);
+}
+
+static bool shader_cache_pre_evict(Lru *lru, LruNode *node)
+{
+    ShaderBinding *binding = container_of(node, ShaderBinding, node);
+    return qatomic_read(&binding->ready);
+}
+#endif
+
 static void shader_module_cache_entry_post_evict(Lru *lru, LruNode *node)
 {
     PGRAPHVkState *r = container_of(lru, PGRAPHVkState, shader_module_cache);
     ShaderModuleCacheEntry *module =
         container_of(node, ShaderModuleCacheEntry, node);
-    pgraph_vk_unref_shader_module(r, module->module_info);
-    module->module_info = NULL;
+    if (module->module_info) {
+        pgraph_vk_unref_shader_module(r, module->module_info);
+        module->module_info = NULL;
+    }
 }
 
 static bool shader_module_cache_entry_compare(Lru *lru, LruNode *node,
@@ -735,6 +877,9 @@ static void shader_cache_init(PGRAPHState *pg)
     r->shader_cache.init_node = shader_cache_entry_init;
     r->shader_cache.compare_nodes = shader_cache_entry_compare;
     r->shader_cache.post_node_evict = shader_cache_entry_post_evict;
+#if OPT_ASYNC_COMPILE
+    r->shader_cache.pre_node_evict = shader_cache_pre_evict;
+#endif
 
     /* FIXME: Make this configurable */
     const size_t shader_module_cache_size = 50 * 1024;
@@ -751,6 +896,9 @@ static void shader_cache_init(PGRAPHState *pg)
     r->shader_module_cache.compare_nodes = shader_module_cache_entry_compare;
     r->shader_module_cache.post_node_evict =
         shader_module_cache_entry_post_evict;
+#if OPT_ASYNC_COMPILE
+    r->shader_module_cache.pre_node_evict = shader_module_cache_pre_evict;
+#endif
 
     if (g_config.perf.cache_shaders) {
         const char *base = xemu_settings_get_base_path();
@@ -831,6 +979,13 @@ void pgraph_vk_update_shader_uniforms(PGRAPHState *pg)
 
     assert(r->shader_binding);
     ShaderBinding *binding = r->shader_binding;
+
+#if OPT_ASYNC_COMPILE
+    if (!qatomic_read(&binding->ready)) {
+        NV2A_VK_DGROUP_END();
+        return;
+    }
+#endif
 
     ShaderUniformLayout *vsh_layout = &binding->vsh.module_info->uniforms;
     ShaderUniformLayout *psh_layout = &binding->psh.module_info->uniforms;
@@ -926,6 +1081,12 @@ void pgraph_vk_bind_shaders(PGRAPHState *pg)
         nv2a_profile_inc_counter(NV2A_PROF_SHADER_BIND_NOTDIRTY);
     }
 
+#if OPT_ASYNC_COMPILE
+    if (r->shader_binding && !qatomic_read(&r->shader_binding->ready)) {
+        try_finalize_shader_binding(r, r->shader_binding);
+    }
+#endif
+
     pgraph_vk_update_shader_uniforms(pg);
 
     NV2A_VK_DGROUP_END();
@@ -942,6 +1103,9 @@ void pgraph_vk_init_shaders(PGRAPHState *pg)
     create_descriptor_sets(pg);
 #if OPT_BINDLESS_TEXTURES
     create_bindless_descriptor_resources(pg);
+#endif
+#if OPT_ASYNC_COMPILE
+    pgraph_vk_compile_worker_init(r);
 #endif
     shader_cache_init(pg);
 
@@ -961,6 +1125,14 @@ void pgraph_vk_init_shaders(PGRAPHState *pg)
 
 void pgraph_vk_finalize_shaders(PGRAPHState *pg)
 {
+    PGRAPHVkState *r = pg->vk_renderer_state;
+
+#if OPT_ASYNC_COMPILE
+    pgraph_vk_compile_worker_shutdown(r);
+#else
+    (void)r;
+#endif
+
     shader_cache_finalize(pg);
 #if OPT_BINDLESS_TEXTURES
     destroy_bindless_descriptor_resources(pg);

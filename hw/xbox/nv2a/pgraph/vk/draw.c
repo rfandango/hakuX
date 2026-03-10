@@ -35,6 +35,7 @@
 static bool g_xemu_fast_fences = false;
 static bool g_xemu_draw_reorder = false;
 static bool g_xemu_bindless_textures = false;
+static bool g_xemu_async_compile = false;
 static int g_xemu_submit_frames = 3;
 
 struct OptBisectStats g_opt_stats;
@@ -67,7 +68,7 @@ static void opt_stats_log_and_reset(void)
                 g_opt_stats.sfp_miss_vtx_gen,
                 g_opt_stats.sfp_miss_tex_vram);
         __android_log_print(ANDROID_LOG_INFO, "xemu-rw",
-                "RW:%d/%d/%d Safe:%d(L%d/LE%d) Rej:Bl%d Cw%d Dp%d Zw%d Zf%d St%d Al%d Ak%d Rt%d Fb%d Zp%d",
+                "RW:%d/%d/%d Safe:%d(L%d/LE%d) Rej:Bl%d Cw%d Dp%d Zw%d Zf%d St%d Al%d Ak%d Rt%d Fb%d Zp%d ASkip:%d",
                 g_opt_stats.reorder_windows_flushed,
                 g_opt_stats.reorder_draws_reordered,
                 g_opt_stats.reorder_pipeline_switches_saved,
@@ -84,7 +85,8 @@ static void opt_stats_log_and_reset(void)
                 g_opt_stats.reorder_reject_alphakill,
                 g_opt_stats.reorder_reject_rtt,
                 g_opt_stats.reorder_reject_fb_dirty,
-                g_opt_stats.reorder_reject_zpass);
+                g_opt_stats.reorder_reject_zpass,
+                g_opt_stats.draws_skipped_pending);
 #else
         DBG_LOG("[OPT-STATS] SFP:%d/%d PEX:%d/%d VTC:%d/%d DRS:%d/%d MDI:%d/%d"
                 " RW:%d/%d/%d"
@@ -152,6 +154,16 @@ bool xemu_get_bindless_textures(void)
     return g_xemu_bindless_textures;
 }
 
+void xemu_set_async_compile(bool enable)
+{
+    g_xemu_async_compile = enable;
+}
+
+bool xemu_get_async_compile(void)
+{
+    return g_xemu_async_compile;
+}
+
 void xemu_set_submit_frames(int count)
 {
     if (count < 1) count = 1;
@@ -217,6 +229,14 @@ static void pipeline_cache_entry_init(Lru *lru, LruNode *node,
     snode->draw_time = 0;
 }
 
+#if OPT_ASYNC_COMPILE
+static bool pipeline_cache_pre_evict(Lru *lru, LruNode *node)
+{
+    PipelineBinding *snode = container_of(node, PipelineBinding, node);
+    return !snode->pending;
+}
+#endif
+
 static void pipeline_cache_entry_post_evict(Lru *lru, LruNode *node)
 {
     PGRAPHVkState *r = container_of(lru, PGRAPHVkState, pipeline_cache);
@@ -226,11 +246,15 @@ static void pipeline_cache_entry_post_evict(Lru *lru, LruNode *node)
             snode->draw_time < r->command_buffer_start_time) &&
            "Pipeline evicted while in use!");
 
-    vkDestroyPipeline(r->device, snode->pipeline, NULL);
-    snode->pipeline = VK_NULL_HANDLE;
+    if (snode->pipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(r->device, snode->pipeline, NULL);
+        snode->pipeline = VK_NULL_HANDLE;
+    }
 
-    vkDestroyPipelineLayout(r->device, snode->layout, NULL);
-    snode->layout = VK_NULL_HANDLE;
+    if (snode->layout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(r->device, snode->layout, NULL);
+        snode->layout = VK_NULL_HANDLE;
+    }
 }
 
 static bool pipeline_cache_entry_compare(Lru *lru, LruNode *node,
@@ -281,6 +305,9 @@ static void init_pipeline_cache(PGRAPHState *pg)
     r->pipeline_cache.init_node = pipeline_cache_entry_init;
     r->pipeline_cache.compare_nodes = pipeline_cache_entry_compare;
     r->pipeline_cache.post_node_evict = pipeline_cache_entry_post_evict;
+#if OPT_ASYNC_COMPILE
+    r->pipeline_cache.pre_node_evict = pipeline_cache_pre_evict;
+#endif
 }
 
 static void save_pipeline_cache_to_disk(PGRAPHVkState *r)
@@ -1029,6 +1056,17 @@ static void create_pipeline(PGRAPHState *pg)
 
     LruNode *node = lru_lookup(&r->pipeline_cache, hash, &key);
     PipelineBinding *snode = container_of(node, PipelineBinding, node);
+
+#if OPT_ASYNC_COMPILE
+    if (snode->pending) {
+        r->pipeline_binding = snode;
+        r->pipeline_binding_changed = true;
+        NV2A_PHASE_TIMER_END(pipe_lookup);
+        NV2A_VK_DGROUP_END();
+        return;
+    }
+#endif
+
     if (snode->pipeline != VK_NULL_HANDLE) {
         NV2A_VK_DPRINTF("Cache hit");
         g_nv2a_stats.shader_stats.pipeline_cache_hits++;
@@ -1041,6 +1079,17 @@ static void create_pipeline(PGRAPHState *pg)
     NV2A_PHASE_TIMER_END(pipe_lookup);
 
     NV2A_VK_DPRINTF("Cache miss");
+
+#if OPT_ASYNC_COMPILE
+    if (xemu_get_async_compile() && !qatomic_read(&r->shader_binding->ready)) {
+        r->pipeline_binding = snode;
+        r->pipeline_binding_changed = true;
+        NV2A_PHASE_TIMER_END(pipe_lookup);
+        NV2A_VK_DGROUP_END();
+        return;
+    }
+#endif
+
     nv2a_profile_inc_counter(NV2A_PROF_PIPELINE_GEN);
     g_nv2a_stats.shader_stats.pipeline_cache_misses++;
     NV2A_PHASE_TIMER_BEGIN(shader_compile);
@@ -1395,6 +1444,55 @@ static void create_pipeline(PGRAPHState *pg)
     VK_CHECK(vkCreatePipelineLayout(r->device, &pipeline_layout_info, NULL,
                                     &layout));
 
+    VkRenderPass render_pass = get_render_pass(r, &key.render_pass_state);
+
+#if OPT_ASYNC_COMPILE
+    if (xemu_get_async_compile()) {
+        CompileJob *job = g_malloc0(sizeof(CompileJob));
+        job->type = COMPILE_JOB_PIPELINE;
+        job->pipeline.target = snode;
+        PipelineCreateParams *p = &job->pipeline.params;
+        p->device = r->device;
+        p->vk_pipeline_cache = r->vk_pipeline_cache;
+        memcpy(p->shader_stages, shader_stages,
+               num_active_shader_stages * sizeof(shader_stages[0]));
+        p->num_shader_stages = num_active_shader_stages;
+        memcpy(p->binding_descs, r->vertex_binding_descriptions,
+               r->num_active_vertex_binding_descriptions *
+                   sizeof(VkVertexInputBindingDescription));
+        memcpy(p->attr_descs, r->vertex_attribute_descriptions,
+               r->num_active_vertex_attribute_descriptions *
+                   sizeof(VkVertexInputAttributeDescription));
+        p->num_binding_descs = r->num_active_vertex_binding_descriptions;
+        p->num_attr_descs = r->num_active_vertex_attribute_descriptions;
+        p->topology = input_assembly.topology;
+        p->rasterizer = rasterizer;
+        p->depth_stencil = depth_stencil;
+        p->has_zeta = r->zeta_binding != NULL;
+        p->color_blend_attachment = color_blend_attachment;
+        p->has_color = r->color_binding != NULL;
+        memcpy(p->blend_constants, color_blending.blendConstants,
+               sizeof(p->blend_constants));
+        memcpy(p->dynamic_states, dynamic_states,
+               num_dynamic_states * sizeof(VkDynamicState));
+        p->num_dynamic_states = num_dynamic_states;
+        p->has_dynamic_line_width = snode->has_dynamic_line_width;
+        p->layout = layout;
+        p->render_pass = render_pass;
+
+        snode->draw_time = pg->draw_time;
+        snode->pending = true;
+        r->pipeline_binding = snode;
+        r->pipeline_binding_changed = true;
+
+        pgraph_vk_compile_worker_enqueue(r, job);
+
+        NV2A_PHASE_TIMER_END(shader_compile);
+        NV2A_VK_DGROUP_END();
+        return;
+    }
+#endif
+
     VkGraphicsPipelineCreateInfo pipeline_create_info = {
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .stageCount = num_active_shader_stages,
@@ -1408,7 +1506,7 @@ static void create_pipeline(PGRAPHState *pg)
         .pColorBlendState = &color_blending,
         .pDynamicState = &dynamic_state,
         .layout = layout,
-        .renderPass = get_render_pass(r, &key.render_pass_state),
+        .renderPass = render_pass,
         .subpass = 0,
         .basePipelineHandle = VK_NULL_HANDLE,
     };
@@ -1418,7 +1516,7 @@ static void create_pipeline(PGRAPHState *pg)
 
     snode->pipeline = pipeline;
     snode->layout = layout;
-    snode->render_pass = pipeline_create_info.renderPass;
+    snode->render_pass = render_pass;
     snode->draw_time = pg->draw_time;
 
     r->pipeline_binding = snode;
@@ -2293,6 +2391,27 @@ static void begin_pre_draw(PGRAPHState *pg)
     }
     r->pipeline_vertex_attr_gen = pg->vertex_attr_gen;
     NV2A_PHASE_TIMER_END(draw_pipeline);
+
+#if OPT_ASYNC_COMPILE
+    r->async_draw_skip = false;
+    if (!pg->clearing && xemu_get_async_compile() && r->pipeline_binding) {
+        bool skip = false;
+        if (!qatomic_read(&r->shader_binding->ready)) {
+            skip = true;
+        } else if (r->pipeline_binding->pending) {
+            skip = true;
+        } else if (r->pipeline_binding->pipeline == VK_NULL_HANDLE) {
+            skip = true;
+        }
+        if (skip) {
+            OPT_STAT_INC(draws_skipped_pending);
+            r->async_draw_skip = true;
+            r->pre_draw_skipped = true;
+            pgraph_vk_ensure_command_buffer(pg);
+            return;
+        }
+    }
+#endif
 
     {
         NV2A_PHASE_TIMER_BEGIN(draw_setup);
@@ -3383,6 +3502,9 @@ static bool try_snapshot_draw_arrays(NV2AState *d, ReorderWindowEntry *e)
     }
 
     begin_pre_draw(pg);
+#if OPT_ASYNC_COMPILE
+    if (r->async_draw_skip) return false;
+#endif
     copy_remapped_attributes_to_inline_buffer(pg, remap, 0, max_element);
 
     e->pipeline_binding = r->pipeline_binding;
@@ -3514,6 +3636,9 @@ static bool try_snapshot_inline_elements(NV2AState *d, ReorderWindowEntry *e)
     VertexBufferRemap remap = remap_unaligned_attributes(pg, max_element + 1);
 
     begin_pre_draw(pg);
+#if OPT_ASYNC_COMPILE
+    if (r->async_draw_skip) return false;
+#endif
     copy_remapped_attributes_to_inline_buffer(pg, remap, 0, max_element + 1);
 
     e->pipeline_binding = r->pipeline_binding;
@@ -4735,6 +4860,9 @@ void pgraph_vk_flush_draw(NV2AState *d)
         NV2A_PHASE_TIMER_END(draw_prim_rw);
 
         begin_pre_draw(pg);
+#if OPT_ASYNC_COMPILE
+        if (r->async_draw_skip) goto draw_arrays_done;
+#endif
         NV2A_PHASE_TIMER_BEGIN(draw_setup);
         copy_remapped_attributes_to_inline_buffer(pg, remap, 0, max_element);
         pgraph_vk_begin_debug_marker(r, r->command_buffer, RGBA_BLUE,
@@ -4789,6 +4917,7 @@ void pgraph_vk_flush_draw(NV2AState *d)
         NV2A_PHASE_TIMER_END(draw_vk_cmd);
 
         nv2a_diag_log_draw_call(d, pg, "draw_arrays", max_element);
+draw_arrays_done:
 
         NV2A_VK_DGROUP_END();
     } else if (pg->inline_elements_length) {
@@ -4840,6 +4969,9 @@ void pgraph_vk_flush_draw(NV2AState *d)
         NV2A_PHASE_TIMER_END(draw_vtx_sync);
 
         begin_pre_draw(pg);
+#if OPT_ASYNC_COMPILE
+        if (r->async_draw_skip) goto inline_elements_done;
+#endif
         NV2A_PHASE_TIMER_BEGIN(draw_setup);
         copy_remapped_attributes_to_inline_buffer(pg, remap, 0, max_element + 1);
         VkDeviceSize buffer_offset = pgraph_vk_update_index_buffer(
@@ -4860,6 +4992,7 @@ void pgraph_vk_flush_draw(NV2AState *d)
         NV2A_PHASE_TIMER_END(draw_vk_cmd);
 
         nv2a_diag_log_draw_call(d, pg, "inline_elements", draw_index_count);
+inline_elements_done:
 
         NV2A_VK_DGROUP_END();
     } else if (pg->inline_buffer_length) {
@@ -4900,6 +5033,9 @@ void pgraph_vk_flush_draw(NV2AState *d)
         NV2A_PHASE_TIMER_END(draw_prim_rw);
 
         begin_pre_draw(pg);
+#if OPT_ASYNC_COMPILE
+        if (r->async_draw_skip) goto inline_buffer_done;
+#endif
         NV2A_PHASE_TIMER_BEGIN(draw_setup);
         VkDeviceSize buffer_offset = pgraph_vk_update_vertex_inline_buffer(
             pg, data, sizes, r->num_active_vertex_attribute_descriptions);
@@ -4929,6 +5065,7 @@ void pgraph_vk_flush_draw(NV2AState *d)
 
         nv2a_diag_log_draw_call(d, pg, "inline_buffer",
                                 pg->inline_buffer_length);
+inline_buffer_done:
 
         NV2A_VK_DGROUP_END();
     } else if (pg->inline_array_length) {
@@ -4975,6 +5112,9 @@ void pgraph_vk_flush_draw(NV2AState *d)
         NV2A_PHASE_TIMER_END(draw_prim_rw);
 
         begin_pre_draw(pg);
+#if OPT_ASYNC_COMPILE
+        if (r->async_draw_skip) goto inline_array_done;
+#endif
         NV2A_PHASE_TIMER_BEGIN(draw_setup);
         void *inline_array_data = pg->inline_array;
         VkDeviceSize buffer_offset = pgraph_vk_update_vertex_inline_buffer(
@@ -5004,6 +5144,7 @@ void pgraph_vk_flush_draw(NV2AState *d)
         NV2A_PHASE_TIMER_END(draw_vk_cmd);
 
         nv2a_diag_log_draw_call(d, pg, "inline_array", index_count);
+inline_array_done:
 
         NV2A_VK_DGROUP_END();
     } else {

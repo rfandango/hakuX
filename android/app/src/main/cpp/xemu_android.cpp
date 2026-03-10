@@ -37,6 +37,8 @@ extern "C" void xemu_set_draw_reorder(bool enable);
 extern "C" bool xemu_get_draw_reorder(void);
 extern "C" void xemu_set_bindless_textures(bool enable);
 extern "C" bool xemu_get_bindless_textures(void);
+extern "C" void xemu_set_async_compile(bool enable);
+extern "C" bool xemu_get_async_compile(void);
 extern "C" void xemu_set_submit_frames(int count);
 extern "C" int xemu_get_submit_frames(void);
 
@@ -769,6 +771,11 @@ static SetupFiles SyncSetupFiles() {
   __android_log_print(ANDROID_LOG_INFO, "xemu-android",
                       "bindless textures: %s", bindless_tex ? "ON" : "OFF");
 
+  bool async_compile = GetPrefBool(env, activity, "async_compile", false);
+  xemu_set_async_compile(async_compile);
+  __android_log_print(ANDROID_LOG_INFO, "xemu-android",
+                      "async compile: %s", async_compile ? "ON" : "OFF");
+
   int submit_frames = GetPrefInt(env, activity, "submit_frames", 3);
   xemu_set_submit_frames(submit_frames);
   __android_log_print(ANDROID_LOG_INFO, "xemu-android",
@@ -1281,6 +1288,18 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_rfandango_xemuandroid_SettingsActivity_nativeSetBindlessTextures(JNIEnv *, jobject, jboolean enable)
 {
     xemu_set_bindless_textures(enable == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_rfandango_xemuandroid_SettingsActivity_nativeGetAsyncCompile(JNIEnv *, jobject)
+{
+    return xemu_get_async_compile() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_rfandango_xemuandroid_SettingsActivity_nativeSetAsyncCompile(JNIEnv *, jobject, jboolean enable)
+{
+    xemu_set_async_compile(enable == JNI_TRUE);
 }
 
 extern "C" JNIEXPORT jint JNICALL

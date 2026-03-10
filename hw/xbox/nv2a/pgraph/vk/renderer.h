@@ -81,6 +81,7 @@
 #define OPT_DYNAMIC_REG_FILTER   1
 #define OPT_BINDLESS_TEXTURES    1
 #define MAX_BINDLESS_TEXTURES    1024
+#define OPT_ASYNC_COMPILE        1
 
 struct OptBisectStats {
     int super_fast_hits;
@@ -127,6 +128,7 @@ struct OptBisectStats {
     int reorder_reject_zpass;
     int reorder_safe_zfunc_less;
     int reorder_safe_zfunc_lequal;
+    int draws_skipped_pending;
 };
 extern struct OptBisectStats g_opt_stats;
 #if NV2A_PERF_LOG
@@ -200,6 +202,9 @@ typedef struct PipelineBinding {
     VkRenderPass render_pass;
     unsigned int draw_time;
     bool has_dynamic_line_width;
+#if OPT_ASYNC_COMPILE
+    bool pending;
+#endif
 } PipelineBinding;
 
 enum Buffer {
@@ -328,11 +333,20 @@ typedef struct ShaderModuleCacheEntry {
     LruNode node;
     ShaderModuleCacheKey key;
     ShaderModuleInfo *module_info;
+#if OPT_ASYNC_COMPILE
+    bool ready;
+#endif
 } ShaderModuleCacheEntry;
 
 typedef struct ShaderBinding {
     LruNode node;
     ShaderState state;
+#if OPT_ASYNC_COMPILE
+    bool ready;
+    struct ShaderModuleCacheEntry *pending_vsh_entry;
+    struct ShaderModuleCacheEntry *pending_geom_entry;
+    struct ShaderModuleCacheEntry *pending_psh_entry;
+#endif
     struct {
         ShaderModuleInfo *module_info;
         VshUniformLocs uniform_locs;
@@ -345,6 +359,61 @@ typedef struct ShaderBinding {
         PshUniformLocs uniform_locs;
     } psh;
 } ShaderBinding;
+
+#if OPT_ASYNC_COMPILE
+
+typedef struct PipelineCreateParams {
+    VkDevice device;
+    VkPipelineCache vk_pipeline_cache;
+
+    VkPipelineShaderStageCreateInfo shader_stages[3];
+    int num_shader_stages;
+
+    VkVertexInputBindingDescription binding_descs[NV2A_VERTEXSHADER_ATTRIBUTES];
+    VkVertexInputAttributeDescription attr_descs[NV2A_VERTEXSHADER_ATTRIBUTES];
+    uint32_t num_binding_descs;
+    uint32_t num_attr_descs;
+
+    VkPrimitiveTopology topology;
+
+    VkPipelineRasterizationStateCreateInfo rasterizer;
+    VkPipelineDepthStencilStateCreateInfo depth_stencil;
+    bool has_zeta;
+
+    VkPipelineColorBlendAttachmentState color_blend_attachment;
+    bool has_color;
+    float blend_constants[4];
+
+    VkDynamicState dynamic_states[20];
+    int num_dynamic_states;
+
+    bool has_dynamic_line_width;
+
+    VkPipelineLayout layout;
+    VkRenderPass render_pass;
+} PipelineCreateParams;
+
+typedef enum {
+    COMPILE_JOB_SHADER_MODULE,
+    COMPILE_JOB_PIPELINE,
+} CompileJobType;
+
+typedef struct CompileJob {
+    CompileJobType type;
+    QSIMPLEQ_ENTRY(CompileJob) entry;
+    union {
+        struct {
+            ShaderModuleCacheEntry *target;
+            ShaderModuleCacheKey key;
+        } shader_module;
+        struct {
+            PipelineBinding *target;
+            PipelineCreateParams params;
+        } pipeline;
+    };
+} CompileJob;
+
+#endif /* OPT_ASYNC_COMPILE */
 
 typedef struct TextureKey {
     TextureShape state;
@@ -686,6 +755,9 @@ typedef struct PGRAPHVkState {
     bool pipeline_binding_changed;
     bool pipeline_state_dirty;
     bool pre_draw_skipped;
+#if OPT_ASYNC_COMPILE
+    bool async_draw_skip;
+#endif
 
 #if OPT_DYNAMIC_STATES
     struct {
@@ -876,6 +948,17 @@ typedef struct PGRAPHVkState {
 
     PGRAPHVkDisplayState display;
     PGRAPHVkComputeState compute;
+
+#if OPT_ASYNC_COMPILE
+    struct {
+        QemuThread thread;
+        QemuMutex lock;
+        QemuCond cond;
+        QSIMPLEQ_HEAD(, CompileJob) queue;
+        bool shutdown;
+        int queue_depth;
+    } compile_worker;
+#endif
 } PGRAPHVkState;
 
 static inline StorageBuffer *get_staging_buffer(PGRAPHVkState *r, int buffer_id)
@@ -1038,6 +1121,13 @@ bool pgraph_vk_check_textures_fast_skip(PGRAPHState *pg);
 void pgraph_vk_mark_textures_possibly_dirty(NV2AState *d, hwaddr addr,
                                             hwaddr size);
 void pgraph_vk_trim_texture_cache(PGRAPHState *pg);
+
+// compile_worker.c
+#if OPT_ASYNC_COMPILE
+void pgraph_vk_compile_worker_init(PGRAPHVkState *r);
+void pgraph_vk_compile_worker_shutdown(PGRAPHVkState *r);
+void pgraph_vk_compile_worker_enqueue(PGRAPHVkState *r, CompileJob *job);
+#endif
 
 // shaders.c
 void pgraph_vk_init_shaders(PGRAPHState *pg);

@@ -150,6 +150,9 @@
   <string name="settings_bindless_textures">Bindless textures</string>
   <string name="settings_bindless_textures_desc">Use bindless descriptor indexing for texture access. Faster on modern GPUs (Adreno 740+) but may reduce performance on older GPUs. Requires restart to take effect.</string>
 
+  <string name="settings_async_compile">Async shader compilation</string>
+  <string name="settings_async_compile_desc">Compile shaders in background to reduce stutter. May cause brief visual pop-in.</string>
+
   <string name="settings_submit_frames">Submit frame buffering</string>
   <string name="settings_submit_frames_desc">Number of GPU submission frames. Higher values increase parallelism but use more memory and add latency. Single = lowest memory, Triple = best throughput. Takes effect immediately.</string>
 
