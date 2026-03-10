@@ -153,6 +153,9 @@
   <string name="settings_async_compile">Async shader compilation</string>
   <string name="settings_async_compile_desc">Compile shaders in background to reduce stutter. May cause brief visual pop-in.</string>
 
+  <string name="settings_frame_skip">Frame skip</string>
+  <string name="settings_frame_skip_desc">Skip rendering when running behind to maintain game speed. May cause visible stuttering.</string>
+
   <string name="settings_submit_frames">Submit frame buffering</string>
   <string name="settings_submit_frames_desc">Number of GPU submission frames. Higher values increase parallelism but use more memory and add latency. Single = lowest memory, Triple = best throughput. Takes effect immediately.</string>
 

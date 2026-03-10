@@ -21,6 +21,8 @@
 #include "renderer.h"
 #include "qemu/error-report.h"
 #include "ui/xemu-settings.h"
+
+extern bool xemu_get_frame_skip(void);
 #ifdef __ANDROID__
 #include <android/log.h>
 #define DBG_LOG(...) __android_log_print(ANDROID_LOG_INFO, "xemu-vk-dbg", __VA_ARGS__)
@@ -766,6 +768,24 @@ static void pgraph_vk_flip_stall(NV2AState *d)
         }
     }
     pgraph_vk_finish(&d->pgraph, VK_FINISH_REASON_FLIP_STALL);
+
+    {
+        PGRAPHVkState *r = d->pgraph.vk_renderer_state;
+        r->frame_was_skipped = r->frame_skip_active;
+        if (xemu_get_frame_skip() && d->avg_frame_ns > 0) {
+            int64_t period = (d->pramdac.fp_vdisplay_end > 480)
+                                 ? (NANOSECONDS_PER_SECOND / 50)
+                                 : 16683750LL;
+            if (d->avg_frame_ns > period + period / 4) {
+                r->frame_skip_active = !r->frame_skip_active;
+            } else {
+                r->frame_skip_active = false;
+            }
+        } else {
+            r->frame_skip_active = false;
+        }
+
+    }
 
     if (qatomic_read(&diag_frame_active)) {
         diag_json_append("\n]\n");

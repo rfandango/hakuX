@@ -36,6 +36,7 @@ static bool g_xemu_fast_fences = false;
 static bool g_xemu_draw_reorder = false;
 static bool g_xemu_bindless_textures = false;
 static bool g_xemu_async_compile = false;
+static bool g_xemu_frame_skip = false;
 static int g_xemu_submit_frames = 3;
 
 struct OptBisectStats g_opt_stats;
@@ -68,7 +69,7 @@ static void opt_stats_log_and_reset(void)
                 g_opt_stats.sfp_miss_vtx_gen,
                 g_opt_stats.sfp_miss_tex_vram);
         __android_log_print(ANDROID_LOG_INFO, "xemu-rw",
-                "RW:%d/%d/%d Safe:%d(L%d/LE%d) Rej:Bl%d Cw%d Dp%d Zw%d Zf%d St%d Al%d Ak%d Rt%d Fb%d Zp%d ASkip:%d",
+                "RW:%d/%d/%d Safe:%d(L%d/LE%d) Rej:Bl%d Cw%d Dp%d Zw%d Zf%d St%d Al%d Ak%d Rt%d Fb%d Zp%d ASkip:%d FSkip:%d",
                 g_opt_stats.reorder_windows_flushed,
                 g_opt_stats.reorder_draws_reordered,
                 g_opt_stats.reorder_pipeline_switches_saved,
@@ -86,7 +87,8 @@ static void opt_stats_log_and_reset(void)
                 g_opt_stats.reorder_reject_rtt,
                 g_opt_stats.reorder_reject_fb_dirty,
                 g_opt_stats.reorder_reject_zpass,
-                g_opt_stats.draws_skipped_pending);
+                g_opt_stats.draws_skipped_pending,
+                g_opt_stats.draws_skipped_frameskip);
 #else
         DBG_LOG("[OPT-STATS] SFP:%d/%d PEX:%d/%d VTC:%d/%d DRS:%d/%d MDI:%d/%d"
                 " RW:%d/%d/%d"
@@ -164,6 +166,16 @@ bool xemu_get_async_compile(void)
     return g_xemu_async_compile;
 }
 
+void xemu_set_frame_skip(bool enable)
+{
+    g_xemu_frame_skip = enable;
+}
+
+bool xemu_get_frame_skip(void)
+{
+    return g_xemu_frame_skip;
+}
+
 void xemu_set_submit_frames(int count)
 {
     if (count < 1) count = 1;
@@ -179,6 +191,11 @@ int xemu_get_submit_frames(void)
 void pgraph_vk_draw_begin(NV2AState *d)
 {
     PGRAPHState *pg = &d->pgraph;
+    PGRAPHVkState *r = pg->vk_renderer_state;
+
+    if (r->frame_skip_active && xemu_get_frame_skip()) {
+        return;
+    }
 
     NV2A_VK_DPRINTF("NV097_SET_BEGIN_END: 0x%x", d->pgraph.primitive_mode);
 
@@ -4033,6 +4050,13 @@ void pgraph_vk_draw_end(NV2AState *d)
     PGRAPHState *pg = &d->pgraph;
     PGRAPHVkState *r = pg->vk_renderer_state;
 
+    if (r->frame_skip_active && !pg->zpass_pixel_count_enable &&
+        xemu_get_frame_skip()) {
+        OPT_STAT_INC(draws_skipped_frameskip);
+        pg->draw_time++;
+        return;
+    }
+
     uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
     bool mask_alpha = control_0 & NV_PGRAPH_CONTROL_0_ALPHA_WRITE_ENABLE;
     bool mask_red = control_0 & NV_PGRAPH_CONTROL_0_RED_WRITE_ENABLE;
@@ -4416,6 +4440,11 @@ void pgraph_vk_clear_surface(NV2AState *d, uint32_t parameter)
 #endif
 
     nv2a_profile_inc_counter(NV2A_PROF_CLEAR);
+
+    if (r->frame_skip_active && xemu_get_frame_skip()) {
+        OPT_STAT_INC(draws_skipped_frameskip);
+        return;
+    }
 
     bool write_color = (parameter & NV097_CLEAR_SURFACE_COLOR);
     bool write_zeta =

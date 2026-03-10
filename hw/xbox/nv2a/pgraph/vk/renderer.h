@@ -129,6 +129,7 @@ struct OptBisectStats {
     int reorder_safe_zfunc_less;
     int reorder_safe_zfunc_lequal;
     int draws_skipped_pending;
+    int draws_skipped_frameskip;
 };
 extern struct OptBisectStats g_opt_stats;
 #if NV2A_PERF_LOG
@@ -758,6 +759,9 @@ typedef struct PGRAPHVkState {
 #if OPT_ASYNC_COMPILE
     bool async_draw_skip;
 #endif
+    bool frame_skip_active;
+    bool frame_was_skipped;
+    hwaddr frame_skip_last_good_addr;
 
 #if OPT_DYNAMIC_STATES
     struct {

@@ -149,6 +149,17 @@ class SettingsActivity : AppCompatActivity() {
       try { nativeSetAsyncCompile(checked) } catch (_: Throwable) {}
     }
 
+    val switchFrameSkip = findViewById<MaterialSwitch>(R.id.switch_frame_skip)
+    try {
+      switchFrameSkip.isChecked = nativeGetFrameSkip()
+    } catch (_: Throwable) {
+      switchFrameSkip.isChecked = prefs.getBoolean("frame_skip", false)
+    }
+    switchFrameSkip.setOnCheckedChangeListener { _, checked ->
+      prefs.edit().putBoolean("frame_skip", checked).apply()
+      try { nativeSetFrameSkip(checked) } catch (_: Throwable) {}
+    }
+
     setupSubmitFramesPicker()
 
     val switchValidation = findViewById<MaterialSwitch>(R.id.switch_validation_layers)
@@ -498,6 +509,8 @@ class SettingsActivity : AppCompatActivity() {
   private external fun nativeSetBindlessTextures(enable: Boolean)
   private external fun nativeGetAsyncCompile(): Boolean
   private external fun nativeSetAsyncCompile(enable: Boolean)
+  private external fun nativeGetFrameSkip(): Boolean
+  private external fun nativeSetFrameSkip(enable: Boolean)
   private external fun nativeGetSubmitFrames(): Int
   private external fun nativeSetSubmitFrames(count: Int)
 

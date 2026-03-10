@@ -28,6 +28,8 @@
 #define DBG_LOG(...) fprintf(stderr, __VA_ARGS__)
 #endif
 
+extern bool xemu_get_frame_skip(void);
+
 #if HAVE_EXTERNAL_MEMORY
 #ifdef __ANDROID__
 #include <android/hardware_buffer.h>
@@ -1590,8 +1592,16 @@ void pgraph_vk_render_display(PGRAPHState *pg)
     VGADisplayParams vga_display_params;
     d->vga.get_params(&d->vga, &vga_display_params);
 
-    SurfaceBinding *surface = pgraph_vk_surface_get_within(
-        d, d->pcrtc.start + vga_display_params.line_offset);
+    hwaddr display_addr = d->pcrtc.start + vga_display_params.line_offset;
+
+    if (r->frame_was_skipped && xemu_get_frame_skip() &&
+        r->frame_skip_last_good_addr) {
+        display_addr = r->frame_skip_last_good_addr;
+    } else {
+        r->frame_skip_last_good_addr = display_addr;
+    }
+
+    SurfaceBinding *surface = pgraph_vk_surface_get_within(d, display_addr);
     if (surface == NULL || !surface->color || !surface->width ||
         !surface->height) {
         static int dbg_no_surf = 0;

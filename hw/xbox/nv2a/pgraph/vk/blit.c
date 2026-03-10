@@ -76,9 +76,17 @@ static void patch_alpha(uint8_t *dest, size_t width_pixels, size_t height,
 void pgraph_vk_image_blit(NV2AState *d)
 {
     PGRAPHState *pg = &d->pgraph;
+    PGRAPHVkState *r = pg->vk_renderer_state;
     ContextSurfaces2DState *context_surfaces = &pg->context_surfaces_2d;
     ImageBlitState *image_blit = &pg->image_blit;
     BetaState *beta = &pg->beta;
+
+    {
+        extern bool xemu_get_frame_skip(void);
+        if (r->frame_skip_active && xemu_get_frame_skip()) {
+            return;
+        }
+    }
 
     pgraph_vk_surface_update(d, false, true, true);
 
