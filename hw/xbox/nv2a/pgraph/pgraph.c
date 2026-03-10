@@ -1648,6 +1648,14 @@ DEF_METHOD(NV097, FLIP_STALL)
     }
     d->last_flip_ns = now;
 
+    {
+        int idx = d->defer_ring_idx;
+        int was_deferred = qatomic_read(&d->vblank_deferred) ? 1 : 0;
+        d->defer_count += was_deferred - d->defer_ring[idx];
+        d->defer_ring[idx] = was_deferred;
+        d->defer_ring_idx = (idx + 1) % DEFER_RING_SIZE;
+    }
+
     if (qatomic_read(&d->vblank_deferred)) {
         /*
          * VBLANK is currently deferred (waiting for the game to finish).

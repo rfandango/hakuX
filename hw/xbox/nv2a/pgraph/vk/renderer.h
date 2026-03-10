@@ -761,6 +761,7 @@ typedef struct PGRAPHVkState {
 #endif
     bool frame_skip_active;
     bool frame_was_skipped;
+    int skip_counter;
     hwaddr frame_skip_last_good_addr;
 
 #if OPT_DYNAMIC_STATES

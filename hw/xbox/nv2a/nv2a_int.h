@@ -88,6 +88,11 @@ typedef struct NV2AState {
     int64_t vblank_defer_request_ns;
     bool unlock_mode_active;
 
+#define DEFER_RING_SIZE 16
+    uint8_t defer_ring[DEFER_RING_SIZE];
+    int defer_ring_idx;
+    int defer_count;
+
     MemoryRegion *vram;
     MemoryRegion vram_pci;
     uint8_t *vram_ptr;
