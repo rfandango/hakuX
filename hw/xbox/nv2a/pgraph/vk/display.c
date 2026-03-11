@@ -323,6 +323,7 @@ static const char *display_frag_glsl =
     "#version 450\n"
     "layout(binding = 0) uniform sampler2D tex;\n"
     "layout(binding = 1) uniform sampler2D pvideo_tex;\n"
+    "layout(binding = 2) uniform sampler2D prev_tex;\n"
     "layout(push_constant, std430) uniform PushConstants {\n"
     "    float line_offset;\n"
     "    vec2 display_size;\n"
@@ -332,6 +333,7 @@ static const char *display_frag_glsl =
     "    vec4 pvideo_scale;\n"
     "    bool pvideo_color_key_enable;\n"
     "    vec3 pvideo_color_key;\n"
+    "    float blend_factor;\n"
     "};\n"
     "layout(location = 0) out vec4 out_Color;\n"
     "void main()\n"
@@ -339,7 +341,7 @@ static const char *display_frag_glsl =
     "    vec2 tex_coord = gl_FragCoord.xy/display_size;\n"
     "    float rel = display_size.y/textureSize(tex, 0).y/line_offset;\n"
     "    tex_coord.y = 1 + rel*(tex_coord.y - 1);\n"
-    "    tex_coord.y = 1 - tex_coord.y;\n" // GL compat
+    "    tex_coord.y = 1 - tex_coord.y;\n"
     "    out_Color.rgba = texture(tex, tex_coord);\n"
     "    if (pvideo_enable) {\n"
     "        vec2 screen_coord = vec2(gl_FragCoord.x, display_size.y - gl_FragCoord.y) * pvideo_scale.z;\n"
@@ -352,6 +354,11 @@ static const char *display_frag_glsl =
     "            out_Color.rgba = texture(pvideo_tex, in_st);\n"
     "        }\n"
     "    }\n"
+    "    if (blend_factor > 0.0) {\n"
+    "        vec2 prev_coord = gl_FragCoord.xy / display_size;\n"
+    "        vec4 prev = texture(prev_tex, prev_coord);\n"
+    "        out_Color.rgba = mix(out_Color.rgba, prev, blend_factor);\n"
+    "    }\n"
     "}\n";
 
 static void create_descriptor_pool(PGRAPHState *pg)
@@ -360,7 +367,7 @@ static void create_descriptor_pool(PGRAPHState *pg)
 
     VkDescriptorPoolSize pool_sizes = {
         .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .descriptorCount = 2 * NUM_DISPLAY_IMAGES,
+        .descriptorCount = 3 * NUM_DISPLAY_IMAGES,
     };
 
     VkDescriptorPoolCreateInfo pool_info = {
@@ -386,7 +393,7 @@ static void create_descriptor_set_layout(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
 
-    VkDescriptorSetLayoutBinding bindings[2];
+    VkDescriptorSetLayoutBinding bindings[3];
 
     for (int i = 0; i < ARRAY_SIZE(bindings); i++) {
         bindings[i] = (VkDescriptorSetLayoutBinding){
@@ -729,6 +736,18 @@ static void destroy_current_display_image(PGRAPHState *pg)
         destroy_single_display_image(pg, &d->images[i]);
     }
 
+    if (d->blend_prev_view) {
+        vkDestroyImageView(r->device, d->blend_prev_view, NULL);
+        d->blend_prev_view = VK_NULL_HANDLE;
+    }
+    if (d->blend_prev_image) {
+        vmaDestroyImage(r->allocator, d->blend_prev_image,
+                        d->blend_prev_alloc);
+        d->blend_prev_image = VK_NULL_HANDLE;
+        d->blend_prev_alloc = VK_NULL_HANDLE;
+    }
+    d->blend_prev_valid = false;
+
     d->render_idx = 0;
     d->display_idx = 0;
     d->draw_time = 0;
@@ -794,7 +813,8 @@ static bool create_single_display_image_resources(PGRAPHState *pg,
             .arrayLayers = 1,
             .samples = VK_SAMPLE_COUNT_1_BIT,
             .tiling = VK_IMAGE_TILING_OPTIMAL,
-            .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+            .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                     VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
         };
@@ -930,7 +950,8 @@ static bool create_single_display_image_resources(PGRAPHState *pg,
         .format = VK_FORMAT_R8G8B8A8_UNORM,
         .tiling = use_optimal_tiling ? VK_IMAGE_TILING_OPTIMAL : VK_IMAGE_TILING_LINEAR,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                 VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     };
@@ -1198,6 +1219,41 @@ static bool create_display_image(PGRAPHState *pg, int width, int height)
         create_frame_buffer(pg, &d->images[i]);
     }
 
+    {
+        VkImageCreateInfo ci = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            .imageType = VK_IMAGE_TYPE_2D,
+            .format = VK_FORMAT_R8G8B8A8_UNORM,
+            .extent = { width, height, 1 },
+            .mipLevels = 1,
+            .arrayLayers = 1,
+            .samples = VK_SAMPLE_COUNT_1_BIT,
+            .tiling = VK_IMAGE_TILING_OPTIMAL,
+            .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                     VK_IMAGE_USAGE_SAMPLED_BIT,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        };
+        VmaAllocationCreateInfo ai = {
+            .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+        };
+        VK_CHECK(vmaCreateImage(r->allocator, &ci, &ai,
+                                &d->blend_prev_image,
+                                &d->blend_prev_alloc, NULL));
+
+        VkImageViewCreateInfo vi = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image = d->blend_prev_image,
+            .viewType = VK_IMAGE_VIEW_TYPE_2D,
+            .format = VK_FORMAT_R8G8B8A8_UNORM,
+            .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .subresourceRange.levelCount = 1,
+            .subresourceRange.layerCount = 1,
+        };
+        VK_CHECK(vkCreateImageView(r->device, &vi, NULL,
+                                   &d->blend_prev_view));
+        d->blend_prev_valid = false;
+    }
+
     return true;
 }
 
@@ -1205,10 +1261,9 @@ static void update_descriptor_set(PGRAPHState *pg, SurfaceBinding *surface)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
 
-    VkDescriptorImageInfo image_infos[2];
-    VkWriteDescriptorSet descriptor_writes[2];
+    VkDescriptorImageInfo image_infos[3];
+    VkWriteDescriptorSet descriptor_writes[3];
 
-    // Display surface
     image_infos[0] = (VkDescriptorImageInfo){
         .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         .imageView = surface->image_view,
@@ -1241,6 +1296,20 @@ static void update_descriptor_set(PGRAPHState *pg, SurfaceBinding *surface)
             .sampler = r->dummy_texture.sampler,
         };
     }
+
+    if (r->display.blend_prev_valid && r->display.blend_prev_view) {
+        image_infos[2] = (VkDescriptorImageInfo){
+            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .imageView = r->display.blend_prev_view,
+            .sampler = r->display.sampler,
+        };
+    } else {
+        image_infos[2] = (VkDescriptorImageInfo){
+            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .imageView = r->dummy_texture.image_view,
+            .sampler = r->dummy_texture.sampler,
+        };
+    }
     descriptor_writes[1] = (VkWriteDescriptorSet){
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         .dstSet = current_set,
@@ -1249,6 +1318,16 @@ static void update_descriptor_set(PGRAPHState *pg, SurfaceBinding *surface)
         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         .descriptorCount = 1,
         .pImageInfo = &image_infos[1],
+    };
+
+    descriptor_writes[2] = (VkWriteDescriptorSet){
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = current_set,
+        .dstBinding = 2,
+        .dstArrayElement = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = 1,
+        .pImageInfo = &image_infos[2],
     };
 
     vkUpdateDescriptorSets(r->device, ARRAY_SIZE(descriptor_writes),
@@ -1374,6 +1453,9 @@ static void update_uniforms(PGRAPHState *pg, SurfaceBinding *surface)
         uniform4f(l, uniform_index(l, "pvideo_scale"), pvideo->scale_x,
                   pvideo->scale_y, 1.0f / pg->surface_scale_factor, 1.0);
     }
+
+    uniform1f(l, uniform_index(l, "blend_factor"),
+              r->display.blend_active ? 0.5f : 0.0f);
 }
 
 static void render_display(PGRAPHState *pg, SurfaceBinding *surface)
@@ -1484,10 +1566,41 @@ static void render_display(PGRAPHState *pg, SurfaceBinding *surface)
                                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
-    pgraph_vk_transition_image_layout(pg, cmd, img->image,
-                                      VK_FORMAT_R8G8B8A8_UNORM,
-                                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if (!disp->blend_active && disp->blend_prev_image) {
+        pgraph_vk_transition_image_layout(pg, cmd, img->image,
+                                          VK_FORMAT_R8G8B8A8_UNORM,
+                                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        pgraph_vk_transition_image_layout(pg, cmd, disp->blend_prev_image,
+                                          VK_FORMAT_R8G8B8A8_UNORM,
+                                          VK_IMAGE_LAYOUT_UNDEFINED,
+                                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+        VkImageCopy region = {
+            .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+            .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+            .extent = { disp->width, disp->height, 1 },
+        };
+        vkCmdCopyImage(cmd,
+                       img->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       disp->blend_prev_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       1, &region);
+
+        pgraph_vk_transition_image_layout(pg, cmd, disp->blend_prev_image,
+                                          VK_FORMAT_R8G8B8A8_UNORM,
+                                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        pgraph_vk_transition_image_layout(pg, cmd, img->image,
+                                          VK_FORMAT_R8G8B8A8_UNORM,
+                                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        disp->blend_prev_valid = true;
+    } else {
+        pgraph_vk_transition_image_layout(pg, cmd, img->image,
+                                          VK_FORMAT_R8G8B8A8_UNORM,
+                                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    }
 
     pgraph_vk_end_debug_marker(r, cmd);
 
@@ -1627,6 +1740,14 @@ void pgraph_vk_render_display(PGRAPHState *pg)
         if (!create_display_image(pg, width, height)) {
             return;
         }
+    }
+
+    disp->blend_active = !r->frame_was_skipped &&
+                         r->blend_after_skip &&
+                         xemu_get_frame_skip() &&
+                         disp->blend_prev_valid;
+    if (disp->blend_active) {
+        r->blend_after_skip = false;
     }
 
     render_display(pg, surface);

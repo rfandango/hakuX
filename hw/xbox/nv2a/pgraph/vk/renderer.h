@@ -538,6 +538,12 @@ typedef struct PGRAPHVkDisplayState {
     int width, height;
     int draw_time;
     bool use_external_memory;
+
+    VkImage blend_prev_image;
+    VkImageView blend_prev_view;
+    VmaAllocation blend_prev_alloc;
+    bool blend_prev_valid;
+    bool blend_active;
 } PGRAPHVkDisplayState;
 
 typedef enum {
@@ -761,6 +767,7 @@ typedef struct PGRAPHVkState {
 #endif
     bool frame_skip_active;
     bool frame_was_skipped;
+    bool blend_after_skip;
     int skip_counter;
     hwaddr frame_skip_last_good_addr;
 

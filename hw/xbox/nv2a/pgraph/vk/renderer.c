@@ -772,21 +772,24 @@ static void pgraph_vk_flip_stall(NV2AState *d)
     {
         PGRAPHVkState *r = d->pgraph.vk_renderer_state;
         r->frame_was_skipped = r->frame_skip_active;
+        if (r->frame_skip_active) {
+            r->blend_after_skip = true;
+        }
 
-        if (xemu_get_frame_skip() && d->defer_count > 0) {
+        if (xemu_get_frame_skip() && d->defer_count >= 6) {
             int dc = d->defer_count;
             int skip_pattern;
-            if (dc >= 12)      skip_pattern = 3;
-            else if (dc >= 8)  skip_pattern = 2;
-            else if (dc >= 4)  skip_pattern = 1;
+            if (dc >= 21)      skip_pattern = 3;
+            else if (dc >= 16) skip_pattern = 2;
+            else if (dc >= 11) skip_pattern = 1;
             else               skip_pattern = 0;
 
             r->skip_counter++;
             switch (skip_pattern) {
-            case 0: r->frame_skip_active = (r->skip_counter % 4) == 0; break;
-            case 1: r->frame_skip_active = (r->skip_counter % 3) == 0; break;
-            case 2: r->frame_skip_active = (r->skip_counter % 2) == 0; break;
-            case 3: r->frame_skip_active = (r->skip_counter % 3) != 0; break;
+            case 0: r->frame_skip_active = (r->skip_counter % 4) == 0; break; /* 25% */
+            case 1: r->frame_skip_active = (r->skip_counter % 5) == 0; break; /* 20% */
+            case 2: r->frame_skip_active = (r->skip_counter % 3) == 0; break; /* 33% */
+            case 3: r->frame_skip_active = (r->skip_counter % 2) == 0; break; /* 50% */
             default: r->frame_skip_active = false; break;
             }
         } else {
