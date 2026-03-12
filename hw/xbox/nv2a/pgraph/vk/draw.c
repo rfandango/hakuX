@@ -48,12 +48,13 @@ static void opt_stats_log_and_reset(void)
     if (++frame_counter % 60 == 0) {
 #ifdef __ANDROID__
         __android_log_print(ANDROID_LOG_INFO, "xemu-sfp",
-                "SFP:%d/%d BLtx:%d PTx:%d UnF:%d TxPool:%d/%d miss: clr%d noPl%d noCb%d noRp%d noFb%d fbD%d shC%d piD%d dsR%d uni%d noDs%d tG%d ndG%d prD%d vG%d tV%d",
+                "SFP:%d/%d BLtx:%d PTx:%d UnF:%d VAF:%d TxPool:%d/%d miss: clr%d noPl%d noCb%d noRp%d noFb%d fbD%d shC%d piD%d dsR%d uni%d noDs%d tG%d ndG%d prD%d vG%d tV%d",
                 g_opt_stats.super_fast_hits,
                 g_opt_stats.super_fast_misses,
                 g_opt_stats.bindless_tex_fast,
                 g_opt_stats.push_tex_fast,
                 g_opt_stats.sfp_uniform_fast,
+                g_opt_stats.vtx_attr_fast,
                 g_opt_stats.tex_pool_hits,
                 g_opt_stats.tex_pool_misses,
                 g_opt_stats.sfp_miss_clearing,
@@ -2417,7 +2418,6 @@ static void begin_pre_draw(PGRAPHState *pg)
         else if (pg->any_reg_gen != r->last_any_reg_gen) { OPT_STAT_INC(sfp_miss_reg_gen); sfp_ok = false; }
 #endif
         else if (pg->program_data_dirty) { OPT_STAT_INC(sfp_miss_prog_dirty); sfp_ok = false; }
-        else if (pg->vertex_attr_gen != r->pipeline_vertex_attr_gen) { OPT_STAT_INC(sfp_miss_vtx_gen); sfp_ok = false; }
 
         if (sfp_ok) {
             bool tex_vram_clean = (r->texture_vram_gen == r->last_texture_vram_gen);
@@ -2497,6 +2497,26 @@ static void begin_pre_draw(PGRAPHState *pg)
                         }
                     }
                 }
+                if (sfp_ok && pg->vertex_attr_gen != r->pipeline_vertex_attr_gen) {
+                    if (r->num_active_vertex_attribute_descriptions == r->pipeline_num_active_attr_descs &&
+                        r->num_active_vertex_binding_descriptions == r->pipeline_num_active_bind_descs &&
+                        !memcmp(r->vertex_attribute_descriptions,
+                                r->pipeline_binding->key.attribute_descriptions,
+                                r->num_active_vertex_attribute_descriptions *
+                                    sizeof(r->vertex_attribute_descriptions[0])) &&
+                        !memcmp(r->vertex_binding_descriptions,
+                                r->pipeline_binding->key.binding_descriptions,
+                                r->num_active_vertex_binding_descriptions *
+                                    sizeof(r->vertex_binding_descriptions[0]))) {
+                        r->pipeline_vertex_attr_gen = pg->vertex_attr_gen;
+                        r->pipeline_num_active_attr_descs = r->num_active_vertex_attribute_descriptions;
+                        r->pipeline_num_active_bind_descs = r->num_active_vertex_binding_descriptions;
+                        OPT_STAT_INC(vtx_attr_fast);
+                    } else {
+                        sfp_ok = false;
+                        OPT_STAT_INC(sfp_miss_vtx_gen);
+                    }
+                }
                 if (sfp_ok) {
                     r->last_any_reg_gen = pg->any_reg_gen;
                     r->last_non_dynamic_reg_gen = pg->non_dynamic_reg_gen;
@@ -2523,7 +2543,6 @@ static void begin_pre_draw(PGRAPHState *pg)
         !r->need_descriptor_rebind &&
         !r->uniforms_changed &&
         !pg->program_data_dirty &&
-        pg->vertex_attr_gen == r->pipeline_vertex_attr_gen &&
         pg->non_dynamic_reg_gen == r->last_non_dynamic_reg_gen &&
         (pg->texture_state_gen != r->last_texture_state_gen ||
          r->texture_vram_gen != r->last_texture_vram_gen)) {
@@ -2540,6 +2559,25 @@ static void begin_pre_draw(PGRAPHState *pg)
                 r->uniform_buffer_offsets[1] = ubo_offsets[1];
                 bind_descriptor_sets(pg);
                 OPT_STAT_INC(sfp_uniform_fast);
+            } else {
+                bl_ok = false;
+            }
+        }
+        if (bl_ok && pg->vertex_attr_gen != r->pipeline_vertex_attr_gen) {
+            if (r->num_active_vertex_attribute_descriptions == r->pipeline_num_active_attr_descs &&
+                r->num_active_vertex_binding_descriptions == r->pipeline_num_active_bind_descs &&
+                !memcmp(r->vertex_attribute_descriptions,
+                        r->pipeline_binding->key.attribute_descriptions,
+                        r->num_active_vertex_attribute_descriptions *
+                            sizeof(r->vertex_attribute_descriptions[0])) &&
+                !memcmp(r->vertex_binding_descriptions,
+                        r->pipeline_binding->key.binding_descriptions,
+                        r->num_active_vertex_binding_descriptions *
+                            sizeof(r->vertex_binding_descriptions[0]))) {
+                r->pipeline_vertex_attr_gen = pg->vertex_attr_gen;
+                r->pipeline_num_active_attr_descs = r->num_active_vertex_attribute_descriptions;
+                r->pipeline_num_active_bind_descs = r->num_active_vertex_binding_descriptions;
+                OPT_STAT_INC(vtx_attr_fast);
             } else {
                 bl_ok = false;
             }
@@ -2586,8 +2624,25 @@ static void begin_pre_draw(PGRAPHState *pg)
         pg->shader_state_gen == r->last_shader_state_gen &&
         pg->pipeline_state_gen == r->last_pipeline_state_gen &&
         pg->primitive_mode == r->shader_binding->state.geom.primitive_mode &&
-        !pg->program_data_dirty &&
-        pg->vertex_attr_gen == r->pipeline_vertex_attr_gen) {
+        !pg->program_data_dirty) {
+        if (pg->vertex_attr_gen != r->pipeline_vertex_attr_gen) {
+            if (r->num_active_vertex_attribute_descriptions != r->pipeline_num_active_attr_descs ||
+                r->num_active_vertex_binding_descriptions != r->pipeline_num_active_bind_descs ||
+                memcmp(r->vertex_attribute_descriptions,
+                       r->pipeline_binding->key.attribute_descriptions,
+                       r->num_active_vertex_attribute_descriptions *
+                           sizeof(r->vertex_attribute_descriptions[0])) ||
+                memcmp(r->vertex_binding_descriptions,
+                       r->pipeline_binding->key.binding_descriptions,
+                       r->num_active_vertex_binding_descriptions *
+                           sizeof(r->vertex_binding_descriptions[0]))) {
+                goto mfp_miss;
+            }
+            r->pipeline_vertex_attr_gen = pg->vertex_attr_gen;
+            r->pipeline_num_active_attr_descs = r->num_active_vertex_attribute_descriptions;
+            r->pipeline_num_active_bind_descs = r->num_active_vertex_binding_descriptions;
+            OPT_STAT_INC(vtx_attr_fast);
+        }
         r->pre_draw_skipped = false;
 #if OPT_BINDLESS_TEXTURES
         if (r->bindless_textures_supported &&
@@ -2628,6 +2683,7 @@ static void begin_pre_draw(PGRAPHState *pg)
         pgraph_vk_ensure_command_buffer(pg);
         return;
     }
+mfp_miss: (void)0;
 #endif
 
     r->pre_draw_skipped = false;
@@ -2639,6 +2695,8 @@ static void begin_pre_draw(PGRAPHState *pg)
         create_pipeline(pg);
     }
     r->pipeline_vertex_attr_gen = pg->vertex_attr_gen;
+    r->pipeline_num_active_attr_descs = r->num_active_vertex_attribute_descriptions;
+    r->pipeline_num_active_bind_descs = r->num_active_vertex_binding_descriptions;
     NV2A_PHASE_TIMER_END(draw_pipeline);
 
 #if OPT_ASYNC_COMPILE

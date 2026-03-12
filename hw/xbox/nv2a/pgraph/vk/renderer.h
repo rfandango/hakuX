@@ -105,6 +105,7 @@ struct OptBisectStats {
     int bindless_tex_fast;
     int push_tex_fast;
     int sfp_uniform_fast;
+    int vtx_attr_fast;
     int pipeline_early_hits;
     int pipeline_early_misses;
     int vtx_cache_hits;
@@ -861,6 +862,8 @@ typedef struct PGRAPHVkState {
 
     uint32_t last_vertex_attr_gen;
     uint32_t pipeline_vertex_attr_gen;
+    int pipeline_num_active_attr_descs;
+    int pipeline_num_active_bind_descs;
     uint32_t last_shader_state_gen;
     uint32_t last_pipeline_state_gen;
     uint32_t last_any_reg_gen;
