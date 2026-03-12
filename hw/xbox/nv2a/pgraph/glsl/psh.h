@@ -65,10 +65,12 @@ typedef struct PshState {
     enum PshAlphaFunc alpha_func;
 
     bool window_clip_exclusive;
+    int window_clip_count;
 
     bool smooth_shading;
     bool depth_clipping;
     bool z_perspective;
+    bool depth_needed;
 
     unsigned int surface_zeta_format;
     enum PshDepthFormat depth_format;
