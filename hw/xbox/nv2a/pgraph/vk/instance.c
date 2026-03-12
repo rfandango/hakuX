@@ -503,6 +503,10 @@ static void add_optional_device_extension_names(
         }
     }
 #endif
+
+    r->push_descriptors_supported = add_extension_if_available(
+        available_extensions, enabled_extension_names,
+        VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
 }
 
 static bool check_device_support_required_extensions(VkPhysicalDevice device)

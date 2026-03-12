@@ -103,6 +103,7 @@ struct OptBisectStats {
     int sfp_miss_vtx_gen;
     int sfp_miss_tex_vram;
     int bindless_tex_fast;
+    int push_tex_fast;
     int pipeline_early_hits;
     int pipeline_early_misses;
     int vtx_cache_hits;
@@ -684,6 +685,8 @@ typedef struct ReorderWindowEntry {
 #if OPT_BINDLESS_TEXTURES
     uint32_t tex_indices[NV2A_MAX_TEXTURES];
 #endif
+    VkDescriptorImageInfo rw_push_tex_infos[NV2A_MAX_TEXTURES];
+    bool rw_use_push_descriptors;
 
     bool pre_draw_skipped;
 
@@ -727,6 +730,15 @@ typedef struct PGRAPHVkState {
     uint32_t tex_push_offset;
     int max_vertex_push_attrs;
 #endif
+    bool push_descriptors_supported;
+    VkDescriptorSetLayout push_tex_set_layout;
+    VkDescriptorSetLayout push_ubo_set_layout;
+    VkDescriptorPool push_ubo_pool;
+    VkDescriptorSet *push_ubo_sets;
+    int push_ubo_set_count;
+    int push_ubo_set_index;
+    VkDescriptorImageInfo push_tex_infos[NV2A_MAX_TEXTURES];
+    bool push_tex_dirty;
 
     VkPhysicalDevice physical_device;
     VkPhysicalDeviceFeatures enabled_physical_device_features;
