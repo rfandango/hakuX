@@ -202,6 +202,27 @@ static void pgraph_vk_init(NV2AState *d, Error **errp)
     pgraph_vk_init_textures(pg);
     VK_LOG_ERROR("init: reports");
     pgraph_vk_init_reports(pg);
+
+    {
+        PGRAPHVkState *r = pg->vk_renderer_state;
+        if (r->device_props.limits.timestampComputeAndGraphics) {
+            VkQueryPoolCreateInfo ts_ci = {
+                .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+                .queryType = VK_QUERY_TYPE_TIMESTAMP,
+                .queryCount = GPU_TS_QUERIES_PER_CB * NUM_SUBMIT_FRAMES,
+            };
+            VK_CHECK(vkCreateQueryPool(r->device, &ts_ci, NULL,
+                                       &r->gpu_ts_pool));
+            r->gpu_ts_supported = true;
+            r->gpu_ts_period_ns = r->device_props.limits.timestampPeriod;
+            VK_LOG_ERROR("init: GPU timestamps enabled (period=%.2f ns)",
+                         r->gpu_ts_period_ns);
+        } else {
+            r->gpu_ts_supported = false;
+            VK_LOG_ERROR("init: GPU timestamps not supported");
+        }
+    }
+
     VK_LOG_ERROR("init: compute");
     pgraph_vk_init_compute(pg);
     VK_LOG_ERROR("init: display");
@@ -222,6 +243,15 @@ static void pgraph_vk_finalize(NV2AState *d)
 
     pgraph_vk_finalize_display(pg);
     pgraph_vk_finalize_compute(pg);
+
+    {
+        PGRAPHVkState *r = pg->vk_renderer_state;
+        if (r->gpu_ts_supported) {
+            vkDestroyQueryPool(r->device, r->gpu_ts_pool, NULL);
+            r->gpu_ts_pool = VK_NULL_HANDLE;
+        }
+    }
+
     pgraph_vk_finalize_reports(pg);
     pgraph_vk_finalize_textures(pg);
     pgraph_vk_finalize_pipelines(pg);

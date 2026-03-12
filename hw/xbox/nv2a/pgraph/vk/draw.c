@@ -48,10 +48,12 @@ static void opt_stats_log_and_reset(void)
     if (++frame_counter % 60 == 0) {
 #ifdef __ANDROID__
         __android_log_print(ANDROID_LOG_INFO, "xemu-sfp",
-                "SFP:%d/%d BLtx:%d miss: clr%d noPl%d noCb%d noRp%d noFb%d fbD%d shC%d piD%d dsR%d uni%d noDs%d tG%d ndG%d prD%d vG%d tV%d",
+                "SFP:%d/%d BLtx:%d TxPool:%d/%d miss: clr%d noPl%d noCb%d noRp%d noFb%d fbD%d shC%d piD%d dsR%d uni%d noDs%d tG%d ndG%d prD%d vG%d tV%d",
                 g_opt_stats.super_fast_hits,
                 g_opt_stats.super_fast_misses,
                 g_opt_stats.bindless_tex_fast,
+                g_opt_stats.tex_pool_hits,
+                g_opt_stats.tex_pool_misses,
                 g_opt_stats.sfp_miss_clearing,
                 g_opt_stats.sfp_miss_no_pipeline,
                 g_opt_stats.sfp_miss_no_cmdbuf,
@@ -1822,14 +1824,73 @@ static void begin_render_pass(PGRAPHState *pg)
     vkCmdBeginRenderPass(r->command_buffer, &render_pass_begin_info,
                          VK_SUBPASS_CONTENTS_INLINE);
     r->in_render_pass = true;
+
+    if (r->gpu_ts_supported &&
+        r->gpu_ts_rp_index < GPU_TS_MAX_RENDER_PASSES) {
+        uint32_t base = r->current_frame * GPU_TS_QUERIES_PER_CB;
+        uint32_t slot = base + 2 + r->gpu_ts_rp_index * 2;
+        vkCmdWriteTimestamp(r->command_buffer,
+                            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                            r->gpu_ts_pool, slot);
+    }
 }
 
 static void end_render_pass(PGRAPHVkState *r)
 {
     if (r->in_render_pass) {
+        if (r->gpu_ts_supported &&
+            r->gpu_ts_rp_index < GPU_TS_MAX_RENDER_PASSES) {
+            uint32_t base = r->current_frame * GPU_TS_QUERIES_PER_CB;
+            uint32_t slot = base + 2 + r->gpu_ts_rp_index * 2 + 1;
+            vkCmdWriteTimestamp(r->command_buffer,
+                                VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                                r->gpu_ts_pool, slot);
+            r->gpu_ts_rp_index++;
+        }
         vkCmdEndRenderPass(r->command_buffer);
         r->in_render_pass = false;
     }
+}
+
+static void gpu_ts_readback(PGRAPHVkState *r, int frame)
+{
+    if (!r->gpu_ts_supported) {
+        return;
+    }
+
+    uint32_t base = frame * GPU_TS_QUERIES_PER_CB;
+    int rp_count = r->gpu_ts_rp_counts[frame];
+    uint32_t query_count = 2 + rp_count * 2;
+
+    VkResult res = vkGetQueryPoolResults(
+        r->device, r->gpu_ts_pool, base, query_count,
+        sizeof(uint64_t) * query_count, r->gpu_ts_results,
+        sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
+    if (res != VK_SUCCESS) {
+        return;
+    }
+
+    uint64_t cb_start = r->gpu_ts_results[0];
+    uint64_t cb_end = r->gpu_ts_results[1];
+    int64_t total_ticks = (int64_t)(cb_end - cb_start);
+    int64_t total_ns = (int64_t)(total_ticks * r->gpu_ts_period_ns);
+
+    int64_t render_ticks = 0;
+    for (int i = 0; i < rp_count; i++) {
+        uint64_t rp_start = r->gpu_ts_results[2 + i * 2];
+        uint64_t rp_end = r->gpu_ts_results[2 + i * 2 + 1];
+        render_ticks += (int64_t)(rp_end - rp_start);
+    }
+    int64_t render_ns = (int64_t)(render_ticks * r->gpu_ts_period_ns);
+    int64_t nonrender_ns = total_ns - render_ns;
+    if (nonrender_ns < 0) {
+        nonrender_ns = 0;
+    }
+
+    g_nv2a_stats.phase_working.gpu_total_ns += total_ns;
+    g_nv2a_stats.phase_working.gpu_render_ns += render_ns;
+    g_nv2a_stats.phase_working.gpu_nonrender_ns += nonrender_ns;
+    g_nv2a_stats.phase_working.gpu_rp_count += rp_count;
 }
 
 const enum NV2A_PROF_COUNTERS_ENUM finish_reason_to_counter_enum[] = {
@@ -1852,6 +1913,7 @@ void pgraph_vk_flush_all_frames(PGRAPHState *pg)
         if (r->frame_submitted[i]) {
             VK_CHECK(vkWaitForFences(r->device, 1, &r->frame_fences[i],
                                      VK_TRUE, UINT64_MAX));
+            gpu_ts_readback(r, i);
             r->frame_submitted[i] = false;
             for (int j = 0; j < r->deferred_framebuffer_count[i]; j++) {
                 vkDestroyFramebuffer(r->device,
@@ -1939,6 +2001,13 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
         if (r->query_in_flight) {
             end_query(r);
         }
+        if (r->gpu_ts_supported) {
+            uint32_t base = r->current_frame * GPU_TS_QUERIES_PER_CB;
+            vkCmdWriteTimestamp(r->command_buffer,
+                                VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                                r->gpu_ts_pool, base + 1);
+        }
+
         VK_CHECK(vkEndCommandBuffer(r->command_buffer));
 
         VkCommandBuffer cmd = pgraph_vk_ensure_nondraw_commands(pg);
@@ -1996,6 +2065,10 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
                 .pWaitDstStageMask = &wait_stage,
             }
         };
+        if (r->gpu_ts_supported) {
+            r->gpu_ts_rp_counts[r->current_frame] = r->gpu_ts_rp_index;
+        }
+
         nv2a_profile_inc_counter(NV2A_PROF_QUEUE_SUBMIT);
         vkResetFences(r->device, 1, &r->command_buffer_fence);
         NV2A_PHASE_TIMER_BEGIN(finish_submit);
@@ -2026,6 +2099,7 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
             if (!deferred) {
                 VK_CHECK(vkWaitForFences(r->device, 1, &r->command_buffer_fence,
                                          VK_TRUE, UINT64_MAX));
+                gpu_ts_readback(r, r->current_frame);
             }
         }
 #endif
@@ -2071,6 +2145,7 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
                 VK_CHECK(vkWaitForFences(r->device, 1,
                                          &r->frame_fences[next_frame],
                                          VK_TRUE, UINT64_MAX));
+                gpu_ts_readback(r, next_frame);
                 r->frame_submitted[next_frame] = false;
                 for (int i = 0; i < r->deferred_framebuffer_count[next_frame]; i++) {
                     vkDestroyFramebuffer(r->device,
@@ -2096,6 +2171,7 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
         } else {
             VK_CHECK(vkWaitForFences(r->device, 1, &r->command_buffer_fence,
                                      VK_TRUE, UINT64_MAX));
+            gpu_ts_readback(r, r->current_frame);
             r->frame_submitted[r->current_frame] = false;
 
             int next_frame = (r->current_frame + 1) % r->num_active_frames;
@@ -2109,6 +2185,7 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
 #else
         VK_CHECK(vkWaitForFences(r->device, 1, &r->command_buffer_fence,
                                  VK_TRUE, UINT64_MAX));
+        gpu_ts_readback(r, r->current_frame);
         r->frame_submitted[r->current_frame] = false;
 
         int next_frame = (r->current_frame + 1) % r->num_active_frames;
@@ -2178,6 +2255,16 @@ void pgraph_vk_begin_command_buffer(PGRAPHState *pg)
                                   &command_buffer_begin_info));
     r->command_buffer_start_time = pg->draw_time;
     r->in_command_buffer = true;
+
+    if (r->gpu_ts_supported) {
+        uint32_t base = r->current_frame * GPU_TS_QUERIES_PER_CB;
+        vkCmdResetQueryPool(r->command_buffer, r->gpu_ts_pool,
+                            base, GPU_TS_QUERIES_PER_CB);
+        vkCmdWriteTimestamp(r->command_buffer,
+                            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                            r->gpu_ts_pool, base + 0);
+        r->gpu_ts_rp_index = 0;
+    }
 #if OPT_BINDLESS_TEXTURES
     r->bindless_set_bound = false;
 #endif

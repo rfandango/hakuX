@@ -179,6 +179,11 @@ typedef struct FramePhaseTimingWork {
     /* Sub-phases within finish */
     int64_t finish_fence_ns;
     int64_t finish_submit_ns;
+    /* GPU-side timestamp measurements */
+    int64_t gpu_total_ns;
+    int64_t gpu_render_ns;
+    int64_t gpu_nonrender_ns;
+    int gpu_rp_count;
 } FramePhaseTimingWork;
 
 typedef struct FramePhaseTimingStats {
@@ -207,6 +212,11 @@ typedef struct FramePhaseTimingStats {
     /* Sub-phases within finish */
     float finish_fence_ms;
     float finish_submit_ms;
+    /* GPU-side timestamp measurements */
+    float gpu_total_ms;
+    float gpu_render_ms;
+    float gpu_nonrender_ms;
+    float gpu_rp_count;
 } FramePhaseTimingStats;
 
 typedef struct CpuTimingWork {
@@ -346,7 +356,7 @@ void nv2a_profile_get_surf_timing_str(char *buf, int bufsize);
 void nv2a_profile_get_workload_str(char *buf, int bufsize);
 
 #ifndef NV2A_PERF_LOG
-#define NV2A_PERF_LOG 0
+#define NV2A_PERF_LOG 1
 #endif
 
 /*

@@ -31,6 +31,9 @@
 #include "renderer.h"
 
 static void texture_cache_release_node_resources(PGRAPHVkState *r, TextureBinding *snode);
+static bool image_pool_acquire(PGRAPHVkState *r, const TextureImageConfig *config,
+                               VkImage *out_image, VmaAllocation *out_allocation);
+static void image_pool_drain(PGRAPHVkState *r);
 
 static const VkImageType dimensionality_to_vk_image_type[] = {
     0,
@@ -1092,6 +1095,16 @@ static void create_dummy_texture(PGRAPHState *pg)
 
     r->dummy_texture = (TextureBinding){
         .key.scale = 1.0,
+        .image_config = {
+            .format = VK_FORMAT_R8_UNORM,
+            .image_type = VK_IMAGE_TYPE_2D,
+            .width = image_create_info.extent.width,
+            .height = image_create_info.extent.height,
+            .depth = 1,
+            .mip_levels = 1,
+            .array_layers = 1,
+            .flags = 0,
+        },
         .image = texture_image,
         .current_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         .allocation = texture_allocation,
@@ -1398,13 +1411,32 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
                                         &image_create_info.extent.height);
     }
 
+    TextureImageConfig pool_cfg = {
+        .format = image_create_info.format,
+        .image_type = image_create_info.imageType,
+        .width = image_create_info.extent.width,
+        .height = image_create_info.extent.height,
+        .depth = image_create_info.extent.depth,
+        .mip_levels = image_create_info.mipLevels,
+        .array_layers = image_create_info.arrayLayers,
+        .flags = image_create_info.flags,
+    };
+    snode->image_config = pool_cfg;
+
     VmaAllocationCreateInfo alloc_create_info = {
         .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
     };
 
-    VkResult create_result = vmaCreateImage(r->allocator, &image_create_info,
-                                            &alloc_create_info, &snode->image,
-                                            &snode->allocation, NULL);
+    VkResult create_result = VK_SUCCESS;
+    if (image_pool_acquire(r, &pool_cfg, &snode->image, &snode->allocation)) {
+        snode->current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+        OPT_STAT_INC(tex_pool_hits);
+    } else {
+        create_result = vmaCreateImage(r->allocator, &image_create_info,
+                                       &alloc_create_info, &snode->image,
+                                       &snode->allocation, NULL);
+        OPT_STAT_INC(tex_pool_misses);
+    }
     if (create_result == VK_ERROR_OUT_OF_DEVICE_MEMORY ||
         create_result == VK_ERROR_OUT_OF_HOST_MEMORY) {
         const VkPhysicalDeviceMemoryProperties *props;
@@ -1432,11 +1464,13 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
                      image_create_info.arrayLayers,
                      create_result);
 
+        image_pool_drain(r);
         pgraph_vk_flush_all_frames(pg);
 
         for (int evict_pass = 0; evict_pass < 64; evict_pass++) {
             if (!lru_try_evict_one(&r->texture_cache)) break;
         }
+        image_pool_drain(r);
 
         create_result = vmaCreateImage(r->allocator, &image_create_info,
                                        &alloc_create_info, &snode->image,
@@ -1445,6 +1479,7 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
             VK_LOG_ERROR("OOM retry FAILED (result=%d), flushing all textures",
                          create_result);
             lru_flush(&r->texture_cache);
+            image_pool_drain(r);
             create_result = vmaCreateImage(r->allocator, &image_create_info,
                                            &alloc_create_info, &snode->image,
                                            &snode->allocation, NULL);
@@ -1798,6 +1833,76 @@ static void texture_cache_entry_init(Lru *lru, LruNode *node, const void *state)
     }
 }
 
+static void image_pool_init(PGRAPHVkState *r)
+{
+    QTAILQ_INIT(&r->image_pool);
+    r->image_pool_count = 0;
+}
+
+static bool image_pool_config_match(const TextureImageConfig *a,
+                                    const TextureImageConfig *b)
+{
+    return a->format == b->format &&
+           a->image_type == b->image_type &&
+           a->width == b->width &&
+           a->height == b->height &&
+           a->depth == b->depth &&
+           a->mip_levels == b->mip_levels &&
+           a->array_layers == b->array_layers &&
+           a->flags == b->flags;
+}
+
+static bool image_pool_acquire(PGRAPHVkState *r,
+                               const TextureImageConfig *config,
+                               VkImage *out_image,
+                               VmaAllocation *out_allocation)
+{
+    PooledImage *entry;
+    QTAILQ_FOREACH(entry, &r->image_pool, entry) {
+        if (image_pool_config_match(&entry->config, config)) {
+            *out_image = entry->image;
+            *out_allocation = entry->allocation;
+            QTAILQ_REMOVE(&r->image_pool, entry, entry);
+            g_free(entry);
+            r->image_pool_count--;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void image_pool_release(PGRAPHVkState *r,
+                               const TextureImageConfig *config,
+                               VkImage image, VmaAllocation allocation)
+{
+    if (r->image_pool_count >= IMAGE_POOL_MAX_SIZE) {
+        PooledImage *oldest = QTAILQ_FIRST(&r->image_pool);
+        assert(oldest != NULL);
+        QTAILQ_REMOVE(&r->image_pool, oldest, entry);
+        vmaDestroyImage(r->allocator, oldest->image, oldest->allocation);
+        g_free(oldest);
+        r->image_pool_count--;
+    }
+
+    PooledImage *pe = g_malloc(sizeof(PooledImage));
+    pe->config = *config;
+    pe->image = image;
+    pe->allocation = allocation;
+    QTAILQ_INSERT_TAIL(&r->image_pool, pe, entry);
+    r->image_pool_count++;
+}
+
+static void image_pool_drain(PGRAPHVkState *r)
+{
+    PooledImage *entry, *next;
+    QTAILQ_FOREACH_SAFE(entry, &r->image_pool, entry, next) {
+        QTAILQ_REMOVE(&r->image_pool, entry, entry);
+        vmaDestroyImage(r->allocator, entry->image, entry->allocation);
+        g_free(entry);
+    }
+    r->image_pool_count = 0;
+}
+
 static void texture_cache_release_node_resources(PGRAPHVkState *r, TextureBinding *snode)
 {
     vkDestroySampler(r->device, snode->sampler, NULL);
@@ -1806,7 +1911,10 @@ static void texture_cache_release_node_resources(PGRAPHVkState *r, TextureBindin
     vkDestroyImageView(r->device, snode->image_view, NULL);
     snode->image_view = VK_NULL_HANDLE;
 
-    vmaDestroyImage(r->allocator, snode->image, snode->allocation);
+    if (snode->image != VK_NULL_HANDLE) {
+        image_pool_release(r, &snode->image_config, snode->image,
+                           snode->allocation);
+    }
     snode->image = VK_NULL_HANDLE;
     snode->allocation = VK_NULL_HANDLE;
 }
@@ -1878,6 +1986,7 @@ static void texture_cache_init(PGRAPHVkState *r)
     const size_t texture_cache_size = 1024;
     lru_init(&r->texture_cache, 2048);
     QTAILQ_INIT(&r->texture_active_list);
+    image_pool_init(r);
     r->texture_cache_entries = g_malloc_n(texture_cache_size, sizeof(TextureBinding));
     assert(r->texture_cache_entries != NULL);
     for (int i = 0; i < texture_cache_size; i++) {
@@ -1893,6 +2002,7 @@ static void texture_cache_init(PGRAPHVkState *r)
 static void texture_cache_finalize(PGRAPHVkState *r)
 {
     lru_flush(&r->texture_cache);
+    image_pool_drain(r);
     lru_destroy(&r->texture_cache);
     g_free(r->texture_cache_entries);
     r->texture_cache_entries = NULL;

@@ -78,7 +78,15 @@ static void snapshot_phase_timing(void)
     SMOOTH(pipe_lookup);
     SMOOTH(finish_fence);
     SMOOTH(finish_submit);
+    SMOOTH(gpu_total);
+    SMOOTH(gpu_render);
+    SMOOTH(gpu_nonrender);
 #undef SMOOTH
+
+#define SMOOTH_CNT(dst, src) \
+    (dst) = (dst) * (1.0f - alpha) + (float)(src) * alpha
+    SMOOTH_CNT(p->gpu_rp_count, w->gpu_rp_count);
+#undef SMOOTH_CNT
 
     p->total_ms = p->surface_update_ms + p->texture_upload_ms +
                   p->shader_compile_ms + p->draw_dispatch_ms +
@@ -255,6 +263,16 @@ void nv2a_profile_flip_stall(void)
         __android_log_print(ANDROID_LOG_INFO, "xemu-pace", "%s", buf);
         nv2a_profile_get_workload_str(buf, sizeof(buf));
         __android_log_print(ANDROID_LOG_INFO, "xemu-work", "%s", buf);
+
+        {
+            FramePhaseTimingStats *ph = &g_nv2a_stats.phase;
+            __android_log_print(ANDROID_LOG_INFO, "xemu-gpu",
+                "GPU: Tot:%.1f Rnd:%.1f Xfr:%.1f RP:%.0f",
+                ph->gpu_total_ms,
+                ph->gpu_render_ms,
+                ph->gpu_nonrender_ms,
+                ph->gpu_rp_count);
+        }
     }
 #endif
 }

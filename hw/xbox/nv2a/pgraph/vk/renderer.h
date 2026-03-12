@@ -130,6 +130,8 @@ struct OptBisectStats {
     int reorder_safe_zfunc_lequal;
     int draws_skipped_pending;
     int draws_skipped_frameskip;
+    int tex_pool_hits;
+    int tex_pool_misses;
 };
 extern struct OptBisectStats g_opt_stats;
 #if NV2A_PERF_LOG
@@ -429,11 +431,30 @@ typedef struct TextureKey {
     uint32_t max_anisotropy;
 } TextureKey;
 
+#define IMAGE_POOL_MAX_SIZE 32
+
+typedef struct TextureImageConfig {
+    VkFormat format;
+    VkImageType image_type;
+    uint32_t width, height, depth;
+    uint32_t mip_levels;
+    uint32_t array_layers;
+    VkImageCreateFlags flags;
+} TextureImageConfig;
+
+typedef struct PooledImage {
+    QTAILQ_ENTRY(PooledImage) entry;
+    TextureImageConfig config;
+    VkImage image;
+    VmaAllocation allocation;
+} PooledImage;
+
 typedef struct TextureBinding {
     LruNode node;
     QTAILQ_ENTRY(TextureBinding) active_entry;
     bool in_active_list;
     TextureKey key;
+    TextureImageConfig image_config;
     VkImage image;
     VkImageLayout current_layout;
     VkImageView image_view;
@@ -884,6 +905,8 @@ typedef struct PGRAPHVkState {
     TextureBinding *texture_bindings[NV2A_MAX_TEXTURES];
     TextureBinding dummy_texture;
     bool texture_bindings_changed;
+    QTAILQ_HEAD(, PooledImage) image_pool;
+    int image_pool_count;
     uint32_t last_texture_state_gen;
     uint32_t texture_vram_gen;
     uint32_t last_texture_vram_gen;
@@ -945,6 +968,15 @@ typedef struct PGRAPHVkState {
     VkQueryPool query_pool;
     int max_queries_in_flight;
     int num_queries_in_flight;
+
+#define GPU_TS_MAX_RENDER_PASSES 48
+#define GPU_TS_QUERIES_PER_CB (2 + GPU_TS_MAX_RENDER_PASSES * 2)
+    VkQueryPool gpu_ts_pool;
+    bool gpu_ts_supported;
+    float gpu_ts_period_ns;
+    int gpu_ts_rp_index;
+    int gpu_ts_rp_counts[NUM_SUBMIT_FRAMES];
+    uint64_t gpu_ts_results[GPU_TS_QUERIES_PER_CB];
     bool new_query_needed;
     bool query_in_flight;
     bool queries_reset_in_cb;
