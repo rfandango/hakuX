@@ -51,9 +51,18 @@ void pgraph_init_reg_dynamic_masks(bool eds1, bool eds3)
     pgraph_reg_dynamic_mask_table[NV_PGRAPH_SETUPRASTER / 4] |=
         NV_PGRAPH_SETUPRASTER_CULLENABLE |
         NV_PGRAPH_SETUPRASTER_CULLCTRL |
-        NV_PGRAPH_SETUPRASTER_FRONTFACE;
+        NV_PGRAPH_SETUPRASTER_FRONTFACE |
+        NV_PGRAPH_SETUPRASTER_POFFSETPOINTENABLE |
+        NV_PGRAPH_SETUPRASTER_POFFSETLINEENABLE |
+        NV_PGRAPH_SETUPRASTER_POFFSETFILLENABLE |
+        NV_PGRAPH_SETUPRASTER_LINESMOOTHENABLE |
+        NV_PGRAPH_SETUPRASTER_POLYSMOOTHENABLE;
 
     pgraph_reg_dynamic_mask_table[NV_PGRAPH_BLENDCOLOR / 4] = 0xFFFFFFFF;
+
+    pgraph_reg_dynamic_mask_table[NV_PGRAPH_CONTROL_0 / 4] |=
+        NV_PGRAPH_CONTROL_0_ALPHAREF |
+        NV_PGRAPH_CONTROL_0_DITHERENABLE;
 
     pgraph_reg_dynamic_mask_table[NV_PGRAPH_BLEND / 4] |=
         NV_PGRAPH_BLEND_LOGICOP_ENABLE | NV_PGRAPH_BLEND_LOGICOP;
@@ -62,6 +71,7 @@ void pgraph_init_reg_dynamic_masks(bool eds1, bool eds3)
         pgraph_reg_dynamic_mask_table[NV_PGRAPH_CONTROL_0 / 4] |=
             NV_PGRAPH_CONTROL_0_ZENABLE |
             NV_PGRAPH_CONTROL_0_ZWRITEENABLE |
+            NV_PGRAPH_CONTROL_0_STENCIL_WRITE_ENABLE |
             NV_PGRAPH_CONTROL_0_ZFUNC;
         pgraph_reg_dynamic_mask_table[NV_PGRAPH_CONTROL_1 / 4] |=
             NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE |

@@ -48,11 +48,12 @@ static void opt_stats_log_and_reset(void)
     if (++frame_counter % 60 == 0) {
 #ifdef __ANDROID__
         __android_log_print(ANDROID_LOG_INFO, "xemu-sfp",
-                "SFP:%d/%d BLtx:%d PTx:%d TxPool:%d/%d miss: clr%d noPl%d noCb%d noRp%d noFb%d fbD%d shC%d piD%d dsR%d uni%d noDs%d tG%d ndG%d prD%d vG%d tV%d",
+                "SFP:%d/%d BLtx:%d PTx:%d UnF:%d TxPool:%d/%d miss: clr%d noPl%d noCb%d noRp%d noFb%d fbD%d shC%d piD%d dsR%d uni%d noDs%d tG%d ndG%d prD%d vG%d tV%d",
                 g_opt_stats.super_fast_hits,
                 g_opt_stats.super_fast_misses,
                 g_opt_stats.bindless_tex_fast,
                 g_opt_stats.push_tex_fast,
+                g_opt_stats.sfp_uniform_fast,
                 g_opt_stats.tex_pool_hits,
                 g_opt_stats.tex_pool_misses,
                 g_opt_stats.sfp_miss_clearing,
@@ -956,6 +957,7 @@ static void init_pipeline_key(PGRAPHState *pg, PipelineKey *key)
     if (use_dyn_ds) {
         key->regs[1] &= ~(NV_PGRAPH_CONTROL_0_ZENABLE |
                            NV_PGRAPH_CONTROL_0_ZWRITEENABLE |
+                           NV_PGRAPH_CONTROL_0_STENCIL_WRITE_ENABLE |
                            NV_PGRAPH_CONTROL_0_ZFUNC);
         key->regs[2] &= ~(NV_PGRAPH_CONTROL_2_STENCIL_OP_FAIL |
                            NV_PGRAPH_CONTROL_2_STENCIL_OP_ZFAIL |
@@ -963,6 +965,8 @@ static void init_pipeline_key(PGRAPHState *pg, PipelineKey *key)
     }
     key->regs[0] &= ~(NV_PGRAPH_BLEND_LOGICOP_ENABLE |
                        NV_PGRAPH_BLEND_LOGICOP);
+    key->regs[1] &= ~(NV_PGRAPH_CONTROL_0_ALPHAREF |
+                       NV_PGRAPH_CONTROL_0_DITHERENABLE);
 #if OPT_DYNAMIC_BLEND
     if (r->eds3_blend_supported) {
         key->regs[0] = 0;
@@ -974,7 +978,12 @@ static void init_pipeline_key(PGRAPHState *pg, PipelineKey *key)
 #endif
     key->regs[4] &= ~(NV_PGRAPH_SETUPRASTER_CULLENABLE |
                        NV_PGRAPH_SETUPRASTER_CULLCTRL |
-                       NV_PGRAPH_SETUPRASTER_FRONTFACE);
+                       NV_PGRAPH_SETUPRASTER_FRONTFACE |
+                       NV_PGRAPH_SETUPRASTER_POFFSETPOINTENABLE |
+                       NV_PGRAPH_SETUPRASTER_POFFSETLINEENABLE |
+                       NV_PGRAPH_SETUPRASTER_POFFSETFILLENABLE |
+                       NV_PGRAPH_SETUPRASTER_LINESMOOTHENABLE |
+                       NV_PGRAPH_SETUPRASTER_POLYSMOOTHENABLE);
     if (use_dyn_ds) {
         key->regs[5] &= ~(NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE |
                            NV_PGRAPH_CONTROL_1_STENCIL_FUNC |
@@ -2360,6 +2369,8 @@ void pgraph_vk_end_nondraw_commands(PGRAPHState *pg, VkCommandBuffer cmd)
 // buffer. For other reasons though (like descriptor set amount, surface
 // changes, etc) we do flush often.
 
+static bool upload_draw_uniforms(PGRAPHState *pg, size_t offsets_out[2]);
+
 static void begin_pre_draw(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
@@ -2474,6 +2485,19 @@ static void begin_pre_draw(PGRAPHState *pg)
                 }
 #endif
                 if (sfp_ok) {
+                    if (pg->any_reg_gen != r->last_any_reg_gen) {
+                        size_t ubo_offsets[2];
+                        if (upload_draw_uniforms(pg, ubo_offsets)) {
+                            r->uniform_buffer_offsets[0] = ubo_offsets[0];
+                            r->uniform_buffer_offsets[1] = ubo_offsets[1];
+                            bind_descriptor_sets(pg);
+                            OPT_STAT_INC(sfp_uniform_fast);
+                        } else {
+                            sfp_ok = false;
+                        }
+                    }
+                }
+                if (sfp_ok) {
                     r->last_any_reg_gen = pg->any_reg_gen;
                     r->last_non_dynamic_reg_gen = pg->non_dynamic_reg_gen;
                     OPT_STAT_INC(super_fast_hits);
@@ -2508,13 +2532,28 @@ static void begin_pre_draw(PGRAPHState *pg)
         pgraph_vk_bind_textures(d_tex);
         r->last_texture_state_gen = pg->texture_state_gen;
         r->last_texture_vram_gen = r->texture_vram_gen;
-        r->last_any_reg_gen = pg->any_reg_gen;
-        r->last_non_dynamic_reg_gen = pg->non_dynamic_reg_gen;
-        push_texture_indices(pg);
-        r->pre_draw_skipped = true;
+        bool bl_ok = true;
+        if (pg->any_reg_gen != r->last_any_reg_gen) {
+            size_t ubo_offsets[2];
+            if (upload_draw_uniforms(pg, ubo_offsets)) {
+                r->uniform_buffer_offsets[0] = ubo_offsets[0];
+                r->uniform_buffer_offsets[1] = ubo_offsets[1];
+                bind_descriptor_sets(pg);
+                OPT_STAT_INC(sfp_uniform_fast);
+            } else {
+                bl_ok = false;
+            }
+        }
+        if (bl_ok) {
+            r->last_any_reg_gen = pg->any_reg_gen;
+            r->last_non_dynamic_reg_gen = pg->non_dynamic_reg_gen;
+            push_texture_indices(pg);
+            r->pre_draw_skipped = true;
+            NV2A_VK_DGROUP_END();
+            OPT_STAT_INC(bindless_tex_fast);
+            return;
+        }
         NV2A_VK_DGROUP_END();
-        OPT_STAT_INC(bindless_tex_fast);
-        return;
     }
 #endif
 
@@ -2806,6 +2845,16 @@ static void begin_draw(PGRAPHState *pg)
                 assert(depth_func < ARRAY_SIZE(pgraph_depth_func_vk_map));
                 vkCmdSetDepthCompareOp(r->command_buffer,
                                        pgraph_depth_func_vk_map[depth_func]);
+
+                uint32_t swe_mw = GET_MASK(
+                    pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1),
+                    NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE);
+                if (!(control_0 & NV_PGRAPH_CONTROL_0_STENCIL_WRITE_ENABLE))
+                    swe_mw = 0;
+                vkCmdSetStencilWriteMask(r->command_buffer,
+                                         VK_STENCIL_FACE_FRONT_AND_BACK,
+                                         swe_mw);
+
                 r->dyn_state.control_0 = control_0;
             }
 
@@ -2828,6 +2877,8 @@ static void begin_draw(PGRAPHState *pg)
                                               NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ);
                 uint32_t mask_write = GET_MASK(control_1,
                                                NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE);
+                if (!(control_0 & NV_PGRAPH_CONTROL_0_STENCIL_WRITE_ENABLE))
+                    mask_write = 0;
                 vkCmdSetStencilCompareMask(r->command_buffer,
                                            VK_STENCIL_FACE_FRONT_AND_BACK, mask_read);
                 vkCmdSetStencilWriteMask(r->command_buffer,
@@ -3086,29 +3137,6 @@ static bool classify_draw_safe(PGRAPHState *pg)
 }
 #endif
 
-#if OPT_DRAW_MERGING
-static bool check_draw_mergeable(PGRAPHState *pg, DrawQueue *q)
-{
-    PGRAPHVkState *r = pg->vk_renderer_state;
-
-    if (pg->shader_state_gen != q->shader_state_gen ||
-        pg->pipeline_state_gen != q->pipeline_state_gen ||
-        pg->texture_state_gen != q->texture_state_gen ||
-        pg->vertex_attr_gen != q->vertex_attr_gen ||
-        r->texture_vram_gen != q->texture_vram_gen ||
-        r->framebuffer_dirty ||
-        pg->program_data_dirty ||
-        pg->primitive_mode != q->primitive_mode) {
-        return false;
-    }
-
-    if (check_rt_as_texture_hazard(pg)) {
-        return false;
-    }
-
-    return true;
-}
-
 static bool upload_draw_uniforms(PGRAPHState *pg, size_t offsets_out[2])
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
@@ -3141,6 +3169,29 @@ static bool upload_draw_uniforms(PGRAPHState *pg, size_t offsets_out[2])
         offsets_out[i] = pgraph_vk_append_to_buffer(
             pg, BUFFER_UNIFORM_STAGING, &data, &size, 1,
             r->device_props.limits.minUniformBufferOffsetAlignment);
+    }
+
+    return true;
+}
+
+#if OPT_DRAW_MERGING
+static bool check_draw_mergeable(PGRAPHState *pg, DrawQueue *q)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+
+    if (pg->shader_state_gen != q->shader_state_gen ||
+        pg->pipeline_state_gen != q->pipeline_state_gen ||
+        pg->texture_state_gen != q->texture_state_gen ||
+        pg->vertex_attr_gen != q->vertex_attr_gen ||
+        r->texture_vram_gen != q->texture_vram_gen ||
+        r->framebuffer_dirty ||
+        pg->program_data_dirty ||
+        pg->primitive_mode != q->primitive_mode) {
+        return false;
+    }
+
+    if (check_rt_as_texture_hazard(pg)) {
+        return false;
     }
 
     return true;
@@ -3985,7 +4036,9 @@ static void emit_reorder_entry(PGRAPHState *pg, ReorderWindowEntry *e,
 
         if (pipeline_changed ||
             e->dyn_control_1 != prev->dyn_control_1 ||
-            e->dyn_control_2 != prev->dyn_control_2) {
+            e->dyn_control_2 != prev->dyn_control_2 ||
+            ((e->dyn_control_0 ^ prev->dyn_control_0) &
+             NV_PGRAPH_CONTROL_0_STENCIL_WRITE_ENABLE)) {
             bool sten = e->dyn_control_1 &
                         NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE;
             vkCmdSetStencilTestEnable(r->command_buffer,
@@ -3999,6 +4052,8 @@ static void emit_reorder_entry(PGRAPHState *pg, ReorderWindowEntry *e,
                                    NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ);
             uint32_t mw = GET_MASK(e->dyn_control_1,
                                    NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE);
+            if (!(e->dyn_control_0 & NV_PGRAPH_CONTROL_0_STENCIL_WRITE_ENABLE))
+                mw = 0;
             vkCmdSetStencilCompareMask(r->command_buffer,
                                        VK_STENCIL_FACE_FRONT_AND_BACK, mr);
             vkCmdSetStencilWriteMask(r->command_buffer,
