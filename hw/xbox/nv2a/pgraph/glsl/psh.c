@@ -836,11 +836,12 @@ static void apply_convolution_filter(const struct PixelShader *ps, MString *vars
     };
 
     mstring_append_fmt(vars,
+        "vec4 t%d;\n"
         "{\n"
         "vec2 convTexelSize = 1.0 / vec2(textureSize(texSamp%d, 0));\n"
         "vec3 convBase = %s(pT%d.xyw);\n",
-        tex, tex_remap, tex);
-    mstring_append_fmt(vars, "vec4 t%d = ", tex);
+        tex, tex, tex_remap, tex);
+    mstring_append_fmt(vars, "t%d = ", tex);
     for (int i = 0; i < 9; i++) {
         mstring_append_fmt(vars,
             "%stextureProj(texSamp%d, convBase + vec3(vec2(%.1f,%.1f)*convTexelSize, 0)) * %s",

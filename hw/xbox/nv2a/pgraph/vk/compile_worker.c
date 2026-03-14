@@ -49,10 +49,12 @@ static void process_shader_module_job(PGRAPHVkState *r, CompileJob *job)
 
     ShaderModuleInfo *info = pgraph_vk_create_shader_module_from_glsl(
         r, key->kind, mstring_get_str(code));
-    pgraph_vk_ref_shader_module(info);
     mstring_unref(code);
 
-    shader_module_key_persist(key);
+    if (info) {
+        pgraph_vk_ref_shader_module(info);
+        shader_module_key_persist(key);
+    }
 
     qatomic_set(&target->module_info, info);
     qatomic_set(&target->ready, true);

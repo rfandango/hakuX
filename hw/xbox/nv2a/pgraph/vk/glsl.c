@@ -26,6 +26,37 @@
 #include <stdio.h>
 #include <sys/stat.h>
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#define GLSL_ERR(...) __android_log_print(ANDROID_LOG_ERROR, "xemu-glsl", __VA_ARGS__)
+#else
+#define GLSL_ERR(...) fprintf(stderr, __VA_ARGS__)
+#endif
+
+static void dump_glsl_failure(const char *phase, const char *info_log,
+                              const char *debug_log, const char *source)
+{
+    GLSL_ERR("GLSL %s failed", phase);
+    if (info_log && info_log[0])
+        GLSL_ERR("[INFO]: %s", info_log);
+    if (debug_log && debug_log[0])
+        GLSL_ERR("[DEBUG]: %s", debug_log);
+
+    if (source) {
+        const char *p = source;
+        int line = 1;
+        while (*p) {
+            const char *eol = strchr(p, '\n');
+            if (!eol) eol = p + strlen(p);
+            int len = (int)(eol - p);
+            GLSL_ERR("%4d| %.*s", line, len, p);
+            if (!*eol) break;
+            p = eol + 1;
+            line++;
+        }
+    }
+}
+
 static glslang_target_client_version_t g_glslang_client_version =
     GLSLANG_TARGET_VULKAN_1_1;
 static glslang_target_language_version_t g_glslang_spv_version =
@@ -183,28 +214,19 @@ GByteArray *pgraph_vk_compile_glsl_to_spv(glslang_stage_t stage,
     glslang_shader_t *shader = glslang_shader_create(&input);
 
     if (!glslang_shader_preprocess(shader, &input)) {
-        fprintf(stderr,
-                "GLSL preprocessing failed\n"
-                "[INFO]: %s\n"
-                "[DEBUG]: %s\n"
-                "%s\n",
-                glslang_shader_get_info_log(shader),
-                glslang_shader_get_info_debug_log(shader), input.code);
-        assert(!"glslang preprocess failed");
+        dump_glsl_failure("preprocessing",
+                          glslang_shader_get_info_log(shader),
+                          glslang_shader_get_info_debug_log(shader),
+                          input.code);
         glslang_shader_delete(shader);
         return NULL;
     }
 
     if (!glslang_shader_parse(shader, &input)) {
-        fprintf(stderr,
-                "GLSL parsing failed\n"
-                "[INFO]: %s\n"
-                "[DEBUG]: %s\n"
-                "%s\n",
-                glslang_shader_get_info_log(shader),
-                glslang_shader_get_info_debug_log(shader),
-                glslang_shader_get_preprocessed_code(shader));
-        assert(!"glslang parse failed");
+        dump_glsl_failure("parsing",
+                          glslang_shader_get_info_log(shader),
+                          glslang_shader_get_info_debug_log(shader),
+                          glslang_shader_get_preprocessed_code(shader));
         glslang_shader_delete(shader);
         return NULL;
     }
@@ -214,13 +236,10 @@ GByteArray *pgraph_vk_compile_glsl_to_spv(glslang_stage_t stage,
 
     if (!glslang_program_link(program, GLSLANG_MSG_SPV_RULES_BIT |
                                            GLSLANG_MSG_VULKAN_RULES_BIT)) {
-        fprintf(stderr,
-                "GLSL linking failed\n"
-                "[INFO]: %s\n"
-                "[DEBUG]: %s\n",
-                glslang_program_get_info_log(program),
-                glslang_program_get_info_debug_log(program));
-        assert(!"glslang link failed");
+        dump_glsl_failure("linking",
+                          glslang_program_get_info_log(program),
+                          glslang_program_get_info_debug_log(program),
+                          NULL);
         glslang_program_delete(program);
         glslang_shader_delete(shader);
         return NULL;
@@ -436,12 +455,20 @@ ShaderModuleInfo *pgraph_vk_create_shader_module_from_glsl(
         } else {
             info->spirv = pgraph_vk_compile_glsl_to_spv(
                 vk_shader_stage_to_glslang_stage(stage), glsl);
-            spv_cache_store(hash, info->spirv);
+            if (info->spirv) {
+                spv_cache_store(hash, info->spirv);
+            }
             g_nv2a_stats.shader_stats.spv_cache_misses++;
         }
     } else {
         info->spirv = pgraph_vk_compile_glsl_to_spv(
             vk_shader_stage_to_glslang_stage(stage), glsl);
+    }
+
+    if (!info->spirv) {
+        free(info->glsl);
+        g_free(info);
+        return NULL;
     }
 
     info->module = pgraph_vk_create_shader_module_from_spv(r, info->spirv);
@@ -461,6 +488,7 @@ static void finalize_uniform_layout(ShaderUniformLayout *layout)
 
 void pgraph_vk_ref_shader_module(ShaderModuleInfo *info)
 {
+    if (!info) return;
     info->refcnt++;
 }
 

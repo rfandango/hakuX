@@ -809,6 +809,14 @@ static bool try_finalize_shader_binding(PGRAPHVkState *r,
     if (geom_entry && !qatomic_read(&geom_entry->ready)) return false;
     if (!qatomic_read(&psh_entry->ready)) return false;
 
+    if (!vsh_entry->module_info || !psh_entry->module_info ||
+        (geom_entry && !geom_entry->module_info)) {
+        binding->pending_vsh_entry = NULL;
+        binding->pending_geom_entry = NULL;
+        binding->pending_psh_entry = NULL;
+        return false;
+    }
+
     pgraph_vk_ref_shader_module(vsh_entry->module_info);
     binding->vsh.module_info = vsh_entry->module_info;
     if (geom_entry) {
@@ -859,7 +867,9 @@ static void shader_cache_entry_init(Lru *lru, LruNode *node, const void *state)
                          (!geom_entry || qatomic_read(&geom_entry->ready)) &&
                          qatomic_read(&psh_entry->ready);
 
-        if (all_ready) {
+        if (all_ready &&
+            vsh_entry->module_info && psh_entry->module_info &&
+            (!geom_entry || geom_entry->module_info)) {
             pgraph_vk_ref_shader_module(vsh_entry->module_info);
             binding->vsh.module_info = vsh_entry->module_info;
             if (geom_entry) {
@@ -893,6 +903,14 @@ static void shader_cache_entry_init(Lru *lru, LruNode *node, const void *state)
     }
     binding->vsh.module_info = get_and_ref_shader_module_for_key(r, &vsh_key);
     binding->psh.module_info = get_and_ref_shader_module_for_key(r, &psh_key);
+
+    if (!binding->vsh.module_info || !binding->psh.module_info ||
+        (need_geom && !binding->geom.module_info)) {
+#if OPT_ASYNC_COMPILE
+        binding->ready = false;
+#endif
+        return;
+    }
 
     update_shader_uniform_locs(binding);
 }
@@ -964,10 +982,12 @@ static void shader_module_compile_sync(PGRAPHVkState *r,
 
     module->module_info = pgraph_vk_create_shader_module_from_glsl(
         r, module->key.kind, mstring_get_str(code));
-    pgraph_vk_ref_shader_module(module->module_info);
     mstring_unref(code);
 
-    shader_module_key_persist(&module->key);
+    if (module->module_info) {
+        pgraph_vk_ref_shader_module(module->module_info);
+        shader_module_key_persist(&module->key);
+    }
 }
 
 static void shader_module_cache_entry_init(Lru *lru, LruNode *node,
