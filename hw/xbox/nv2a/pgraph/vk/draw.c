@@ -48,7 +48,7 @@ static void opt_stats_log_and_reset(void)
     if (++frame_counter % 60 == 0) {
 #ifdef __ANDROID__
         __android_log_print(ANDROID_LOG_INFO, "xemu-sfp",
-                "SFP:%d/%d BLtx:%d PTx:%d UnF:%d VAF:%d TxPool:%d/%d miss: clr%d noPl%d noCb%d noRp%d noFb%d fbD%d shC%d piD%d dsR%d uni%d noDs%d tG%d ndG%d prD%d vG%d tV%d",
+                "SFP:%d/%d BLtx:%d PTx:%d UnF:%d VAF:%d TxPool:%d/%d SRS:%d SEE:%d miss: clr%d noPl%d noCb%d noRp%d noFb%d fbD%d shC%d piD%d dsR%d uni%d noDs%d tG%d ndG%d prD%d vG%d tV%d",
                 g_opt_stats.super_fast_hits,
                 g_opt_stats.super_fast_misses,
                 g_opt_stats.bindless_tex_fast,
@@ -57,6 +57,8 @@ static void opt_stats_log_and_reset(void)
                 g_opt_stats.vtx_attr_fast,
                 g_opt_stats.tex_pool_hits,
                 g_opt_stats.tex_pool_misses,
+                g_opt_stats.sync_range_skip,
+                g_opt_stats.sync_early_exit,
                 g_opt_stats.sfp_miss_clearing,
                 g_opt_stats.sfp_miss_no_pipeline,
                 g_opt_stats.sfp_miss_no_cmdbuf,
@@ -3769,6 +3771,65 @@ static void snapshot_push_constants(PGRAPHState *pg, ReorderWindowEntry *e)
     }
 }
 
+static inline bool has_dirty_vertex_pages(PGRAPHVkState *r)
+{
+    ram_addr_t ram_base = r->vram_ram_addr;
+
+    RCU_READ_LOCK_GUARD();
+    DirtyMemoryBlocks *blocks =
+        qatomic_rcu_read(&ram_list.dirty_memory[DIRTY_MEMORY_NV2A]);
+
+    for (int i = 0; i < r->num_vertex_ram_buffer_syncs; i++) {
+        hwaddr addr = r->vertex_ram_buffer_syncs[i].addr & TARGET_PAGE_MASK;
+        hwaddr end = ROUND_UP(r->vertex_ram_buffer_syncs[i].addr +
+                              r->vertex_ram_buffer_syncs[i].size,
+                              TARGET_PAGE_SIZE);
+        ram_addr_t start = ram_base + addr;
+        unsigned long page = start >> TARGET_PAGE_BITS;
+        unsigned long end_page = (ram_base + end) >> TARGET_PAGE_BITS;
+
+        while (page < end_page) {
+            unsigned long idx = page / DIRTY_MEMORY_BLOCK_SIZE;
+            unsigned long ofs = page % DIRTY_MEMORY_BLOCK_SIZE;
+            unsigned long num = MIN(end_page - page,
+                                    DIRTY_MEMORY_BLOCK_SIZE - ofs);
+            if (find_next_bit(blocks->blocks[idx], ofs + num, ofs)
+                < ofs + num) {
+                return true;
+            }
+            page += num;
+        }
+    }
+    return false;
+}
+
+#if OPT_SYNC_RANGE_SKIP
+static inline bool sync_range_covers(PGRAPHVkState *r,
+                                     uint32_t attr_gen,
+                                     uint32_t min_el,
+                                     uint32_t max_el)
+{
+    return attr_gen == r->sync_range_attr_gen &&
+           min_el >= r->sync_range_min &&
+           max_el <= r->sync_range_max;
+}
+
+static inline void sync_range_update(PGRAPHVkState *r,
+                                     uint32_t attr_gen,
+                                     uint32_t min_el,
+                                     uint32_t max_el)
+{
+    if (attr_gen != r->sync_range_attr_gen) {
+        r->sync_range_attr_gen = attr_gen;
+        r->sync_range_min = min_el;
+        r->sync_range_max = max_el;
+    } else {
+        r->sync_range_min = MIN(r->sync_range_min, min_el);
+        r->sync_range_max = MAX(r->sync_range_max, max_el);
+    }
+}
+#endif
+
 static bool try_snapshot_draw_arrays(NV2AState *d, ReorderWindowEntry *e)
 {
     PGRAPHState *pg = &d->pgraph;
@@ -3950,7 +4011,9 @@ static bool try_snapshot_inline_elements(NV2AState *d, ReorderWindowEntry *e)
         draw_indices[draw_index_count - 1]);
 
 #if OPT_SYNC_RANGE_SKIP
-    if (sync_range_covers(r, pg->vertex_attr_gen, min_element, max_element)) {
+    if (sync_range_covers(r, pg->vertex_attr_gen, min_element, max_element) &&
+        !has_dirty_vertex_pages(r)) {
+        OPT_STAT_INC(sync_range_skip);
         r->num_vertex_ram_buffer_syncs = 0;
     } else {
         sync_vertex_ram_buffer(pg);
@@ -4592,33 +4655,6 @@ static int compare_memory_sync_requirement_by_addr(const void *p1,
     return 0;
 }
 
-#if OPT_SYNC_RANGE_SKIP
-static inline bool sync_range_covers(PGRAPHVkState *r,
-                                     uint32_t attr_gen,
-                                     uint32_t min_el,
-                                     uint32_t max_el)
-{
-    return attr_gen == r->sync_range_attr_gen &&
-           min_el >= r->sync_range_min &&
-           max_el <= r->sync_range_max;
-}
-
-static inline void sync_range_update(PGRAPHVkState *r,
-                                     uint32_t attr_gen,
-                                     uint32_t min_el,
-                                     uint32_t max_el)
-{
-    if (attr_gen != r->sync_range_attr_gen) {
-        r->sync_range_attr_gen = attr_gen;
-        r->sync_range_min = min_el;
-        r->sync_range_max = max_el;
-    } else {
-        r->sync_range_min = MIN(r->sync_range_min, min_el);
-        r->sync_range_max = MAX(r->sync_range_max, max_el);
-    }
-}
-#endif
-
 static void sync_vertex_ram_buffer(PGRAPHState *pg)
 {
     NV2AState *d = container_of(pg, NV2AState, pgraph);
@@ -4650,7 +4686,8 @@ static void sync_vertex_ram_buffer(PGRAPHState *pg)
                 all_uploaded = false;
             }
         }
-        if (all_uploaded) {
+        if (all_uploaded && !has_dirty_vertex_pages(r)) {
+            OPT_STAT_INC(sync_early_exit);
             r->num_vertex_ram_buffer_syncs = 0;
             return;
         }
@@ -5199,7 +5236,9 @@ void pgraph_vk_flush_draw(NV2AState *d)
 
         NV2A_PHASE_TIMER_BEGIN(draw_vtx_sync);
 #if OPT_SYNC_RANGE_SKIP
-        if (sync_range_covers(r, pg->vertex_attr_gen, min_element, max_element)) {
+        if (sync_range_covers(r, pg->vertex_attr_gen, min_element, max_element) &&
+            !has_dirty_vertex_pages(r)) {
+            OPT_STAT_INC(sync_range_skip);
             r->num_vertex_ram_buffer_syncs = 0;
         } else {
             sync_vertex_ram_buffer(pg);
@@ -5327,7 +5366,9 @@ draw_arrays_done:
 
         NV2A_PHASE_TIMER_BEGIN(draw_vtx_sync);
 #if OPT_SYNC_RANGE_SKIP
-        if (sync_range_covers(r, pg->vertex_attr_gen, min_element, max_element)) {
+        if (sync_range_covers(r, pg->vertex_attr_gen, min_element, max_element) &&
+            !has_dirty_vertex_pages(r)) {
+            OPT_STAT_INC(sync_range_skip);
             r->num_vertex_ram_buffer_syncs = 0;
         } else {
             sync_vertex_ram_buffer(pg);

@@ -135,6 +135,8 @@ struct OptBisectStats {
     int draws_skipped_frameskip;
     int tex_pool_hits;
     int tex_pool_misses;
+    int sync_range_skip;
+    int sync_early_exit;
 };
 extern struct OptBisectStats g_opt_stats;
 #if NV2A_PERF_LOG
@@ -144,26 +146,14 @@ extern struct OptBisectStats g_opt_stats;
 #endif
 #define OPT_SURF_TO_TEX_INLINE  1
 /*
- * DISABLED: OPT_SYNC_RANGE_SKIP skips sync_vertex_ram_buffer when the element
- * range is "covered" by a previous sync within the same command buffer, keyed
- * on vertex_attr_gen (format/offset changes) and element min/max.
- *
- * The bug: vertex_attr_gen only tracks SET_VERTEX_DATA_ARRAY_FORMAT and
- * SET_VERTEX_DATA_ARRAY_OFFSET writes. It does NOT detect when the CPU writes
- * new vertex data to the same VRAM address with the same layout. When that
- * happens, sync_vertex_ram_buffer is skipped even though the DIRTY_MEMORY_NV2A
- * bitmap has new dirty pages, causing stale vertex data on the GPU (vertex
- * explosions, missing geometry).
- *
- * To fix properly, the skip decision must incorporate the VRAM dirty bitmap.
- * One approach: after sync_vertex_ram_buffer runs and finds no dirty pages,
- * record that the range was clean. On the next call with the same range, do a
- * lightweight dirty bitmap scan (like OPT_SYNC_EARLY_EXIT) before skipping.
- * The existing OPT_SYNC_EARLY_EXIT already provides a fast uploaded_bitmap
- * check inside sync_vertex_ram_buffer — this may be sufficient and makes
- * OPT_SYNC_RANGE_SKIP redundant unless the sort/merge overhead is significant.
+ * OPT_SYNC_RANGE_SKIP: skip sync_vertex_ram_buffer when the element range is
+ * already covered by a previous sync within the same command buffer AND a
+ * read-only scan of the DIRTY_MEMORY_NV2A bitmap confirms no new CPU writes.
+ * The dirty bitmap check (has_dirty_vertex_pages) prevents skipping when the
+ * CPU has written new vertex data to the same VRAM address with the same
+ * layout, which would not bump vertex_attr_gen.
  */
-#define OPT_SYNC_RANGE_SKIP     0
+#define OPT_SYNC_RANGE_SKIP     1
 
 #if OPT_ALWAYS_DEFERRED_FENCES
 _Static_assert(OPT_TRIPLE_BUFFERING && OPT_N_BUFFERED_SUBMIT && OPT_DEFERRED_FENCES,
