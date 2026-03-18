@@ -44,7 +44,8 @@ extern "C" bool xemu_get_frame_skip(void);
 extern "C" void xemu_set_submit_frames(int count);
 extern "C" int xemu_get_submit_frames(void);
 extern "C" bool runstate_is_running(void);
-extern "C" void xemu_android_toggle_pause(void);
+extern "C" void xemu_android_pause_emulation(void);
+extern "C" void xemu_android_resume_emulation(void);
 extern "C" void xemu_android_request_exit(void);
 
 #ifdef CONFIG_VULKAN
@@ -1348,17 +1349,16 @@ Java_com_rfandango_xemuandroid_SettingsActivity_nativeSetFpJit(JNIEnv *, jobject
     xemu_set_fp_jit(enable == JNI_TRUE);
 }
 
-extern "C" JNIEXPORT jboolean JNICALL
-Java_com_rfandango_xemuandroid_MainActivity_nativeTogglePause(JNIEnv *, jobject)
+extern "C" JNIEXPORT void JNICALL
+Java_com_rfandango_xemuandroid_MainActivity_nativePauseEmulation(JNIEnv *, jobject)
 {
-    xemu_android_toggle_pause();
-    return runstate_is_running() ? JNI_FALSE : JNI_TRUE;
+    xemu_android_pause_emulation();
 }
 
-extern "C" JNIEXPORT jboolean JNICALL
-Java_com_rfandango_xemuandroid_MainActivity_nativeIsPaused(JNIEnv *, jobject)
+extern "C" JNIEXPORT void JNICALL
+Java_com_rfandango_xemuandroid_MainActivity_nativeResumeEmulation(JNIEnv *, jobject)
 {
-    return runstate_is_running() ? JNI_FALSE : JNI_TRUE;
+    xemu_android_resume_emulation();
 }
 
 extern "C" JNIEXPORT void JNICALL

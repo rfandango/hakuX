@@ -31,6 +31,7 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
   private var inputManager: InputManager? = null
   private var hasPhysicalController = false
   private var pauseMenuOverlay: PauseMenuOverlay? = null
+  private var suspendedByLifecycle = false
 
   private val prefs by lazy { getSharedPreferences("x1box_prefs", MODE_PRIVATE) }
   private var fpsTextView: TextView? = null
@@ -67,6 +68,8 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
   private external fun nativeCaptureFrame(): Boolean
   private external fun nativeDumpRenderTarget(): Unit
   private external fun nativeDumpDiagFrame(): Unit
+  private external fun nativePauseEmulation(): Unit
+  private external fun nativeResumeEmulation(): Unit
   private external fun nativeExitEmulation(): Unit
 
   override fun loadLibraries() {
@@ -269,7 +272,11 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
 
   override fun onResume() {
     super.onResume()
-    
+    if (suspendedByLifecycle) {
+      nativeResumeEmulation()
+      suspendedByLifecycle = false
+    }
+
     mLayout?.postDelayed({
       registerVirtualController()
     }, 1000)
@@ -285,6 +292,8 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
 
   override fun onPause() {
     fpsHandler.removeCallbacks(fpsRunnable)
+    suspendedByLifecycle = true
+    nativePauseEmulation()
     super.onPause()
   }
 

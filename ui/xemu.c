@@ -138,6 +138,8 @@ static bool g_android_gl_bgra_supported = true;
 static bool g_android_use_hud = false;
 static bool g_android_paused = false;
 static bool g_android_should_quit = false;
+static volatile bool g_android_vm_pause_requested = false;
+static volatile bool g_android_vm_resume_requested = false;
 static uint64_t g_android_frame_counter = 0;
 static GLuint g_android_blit_prog;
 static GLuint g_android_blit_vao;
@@ -868,15 +870,13 @@ void sdl2_poll_events(struct sdl2_console *scon)
 #ifdef __ANDROID__
         case SDL_APP_TERMINATING:
             g_android_should_quit = true;
-            bdrv_flush_all();
             __android_log_print(ANDROID_LOG_INFO, "xemu-android",
-                                "android: app terminating, flushed block devices");
+                                "android: app terminating");
             break;
         case SDL_APP_WILLENTERBACKGROUND:
             g_android_paused = true;
-            bdrv_flush_all();
             __android_log_print(ANDROID_LOG_INFO, "xemu-android",
-                                "android: app entering background, flushed block devices");
+                                "android: app entering background");
             break;
         case SDL_APP_DIDENTERBACKGROUND:
             break;
@@ -1421,11 +1421,27 @@ void xemu_android_display_loop(void)
         if (g_android_paused || sdl2_console[0].hidden) {
             qemu_mutex_lock_main_loop();
             bql_lock();
+            if (g_android_vm_pause_requested) {
+                if (runstate_is_running()) {
+                    vm_stop(RUN_STATE_PAUSED);
+                }
+                g_android_vm_pause_requested = false;
+            }
             sdl2_poll_events(&sdl2_console[0]);
             bql_unlock();
             qemu_mutex_unlock_main_loop();
             SDL_Delay(16);
             continue;
+        }
+        if (g_android_vm_resume_requested) {
+            qemu_mutex_lock_main_loop();
+            bql_lock();
+            if (!runstate_is_running()) {
+                vm_start();
+            }
+            g_android_vm_resume_requested = false;
+            bql_unlock();
+            qemu_mutex_unlock_main_loop();
         }
         sdl2_gl_refresh(&sdl2_console[0].dcl);
 #ifdef __ANDROID__
@@ -1438,29 +1454,19 @@ void xemu_android_display_loop(void)
     }
 }
 
-void xemu_android_toggle_pause(void)
+void xemu_android_pause_emulation(void)
 {
-    qemu_mutex_lock_main_loop();
-    bql_lock();
-    if (runstate_is_running()) {
-        vm_stop(RUN_STATE_PAUSED);
-    } else {
-        vm_start();
-    }
-    bql_unlock();
-    qemu_mutex_unlock_main_loop();
+    g_android_vm_pause_requested = true;
+}
+
+void xemu_android_resume_emulation(void)
+{
+    g_android_vm_resume_requested = true;
 }
 
 void xemu_android_request_exit(void)
 {
-    extern ShutdownAction shutdown_action;
-    qemu_mutex_lock_main_loop();
-    bql_lock();
-    shutdown_action = SHUTDOWN_ACTION_POWEROFF;
     g_android_should_quit = true;
-    qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_UI);
-    bql_unlock();
-    qemu_mutex_unlock_main_loop();
 }
 #endif
 
