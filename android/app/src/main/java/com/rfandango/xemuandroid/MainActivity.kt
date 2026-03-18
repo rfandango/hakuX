@@ -1,6 +1,7 @@
 package com.rfandango.xemuandroid
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.hardware.input.InputManager
@@ -9,7 +10,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.TypedValue
+import android.view.GestureDetector
 import android.view.InputDevice
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
@@ -18,6 +21,7 @@ import android.widget.Button
 import android.widget.RelativeLayout
 import android.widget.TextView
 import android.widget.Toast
+import android.view.KeyEvent
 import org.libsdl.app.SDLActivity
 
 class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
@@ -26,6 +30,7 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
   private var isControllerVisible = false
   private var inputManager: InputManager? = null
   private var hasPhysicalController = false
+  private var pauseMenuOverlay: PauseMenuOverlay? = null
 
   private val prefs by lazy { getSharedPreferences("x1box_prefs", MODE_PRIVATE) }
   private var fpsTextView: TextView? = null
@@ -62,6 +67,7 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
   private external fun nativeCaptureFrame(): Boolean
   private external fun nativeDumpRenderTarget(): Unit
   private external fun nativeDumpDiagFrame(): Unit
+  private external fun nativeExitEmulation(): Unit
 
   override fun loadLibraries() {
     super.loadLibraries()
@@ -85,8 +91,11 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    SDLActivity.nativeSetenv("SDL_ANDROID_TRAP_BACK_BUTTON", "1")
     setupOnScreenController()
     setupFpsOverlay()
+    setupPauseMenu()
+    setupEdgeSwipe()
     setupControllerDetection()
     hideSystemUI()
   }
@@ -169,6 +178,73 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
       marginEnd = 8
     }
     mLayout?.addView(captureBtn, captureParams)
+  }
+
+  private fun setupPauseMenu() {
+    pauseMenuOverlay = PauseMenuOverlay(this).apply {
+      onExitEmulation = {
+        nativeExitEmulation()
+        val intent = Intent(this@MainActivity, GameLibraryActivity::class.java).apply {
+          flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        startActivity(intent)
+        finish()
+      }
+      onDismiss = {
+        togglePauseMenu()
+      }
+    }
+    val overlayParams = RelativeLayout.LayoutParams(
+      RelativeLayout.LayoutParams.MATCH_PARENT,
+      RelativeLayout.LayoutParams.MATCH_PARENT
+    )
+    mLayout?.addView(pauseMenuOverlay, overlayParams)
+  }
+
+  private fun setupEdgeSwipe() {
+    val edgeWidth = TypedValue.applyDimension(
+      TypedValue.COMPLEX_UNIT_DIP, 24f, resources.displayMetrics
+    ).toInt()
+
+    val edgeView = View(this)
+    val edgeParams = RelativeLayout.LayoutParams(edgeWidth, RelativeLayout.LayoutParams.MATCH_PARENT).apply {
+      addRule(RelativeLayout.ALIGN_PARENT_START)
+    }
+
+    val gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+      override fun onDown(e: MotionEvent): Boolean = true
+
+      override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
+        if (e1 != null && velocityX > 500f && (e2.x - e1.x) > 80f) {
+          togglePauseMenu()
+          return true
+        }
+        return false
+      }
+    })
+
+    edgeView.setOnTouchListener { _, event -> gestureDetector.onTouchEvent(event) }
+    mLayout?.addView(edgeView, edgeParams)
+  }
+
+  override fun dispatchKeyEvent(event: KeyEvent?): Boolean {
+    if (event?.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_DOWN) {
+      togglePauseMenu()
+      return true
+    }
+    if (event?.keyCode == KeyEvent.KEYCODE_BACK) {
+      return true
+    }
+    return super.dispatchKeyEvent(event)
+  }
+
+  private fun togglePauseMenu() {
+    val overlay = pauseMenuOverlay ?: return
+    if (overlay.isShowing()) {
+      overlay.dismiss()
+    } else {
+      overlay.show()
+    }
   }
 
   private fun setupOnScreenController() {

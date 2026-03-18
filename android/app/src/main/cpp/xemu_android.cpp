@@ -43,6 +43,9 @@ extern "C" void xemu_set_frame_skip(bool enable);
 extern "C" bool xemu_get_frame_skip(void);
 extern "C" void xemu_set_submit_frames(int count);
 extern "C" int xemu_get_submit_frames(void);
+extern "C" bool runstate_is_running(void);
+extern "C" void xemu_android_toggle_pause(void);
+extern "C" void xemu_android_request_exit(void);
 
 #ifdef CONFIG_VULKAN
 #include <adrenotools/driver.h>
@@ -1343,6 +1346,25 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_rfandango_xemuandroid_SettingsActivity_nativeSetFpJit(JNIEnv *, jobject, jboolean enable)
 {
     xemu_set_fp_jit(enable == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_rfandango_xemuandroid_MainActivity_nativeTogglePause(JNIEnv *, jobject)
+{
+    xemu_android_toggle_pause();
+    return runstate_is_running() ? JNI_FALSE : JNI_TRUE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_rfandango_xemuandroid_MainActivity_nativeIsPaused(JNIEnv *, jobject)
+{
+    return runstate_is_running() ? JNI_FALSE : JNI_TRUE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_rfandango_xemuandroid_MainActivity_nativeExitEmulation(JNIEnv *, jobject)
+{
+    xemu_android_request_exit();
 }
 
 #ifdef CONFIG_VULKAN

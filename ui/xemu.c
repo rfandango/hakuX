@@ -1437,6 +1437,31 @@ void xemu_android_display_loop(void)
 #endif
     }
 }
+
+void xemu_android_toggle_pause(void)
+{
+    qemu_mutex_lock_main_loop();
+    bql_lock();
+    if (runstate_is_running()) {
+        vm_stop(RUN_STATE_PAUSED);
+    } else {
+        vm_start();
+    }
+    bql_unlock();
+    qemu_mutex_unlock_main_loop();
+}
+
+void xemu_android_request_exit(void)
+{
+    extern ShutdownAction shutdown_action;
+    qemu_mutex_lock_main_loop();
+    bql_lock();
+    shutdown_action = SHUTDOWN_ACTION_POWEROFF;
+    g_android_should_quit = true;
+    qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_UI);
+    bql_unlock();
+    qemu_mutex_unlock_main_loop();
+}
 #endif
 
 void xb_surface_gl_create_texture(DisplaySurface *surface)
