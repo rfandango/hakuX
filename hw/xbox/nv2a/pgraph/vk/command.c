@@ -107,6 +107,8 @@ void pgraph_vk_end_single_time_commands(PGRAPHState *pg, VkCommandBuffer cmd)
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
+    pgraph_vk_render_thread_wait_idle(r);
+
     vkResetFences(r->device, 1, &r->aux_fence);
 
     VkSubmitInfo submit_info = {

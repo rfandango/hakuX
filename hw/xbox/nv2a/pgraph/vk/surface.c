@@ -449,19 +449,8 @@ static bool download_surface_record_deferred(NV2AState *d,
     return true;
 }
 
-static void download_surface_complete_deferred(NV2AState *d)
+static void complete_staged_downloads(PGRAPHVkState *r)
 {
-    PGRAPHState *pg = &d->pgraph;
-    PGRAPHVkState *r = pg->vk_renderer_state;
-
-    if (r->num_deferred_downloads == 0) {
-        return;
-    }
-
-    int64_t _t0 = nv2a_clock_ns();
-    pgraph_vk_finish(pg, VK_FINISH_REASON_SURFACE_DOWN);
-    int64_t _t1 = nv2a_clock_ns();
-
     StorageBuffer *staging = &r->storage_buffers[BUFFER_STAGING_DST];
 
     for (int i = 0; i < r->num_deferred_downloads; i++) {
@@ -486,11 +475,27 @@ static void download_surface_complete_deferred(NV2AState *d)
         }
     }
 
-    g_nv2a_stats.surf_working.df_flush_ns += _t1 - _t0;
-    g_nv2a_stats.surf_working.df_read_ns += nv2a_clock_ns() - _t1;
-
     r->num_deferred_downloads = 0;
     r->staging_dst_offset = 0;
+}
+
+static void download_surface_complete_deferred(NV2AState *d)
+{
+    PGRAPHState *pg = &d->pgraph;
+    PGRAPHVkState *r = pg->vk_renderer_state;
+
+    if (r->num_deferred_downloads == 0) {
+        return;
+    }
+
+    int64_t _t0 = nv2a_clock_ns();
+    pgraph_vk_finish(pg, VK_FINISH_REASON_SURFACE_DOWN);
+    int64_t _t1 = nv2a_clock_ns();
+
+    complete_staged_downloads(r);
+
+    g_nv2a_stats.surf_working.df_flush_ns += _t1 - _t0;
+    g_nv2a_stats.surf_working.df_read_ns += nv2a_clock_ns() - _t1;
 }
 
 static void download_surface_to_buffer(NV2AState *d, SurfaceBinding *surface,
@@ -974,11 +979,72 @@ void pgraph_vk_wait_for_surface_download(SurfaceBinding *surface)
 
 void pgraph_vk_process_pending_downloads(NV2AState *d)
 {
-    PGRAPHVkState *r = d->pgraph.vk_renderer_state;
+    PGRAPHState *pg = &d->pgraph;
+    PGRAPHVkState *r = pg->vk_renderer_state;
     SurfaceBinding *surface;
 
+    download_surface_complete_deferred(d);
+
+    bool can_defer = true;
+    int pending_count = 0;
+
     QTAILQ_FOREACH(surface, &r->surfaces, entry) {
-        download_surface(d, surface, false);
+        if (surface->download_pending && surface->width && surface->height) {
+            pending_count++;
+        }
+    }
+
+    if (pending_count == 0) {
+        qatomic_set(&r->downloads_pending, false);
+        qemu_event_set(&r->downloads_complete);
+        return;
+    }
+
+    if (pending_count > MAX_DEFERRED_DOWNLOADS) {
+        can_defer = false;
+    }
+
+    if (can_defer) {
+        QTAILQ_FOREACH(surface, &r->surfaces, entry) {
+            if (!surface->download_pending || !surface->width ||
+                !surface->height) {
+                continue;
+            }
+            if (!download_surface_record_deferred(
+                    d, surface, d->vram_ptr + surface->vram_addr)) {
+                can_defer = false;
+                break;
+            }
+        }
+    }
+
+    if (!can_defer || r->num_deferred_downloads == 0) {
+        download_surface_complete_deferred(d);
+        QTAILQ_FOREACH(surface, &r->surfaces, entry) {
+            download_surface(d, surface, false);
+        }
+        qatomic_set(&r->downloads_pending, false);
+        qemu_event_set(&r->downloads_complete);
+        return;
+    }
+
+    pgraph_vk_finish(pg, VK_FINISH_REASON_SURFACE_DOWN);
+
+    complete_staged_downloads(r);
+
+    QTAILQ_FOREACH(surface, &r->surfaces, entry) {
+        if (!surface->download_pending || !surface->width ||
+            !surface->height) {
+            continue;
+        }
+        memory_region_set_client_dirty(d->vram, surface->vram_addr,
+                                       surface->pitch * surface->height,
+                                       DIRTY_MEMORY_VGA);
+        memory_region_set_client_dirty(d->vram, surface->vram_addr,
+                                       surface->pitch * surface->height,
+                                       DIRTY_MEMORY_NV2A_TEX);
+        surface->download_pending = false;
+        surface->draw_dirty = false;
     }
 
     qatomic_set(&r->downloads_pending, false);
@@ -987,11 +1053,72 @@ void pgraph_vk_process_pending_downloads(NV2AState *d)
 
 void pgraph_vk_download_dirty_surfaces(NV2AState *d)
 {
-    PGRAPHVkState *r = d->pgraph.vk_renderer_state;
+    PGRAPHState *pg = &d->pgraph;
+    PGRAPHVkState *r = pg->vk_renderer_state;
 
+    download_surface_complete_deferred(d);
+
+    bool can_defer = true;
+    int pending_count = 0;
     SurfaceBinding *surface;
+
     QTAILQ_FOREACH(surface, &r->surfaces, entry) {
-        pgraph_vk_surface_download_if_dirty(d, surface);
+        if (surface->draw_dirty && surface->width && surface->height) {
+            pending_count++;
+        }
+    }
+
+    if (pending_count == 0) {
+        qatomic_set(&r->download_dirty_surfaces_pending, false);
+        qemu_event_set(&r->dirty_surfaces_download_complete);
+        return;
+    }
+
+    if (pending_count > MAX_DEFERRED_DOWNLOADS) {
+        can_defer = false;
+    }
+
+    if (can_defer) {
+        QTAILQ_FOREACH(surface, &r->surfaces, entry) {
+            if (!surface->draw_dirty || !surface->width ||
+                !surface->height) {
+                continue;
+            }
+            if (!download_surface_record_deferred(
+                    d, surface, d->vram_ptr + surface->vram_addr)) {
+                can_defer = false;
+                break;
+            }
+        }
+    }
+
+    if (!can_defer || r->num_deferred_downloads == 0) {
+        download_surface_complete_deferred(d);
+        QTAILQ_FOREACH(surface, &r->surfaces, entry) {
+            pgraph_vk_surface_download_if_dirty(d, surface);
+        }
+        qatomic_set(&r->download_dirty_surfaces_pending, false);
+        qemu_event_set(&r->dirty_surfaces_download_complete);
+        return;
+    }
+
+    pgraph_vk_finish(pg, VK_FINISH_REASON_SURFACE_DOWN);
+
+    complete_staged_downloads(r);
+
+    QTAILQ_FOREACH(surface, &r->surfaces, entry) {
+        if (!surface->draw_dirty || !surface->width ||
+            !surface->height) {
+            continue;
+        }
+        memory_region_set_client_dirty(d->vram, surface->vram_addr,
+                                       surface->pitch * surface->height,
+                                       DIRTY_MEMORY_VGA);
+        memory_region_set_client_dirty(d->vram, surface->vram_addr,
+                                       surface->pitch * surface->height,
+                                       DIRTY_MEMORY_NV2A_TEX);
+        surface->download_pending = false;
+        surface->draw_dirty = false;
     }
 
     qatomic_set(&r->download_dirty_surfaces_pending, false);
@@ -2365,7 +2492,7 @@ void pgraph_vk_surface_update(NV2AState *d, bool upload, bool color_write,
            upload, color_write, zeta_write, pg->clearing);
 
     pg->surface_shape.z_format =
-        GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
+        GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_SETUPRASTER),
                  NV_PGRAPH_SETUPRASTER_Z_FORMAT);
 
     color_write = color_write &&

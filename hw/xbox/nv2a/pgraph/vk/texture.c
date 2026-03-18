@@ -1187,15 +1187,15 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
     size_t texture_palette_data_size = 0;
 
     uint32_t filter =
-        pgraph_reg_r(pg, NV_PGRAPH_TEXFILTER0 + texture_idx * 4);
+        pgraph_vk_reg_r(pg, NV_PGRAPH_TEXFILTER0 + texture_idx * 4);
     uint32_t address =
-        pgraph_reg_r(pg, NV_PGRAPH_TEXADDRESS0 + texture_idx * 4);
+        pgraph_vk_reg_r(pg, NV_PGRAPH_TEXADDRESS0 + texture_idx * 4);
     uint32_t border_color_pack32 =
-        pgraph_reg_r(pg, NV_PGRAPH_BORDERCOLOR0 + texture_idx * 4);
+        pgraph_vk_reg_r(pg, NV_PGRAPH_BORDERCOLOR0 + texture_idx * 4);
     bool is_indexed = (state.color_format ==
             NV097_SET_TEXTURE_FORMAT_COLOR_SZ_I8_A8R8G8B8);
     uint32_t max_anisotropy =
-        1 << (GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_TEXCTL0_0 + texture_idx*4),
+        1 << (GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_TEXCTL0_0 + texture_idx*4),
                        NV_PGRAPH_TEXCTL0_0_MAX_ANISOTROPY));
 
     TextureKey key;
@@ -1349,6 +1349,8 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
     }
 
     if (binding_found) {
+        bool did_s2t_copy = false;
+        bool did_upload = false;
         if (surface_to_texture) {
             if (surface->draw_time != snode->draw_time) {
 #if OPT_ALWAYS_DEFERRED_FENCES
@@ -1357,6 +1359,7 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
                 }
 #endif
                 copy_surface_to_texture(pg, surface, snode);
+                did_s2t_copy = true;
             }
         } else {
             if (possibly_dirty && content_hash != snode->hash) {
@@ -1367,6 +1370,7 @@ static void create_texture(PGRAPHState *pg, int texture_idx)
 #endif
                 upload_texture_image(pg, texture_idx, snode);
                 snode->hash = content_hash;
+                did_upload = true;
             }
             snode->possibly_dirty = false;
         }
@@ -1754,16 +1758,16 @@ void pgraph_vk_bind_textures(NV2AState *d)
             !r->texture_bindings[i]->dirty_check_result &&
             !r->texture_bindings[i]->possibly_dirty) {
             uint32_t cur[8] = {
-                pgraph_reg_r(pg, NV_PGRAPH_TEXOFFSET0 + i * 4),
-                pgraph_reg_r(pg, NV_PGRAPH_TEXFMT0 + i * 4),
-                pgraph_reg_r(pg, NV_PGRAPH_TEXCTL0_0 + i * 4),
-                pgraph_reg_r(pg, NV_PGRAPH_TEXCTL1_0 + i * 4),
-                pgraph_reg_r(pg, NV_PGRAPH_TEXFILTER0 + i * 4),
-                pgraph_reg_r(pg, NV_PGRAPH_TEXADDRESS0 + i * 4),
-                pgraph_reg_r(pg, NV_PGRAPH_BORDERCOLOR0 + i * 4),
-                pgraph_reg_r(pg, NV_PGRAPH_TEXIMAGERECT0 + i * 4),
+                pgraph_vk_reg_r(pg, NV_PGRAPH_TEXOFFSET0 + i * 4),
+                pgraph_vk_reg_r(pg, NV_PGRAPH_TEXFMT0 + i * 4),
+                pgraph_vk_reg_r(pg, NV_PGRAPH_TEXCTL0_0 + i * 4),
+                pgraph_vk_reg_r(pg, NV_PGRAPH_TEXCTL1_0 + i * 4),
+                pgraph_vk_reg_r(pg, NV_PGRAPH_TEXFILTER0 + i * 4),
+                pgraph_vk_reg_r(pg, NV_PGRAPH_TEXADDRESS0 + i * 4),
+                pgraph_vk_reg_r(pg, NV_PGRAPH_BORDERCOLOR0 + i * 4),
+                pgraph_vk_reg_r(pg, NV_PGRAPH_TEXIMAGERECT0 + i * 4),
             };
-            uint32_t sp = (pgraph_reg_r(pg, NV_PGRAPH_SHADERPROG) >> (i * 5)) & 0x1F;
+            uint32_t sp = (pgraph_vk_reg_r(pg, NV_PGRAPH_SHADERPROG) >> (i * 5)) & 0x1F;
             if (memcmp(cur, r->tex_reg_cache[i].regs, sizeof(cur)) == 0 &&
                 sp == r->tex_reg_cache[i].shaderprog_bits) {
                 pg->texture_dirty[i] = false;
@@ -1774,16 +1778,16 @@ void pgraph_vk_bind_textures(NV2AState *d)
         TextureBinding *prev_binding = r->texture_bindings[i];
         create_texture(pg, i);
 
-        r->tex_reg_cache[i].regs[0] = pgraph_reg_r(pg, NV_PGRAPH_TEXOFFSET0 + i * 4);
-        r->tex_reg_cache[i].regs[1] = pgraph_reg_r(pg, NV_PGRAPH_TEXFMT0 + i * 4);
-        r->tex_reg_cache[i].regs[2] = pgraph_reg_r(pg, NV_PGRAPH_TEXCTL0_0 + i * 4);
-        r->tex_reg_cache[i].regs[3] = pgraph_reg_r(pg, NV_PGRAPH_TEXCTL1_0 + i * 4);
-        r->tex_reg_cache[i].regs[4] = pgraph_reg_r(pg, NV_PGRAPH_TEXFILTER0 + i * 4);
-        r->tex_reg_cache[i].regs[5] = pgraph_reg_r(pg, NV_PGRAPH_TEXADDRESS0 + i * 4);
-        r->tex_reg_cache[i].regs[6] = pgraph_reg_r(pg, NV_PGRAPH_BORDERCOLOR0 + i * 4);
-        r->tex_reg_cache[i].regs[7] = pgraph_reg_r(pg, NV_PGRAPH_TEXIMAGERECT0 + i * 4);
+        r->tex_reg_cache[i].regs[0] = pgraph_vk_reg_r(pg, NV_PGRAPH_TEXOFFSET0 + i * 4);
+        r->tex_reg_cache[i].regs[1] = pgraph_vk_reg_r(pg, NV_PGRAPH_TEXFMT0 + i * 4);
+        r->tex_reg_cache[i].regs[2] = pgraph_vk_reg_r(pg, NV_PGRAPH_TEXCTL0_0 + i * 4);
+        r->tex_reg_cache[i].regs[3] = pgraph_vk_reg_r(pg, NV_PGRAPH_TEXCTL1_0 + i * 4);
+        r->tex_reg_cache[i].regs[4] = pgraph_vk_reg_r(pg, NV_PGRAPH_TEXFILTER0 + i * 4);
+        r->tex_reg_cache[i].regs[5] = pgraph_vk_reg_r(pg, NV_PGRAPH_TEXADDRESS0 + i * 4);
+        r->tex_reg_cache[i].regs[6] = pgraph_vk_reg_r(pg, NV_PGRAPH_BORDERCOLOR0 + i * 4);
+        r->tex_reg_cache[i].regs[7] = pgraph_vk_reg_r(pg, NV_PGRAPH_TEXIMAGERECT0 + i * 4);
         r->tex_reg_cache[i].shaderprog_bits =
-            (pgraph_reg_r(pg, NV_PGRAPH_SHADERPROG) >> (i * 5)) & 0x1F;
+            (pgraph_vk_reg_r(pg, NV_PGRAPH_SHADERPROG) >> (i * 5)) & 0x1F;
         r->tex_reg_cache[i].valid = true;
 
         if (r->texture_bindings[i] != prev_binding) {

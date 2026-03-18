@@ -158,6 +158,7 @@ static void pgraph_vk_init(NV2AState *d, Error **errp)
     PGRAPHState *pg = &d->pgraph;
 
     pg->vk_renderer_state = (PGRAPHVkState *)g_malloc0(sizeof(PGRAPHVkState));
+    pg->vk_renderer_state->nv2a = d;
     pg->vk_renderer_state->need_descriptor_rebind = true;
 
 #if HAVE_EXTERNAL_MEMORY
@@ -185,6 +186,8 @@ static void pgraph_vk_init(NV2AState *d, Error **errp)
 
     check_driver_identity_and_wipe_caches(pg->vk_renderer_state);
 
+    VK_LOG_ERROR("init: render_thread");
+    pgraph_vk_render_thread_init(pg->vk_renderer_state);
     VK_LOG_ERROR("init: command_buffers");
     pgraph_vk_init_command_buffers(pg);
     VK_LOG_ERROR("init: buffers");
@@ -233,6 +236,10 @@ static void pgraph_vk_init(NV2AState *d, Error **errp)
     pgraph_vk_update_vertex_ram_buffer(&d->pgraph, 0, d->vram_ptr,
                                    memory_region_size(d->vram));
 
+#if OPT_ALWAYS_DEFERRED_FENCES
+    pg->vk_renderer_state->frame_staging[0].vertex_ram_initialized = true;
+#endif
+
     VK_LOG_ERROR("init: renderer_ready");
 
 }
@@ -241,6 +248,7 @@ static void pgraph_vk_finalize(NV2AState *d)
 {
     PGRAPHState *pg = &d->pgraph;
 
+    pgraph_vk_render_thread_shutdown(pg->vk_renderer_state);
     pgraph_vk_finalize_display(pg);
     pgraph_vk_finalize_compute(pg);
 
@@ -272,70 +280,66 @@ static void pgraph_vk_finalize(NV2AState *d)
 #endif
 }
 
-static void pgraph_vk_flush(NV2AState *d)
-{
-    PGRAPHState *pg = &d->pgraph;
-
-    pgraph_vk_flush_reorder_window(d);
-    pgraph_vk_flush_draw_queue(d);
-    pgraph_vk_finish(pg, VK_FINISH_REASON_FLUSH);
-    pgraph_vk_surface_flush(d);
-    pgraph_vk_mark_textures_possibly_dirty(d, 0, memory_region_size(d->vram));
-    pgraph_vk_update_vertex_ram_buffer(&d->pgraph, 0, d->vram_ptr,
-                                       memory_region_size(d->vram));
-    PGRAPHVkState *r = pg->vk_renderer_state;
-    r->texture_vram_gen++;
-    for (int i = 0; i < 4; i++) {
-        pg->texture_dirty[i] = true;
-    }
-
-    /* FIXME: Flush more? */
-
-    qatomic_set(&d->pgraph.flush_pending, false);
-    qemu_event_set(&d->pgraph.flush_complete);
-}
-
-static void pgraph_vk_sync(NV2AState *d)
-{
-    PGRAPHState *pg = &d->pgraph;
-#if HAVE_EXTERNAL_MEMORY
-    if (pg->vk_renderer_state->display.use_external_memory) {
-        pgraph_vk_render_display(pg);
-    }
-#else
-    pgraph_vk_render_display(pg);
-#endif
-
-    qatomic_set(&d->pgraph.sync_pending, false);
-    qemu_event_set(&d->pgraph.sync_complete);
-}
-
 static void pgraph_vk_process_pending(NV2AState *d)
 {
     PGRAPHVkState *r = d->pgraph.vk_renderer_state;
 
-    if (qatomic_read(&r->downloads_pending) ||
-        qatomic_read(&r->download_dirty_surfaces_pending) ||
-        qatomic_read(&d->pgraph.sync_pending) ||
-        qatomic_read(&d->pgraph.flush_pending)
-    ) {
-        qemu_mutex_unlock(&d->pfifo.lock);
-        qemu_mutex_lock(&d->pgraph.lock);
-        if (qatomic_read(&r->downloads_pending)) {
-            pgraph_vk_process_pending_downloads(d);
-        }
-        if (qatomic_read(&r->download_dirty_surfaces_pending)) {
-            pgraph_vk_download_dirty_surfaces(d);
-        }
-        if (qatomic_read(&d->pgraph.sync_pending)) {
-            pgraph_vk_sync(d);
-        }
-        if (qatomic_read(&d->pgraph.flush_pending)) {
-            pgraph_vk_flush(d);
-        }
-        qemu_mutex_unlock(&d->pgraph.lock);
-        qemu_mutex_lock(&d->pfifo.lock);
+    bool need_downloads = qatomic_read(&r->downloads_pending);
+    bool need_dirty_dl = qatomic_read(&r->download_dirty_surfaces_pending);
+    bool need_sync = qatomic_read(&d->pgraph.sync_pending);
+    bool need_flush = qatomic_read(&d->pgraph.flush_pending);
+
+    if (!need_downloads && !need_dirty_dl && !need_sync && !need_flush) {
+        return;
     }
+
+    qemu_mutex_unlock(&d->pfifo.lock);
+
+    if (need_downloads) {
+        QemuEvent dl_event;
+        qemu_event_init(&dl_event, false);
+        RenderCommand *cmd = g_new0(RenderCommand, 1);
+        cmd->type = RCMD_PROCESS_DOWNLOADS;
+        cmd->download.dirty_surfaces = false;
+        cmd->download.completion = &dl_event;
+        pgraph_vk_render_thread_enqueue(r, cmd);
+        qemu_event_wait(&dl_event);
+        qemu_event_destroy(&dl_event);
+    }
+    if (need_dirty_dl) {
+        QemuEvent dl_event;
+        qemu_event_init(&dl_event, false);
+        RenderCommand *cmd = g_new0(RenderCommand, 1);
+        cmd->type = RCMD_PROCESS_DOWNLOADS;
+        cmd->download.dirty_surfaces = true;
+        cmd->download.completion = &dl_event;
+        pgraph_vk_render_thread_enqueue(r, cmd);
+        qemu_event_wait(&dl_event);
+        qemu_event_destroy(&dl_event);
+    }
+
+    if (need_sync) {
+        QemuEvent sync_event;
+        qemu_event_init(&sync_event, false);
+        RenderCommand *cmd = g_new0(RenderCommand, 1);
+        cmd->type = RCMD_SYNC_DISPLAY;
+        cmd->sync.completion = &sync_event;
+        pgraph_vk_render_thread_enqueue(r, cmd);
+        qemu_event_wait(&sync_event);
+        qemu_event_destroy(&sync_event);
+    }
+    if (need_flush) {
+        QemuEvent flush_event;
+        qemu_event_init(&flush_event, false);
+        RenderCommand *cmd = g_new0(RenderCommand, 1);
+        cmd->type = RCMD_FLUSH;
+        cmd->flush_op.completion = &flush_event;
+        pgraph_vk_render_thread_enqueue(r, cmd);
+        qemu_event_wait(&flush_event);
+        qemu_event_destroy(&flush_event);
+    }
+
+    qemu_mutex_lock(&d->pfifo.lock);
 }
 
 static char rt_dump_dir[512] = "";
@@ -608,11 +612,11 @@ void nv2a_diag_log_draw_call(NV2AState *d, PGRAPHState *pg,
     PGRAPHVkState *r = pg->vk_renderer_state;
     int idx = diag_draw_index++;
 
-    uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
-    uint32_t control_1 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1);
-    uint32_t control_2 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_2);
-    uint32_t blend_reg = pgraph_reg_r(pg, NV_PGRAPH_BLEND);
-    uint32_t setupraster = pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER);
+    uint32_t control_0 = pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_0);
+    uint32_t control_1 = pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_1);
+    uint32_t control_2 = pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_2);
+    uint32_t blend_reg = pgraph_vk_reg_r(pg, NV_PGRAPH_BLEND);
+    uint32_t setupraster = pgraph_vk_reg_r(pg, NV_PGRAPH_SETUPRASTER);
 
     bool blend_en    = blend_reg & NV_PGRAPH_BLEND_EN;
     uint32_t sfactor = GET_MASK(blend_reg, NV_PGRAPH_BLEND_SFACTOR);
@@ -728,7 +732,7 @@ void nv2a_diag_log_draw_call(NV2AState *d, PGRAPHState *pg,
     diag_json_append("    \"textures\": [");
     for (int i = 0; i < NV2A_MAX_TEXTURES; i++) {
         bool tex_en = pgraph_is_texture_enabled(pg, i);
-        uint32_t tex_fmt = pgraph_reg_r(pg, NV_PGRAPH_TEXFMT0 + i * 4);
+        uint32_t tex_fmt = pgraph_vk_reg_r(pg, NV_PGRAPH_TEXFMT0 + i * 4);
         unsigned int color_format = GET_MASK(tex_fmt, NV_PGRAPH_TEXFMT0_COLOR);
         unsigned int dimensionality = GET_MASK(tex_fmt,
                                                NV_PGRAPH_TEXFMT0_DIMENSIONALITY);

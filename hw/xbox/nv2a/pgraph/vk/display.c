@@ -1607,6 +1607,8 @@ static void render_display(PGRAPHState *pg, SurfaceBinding *surface)
 #if OPT_DISPLAY_DOUBLE_BUFFER
     VK_CHECK(vkEndCommandBuffer(cmd));
 
+    pgraph_vk_render_thread_wait_idle(r);
+
     vkResetFences(r->device, 1, &img->fence);
     VkSubmitInfo submit_info = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,

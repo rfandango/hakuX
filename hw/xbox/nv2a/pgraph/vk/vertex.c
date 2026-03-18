@@ -53,14 +53,35 @@ void pgraph_vk_update_vertex_ram_buffer(PGRAPHState *pg, hwaddr offset,
     size_t end_bit = TARGET_PAGE_ALIGN(offset + size) / TARGET_PAGE_SIZE;
     size_t nbits = end_bit - start_bit;
 
+#if OPT_ALWAYS_DEFERRED_FENCES
+    /* Per-frame buffer: no finish needed, each frame has its own copy */
+#else
     if (find_next_bit(get_uploaded_bitmap(r), start_bit + nbits, start_bit) <
         end_bit) {
         pgraph_vk_finish(pg, VK_FINISH_REASON_VERTEX_BUFFER_DIRTY);
     }
+#endif
 
     nv2a_profile_inc_counter(NV2A_PROF_GEOM_BUFFER_UPDATE_1);
-    memcpy(r->storage_buffers[BUFFER_VERTEX_RAM].mapped + offset, data, size);
+    StorageBuffer *vram = get_staging_buffer(r, BUFFER_VERTEX_RAM);
+    memcpy(vram->mapped + offset, data, size);
 
+#if OPT_ALWAYS_DEFERRED_FENCES
+    FrameStagingState *fs = &r->frame_staging[r->current_frame];
+    if (offset < fs->vertex_ram_flush_min) {
+        fs->vertex_ram_flush_min = offset;
+    }
+    VkDeviceSize end = offset + size;
+    if (end > fs->vertex_ram_flush_max) {
+        fs->vertex_ram_flush_max = end;
+    }
+    if (offset < fs->vertex_ram_propagate_min) {
+        fs->vertex_ram_propagate_min = offset;
+    }
+    if (end > fs->vertex_ram_propagate_max) {
+        fs->vertex_ram_propagate_max = end;
+    }
+#else
     if (offset < r->vertex_ram_flush_min) {
         r->vertex_ram_flush_min = offset;
     }
@@ -68,6 +89,7 @@ void pgraph_vk_update_vertex_ram_buffer(PGRAPHState *pg, hwaddr offset,
     if (end > r->vertex_ram_flush_max) {
         r->vertex_ram_flush_max = end;
     }
+#endif
 
     bitmap_set(get_uploaded_bitmap(r), start_bit, nbits);
 }

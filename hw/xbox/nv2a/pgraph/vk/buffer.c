@@ -288,15 +288,25 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
             .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
             .buffer_size = stg_cap,
         };
+        fs->vertex_ram = (StorageBuffer){
+            .alloc_info = host_alloc_create_info,
+            .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            .buffer_size = memory_region_size(d->vram),
+        };
+        fs->vertex_ram_flush_min = VK_WHOLE_SIZE;
+        fs->vertex_ram_flush_max = 0;
+        fs->vertex_ram_propagate_min = VK_WHOLE_SIZE;
+        fs->vertex_ram_propagate_max = 0;
+        fs->vertex_ram_initialized = false;
 
         char name[64];
         StorageBuffer *bufs[] = {
             &fs->index_staging, &fs->vertex_inline_staging,
-            &fs->uniform_staging, &fs->staging_src
+            &fs->uniform_staging, &fs->staging_src, &fs->vertex_ram
         };
         const char *names[] = {
             "INDEX_STAGING", "VTXINLINE_STAGING", "UNIFORM_STAGING",
-            "STAGING_SRC"
+            "STAGING_SRC", "VERTEX_RAM"
         };
         for (int j = 0; j < ARRAY_SIZE(bufs); j++) {
             snprintf(name, sizeof(name), "FRAME%d_%s", i, names[j]);
@@ -340,7 +350,7 @@ fail:
         FrameStagingState *fs = &r->frame_staging[i];
         StorageBuffer *bufs[] = {
             &fs->index_staging, &fs->vertex_inline_staging,
-            &fs->uniform_staging, &fs->staging_src
+            &fs->uniform_staging, &fs->staging_src, &fs->vertex_ram
         };
         for (int j = 0; j < ARRAY_SIZE(bufs); j++) {
             if (bufs[j]->mapped) {
@@ -376,7 +386,7 @@ void pgraph_vk_finalize_buffers(NV2AState *d)
         FrameStagingState *fs = &r->frame_staging[i];
         StorageBuffer *bufs[] = {
             &fs->index_staging, &fs->vertex_inline_staging,
-            &fs->uniform_staging, &fs->staging_src
+            &fs->uniform_staging, &fs->staging_src, &fs->vertex_ram
         };
         for (int j = 0; j < ARRAY_SIZE(bufs); j++) {
             if (bufs[j]->mapped) {

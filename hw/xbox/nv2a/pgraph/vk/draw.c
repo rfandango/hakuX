@@ -25,12 +25,6 @@
 #include "ui/xemu-settings.h"
 #include "hw/xbox/nv2a/pgraph/prim_rewrite.h"
 #include <math.h>
-#ifdef __ANDROID__
-#include <android/log.h>
-#define DBG_LOG(...) __android_log_print(ANDROID_LOG_INFO, "xemu-vk-dbg", __VA_ARGS__)
-#else
-#define DBG_LOG(...) fprintf(stderr, __VA_ARGS__)
-#endif
 
 static bool g_xemu_fast_fences = false;
 static bool g_xemu_draw_reorder = false;
@@ -96,35 +90,6 @@ static void opt_stats_log_and_reset(void)
                 g_opt_stats.reorder_reject_zpass,
                 g_opt_stats.draws_skipped_pending,
                 g_opt_stats.draws_skipped_frameskip);
-#else
-        DBG_LOG("[OPT-STATS] SFP:%d/%d PEX:%d/%d VTC:%d/%d DRS:%d/%d MDI:%d/%d"
-                " RW:%d/%d/%d"
-                " RWSafe:%d Rej:Bl%d Cw%d Dp%d Zw%d Zf%d St%d Al%d Ak%d Rt%d Fb%d Zp%d",
-                g_opt_stats.super_fast_hits,
-                g_opt_stats.super_fast_misses,
-                g_opt_stats.pipeline_early_hits,
-                g_opt_stats.pipeline_early_misses,
-                g_opt_stats.vtx_cache_hits,
-                g_opt_stats.vtx_cache_misses,
-                g_opt_stats.desc_rebind_skips,
-                g_opt_stats.desc_rebind_full,
-                g_opt_stats.multi_draw_indirect,
-                g_opt_stats.multi_draw_loop,
-                g_opt_stats.reorder_windows_flushed,
-                g_opt_stats.reorder_draws_reordered,
-                g_opt_stats.reorder_pipeline_switches_saved,
-                g_opt_stats.reorder_safe_draws,
-                g_opt_stats.reorder_reject_blend,
-                g_opt_stats.reorder_reject_no_color_write,
-                g_opt_stats.reorder_reject_no_depth,
-                g_opt_stats.reorder_reject_no_zwrite,
-                g_opt_stats.reorder_reject_zfunc,
-                g_opt_stats.reorder_reject_stencil,
-                g_opt_stats.reorder_reject_alpha,
-                g_opt_stats.reorder_reject_alphakill,
-                g_opt_stats.reorder_reject_rtt,
-                g_opt_stats.reorder_reject_fb_dirty,
-                g_opt_stats.reorder_reject_zpass);
 #endif
         memset(&g_opt_stats, 0, sizeof(g_opt_stats));
     }
@@ -206,7 +171,7 @@ void pgraph_vk_draw_begin(NV2AState *d)
 
     NV2A_VK_DPRINTF("NV097_SET_BEGIN_END: 0x%x", d->pgraph.primitive_mode);
 
-    uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
+    uint32_t control_0 = pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_0);
     bool mask_alpha = control_0 & NV_PGRAPH_CONTROL_0_ALPHA_WRITE_ENABLE;
     bool mask_red = control_0 & NV_PGRAPH_CONTROL_0_RED_WRITE_ENABLE;
     bool mask_green = control_0 & NV_PGRAPH_CONTROL_0_GREEN_WRITE_ENABLE;
@@ -214,7 +179,7 @@ void pgraph_vk_draw_begin(NV2AState *d)
     bool color_write = mask_alpha || mask_red || mask_green || mask_blue;
     bool depth_test = control_0 & NV_PGRAPH_CONTROL_0_ZENABLE;
     bool stencil_test =
-        pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1) & NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE;
+        pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_1) & NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE;
     bool is_nop_draw = !(color_write || depth_test || stencil_test);
 
     pgraph_vk_surface_update(d, true, true, depth_test || stencil_test);
@@ -474,6 +439,7 @@ void pgraph_vk_finalize_pipelines(PGRAPHState *pg)
     finalize_pipeline_cache(pg);
     finalize_render_passes(r);
 
+    pgraph_vk_render_thread_wait_idle(r);
     for (int i = 0; i < NUM_SUBMIT_FRAMES; i++) {
         if (r->frame_submitted[i]) {
             VK_CHECK(vkWaitForFences(r->device, 1, &r->frame_fences[i],
@@ -952,7 +918,7 @@ static void init_pipeline_key(PGRAPHState *pg, PipelineKey *key)
 #endif
     assert(ARRAY_SIZE(regs) == ARRAY_SIZE(key->regs));
     for (int i = 0; i < ARRAY_SIZE(regs); i++) {
-        key->regs[i] = pgraph_reg_r(pg, regs[i]);
+        key->regs[i] = pgraph_vk_reg_r(pg, regs[i]);
     }
 #if OPT_DYNAMIC_STATES
     bool use_dyn_ds = OPT_DYNAMIC_DEPTH_STENCIL &&
@@ -1135,13 +1101,13 @@ static void create_pipeline(PGRAPHState *pg)
 #else
     bool use_eds3_blend = false;
 #endif
-    uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
+    uint32_t control_0 = pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_0);
     bool depth_test = false, depth_write = false, stencil_test = false;
     if (!use_dyn_ds) {
         depth_test = control_0 & NV_PGRAPH_CONTROL_0_ZENABLE;
         depth_write = !!(control_0 & NV_PGRAPH_CONTROL_0_ZWRITEENABLE);
         stencil_test =
-            pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1) & NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE;
+            pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_1) & NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE;
     }
 
     int num_active_shader_stages = 0;
@@ -1215,7 +1181,7 @@ static void create_pipeline(PGRAPHState *pg)
             VK_FRONT_FACE_COUNTER_CLOCKWISE,
         .cullMode = VK_CULL_MODE_NONE,
 #else
-            (pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER) &
+            (pgraph_vk_reg_r(pg, NV_PGRAPH_SETUPRASTER) &
              NV_PGRAPH_SETUPRASTER_FRONTFACE) ?
                  VK_FRONT_FACE_COUNTER_CLOCKWISE :
                  VK_FRONT_FACE_CLOCKWISE,
@@ -1225,8 +1191,8 @@ static void create_pipeline(PGRAPHState *pg)
     };
 
 #if !OPT_DYNAMIC_STATES
-    if (pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER) & NV_PGRAPH_SETUPRASTER_CULLENABLE) {
-        uint32_t cull_face = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
+    if (pgraph_vk_reg_r(pg, NV_PGRAPH_SETUPRASTER) & NV_PGRAPH_SETUPRASTER_CULLENABLE) {
+        uint32_t cull_face = GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_SETUPRASTER),
                                       NV_PGRAPH_SETUPRASTER_CULLCTRL);
         assert(cull_face < ARRAY_SIZE(pgraph_cull_face_vk_map));
         rasterizer.cullMode = pgraph_cull_face_vk_map[cull_face];
@@ -1253,26 +1219,26 @@ static void create_pipeline(PGRAPHState *pg)
         if (depth_test) {
             depth_stencil.depthTestEnable = VK_TRUE;
             uint32_t depth_func =
-                GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0), NV_PGRAPH_CONTROL_0_ZFUNC);
+                GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_0), NV_PGRAPH_CONTROL_0_ZFUNC);
             assert(depth_func < ARRAY_SIZE(pgraph_depth_func_vk_map));
             depth_stencil.depthCompareOp = pgraph_depth_func_vk_map[depth_func];
         }
 
         if (stencil_test) {
             depth_stencil.stencilTestEnable = VK_TRUE;
-            uint32_t stencil_func = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1),
+            uint32_t stencil_func = GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_1),
                                              NV_PGRAPH_CONTROL_1_STENCIL_FUNC);
-            uint32_t stencil_ref = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1),
+            uint32_t stencil_ref = GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_1),
                                             NV_PGRAPH_CONTROL_1_STENCIL_REF);
-            uint32_t mask_read = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1),
+            uint32_t mask_read = GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_1),
                                           NV_PGRAPH_CONTROL_1_STENCIL_MASK_READ);
-            uint32_t mask_write = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1),
+            uint32_t mask_write = GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_1),
                                            NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE);
-            uint32_t op_fail = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_2),
+            uint32_t op_fail = GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_2),
                                         NV_PGRAPH_CONTROL_2_STENCIL_OP_FAIL);
-            uint32_t op_zfail = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_2),
+            uint32_t op_zfail = GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_2),
                                          NV_PGRAPH_CONTROL_2_STENCIL_OP_ZFAIL);
-            uint32_t op_zpass = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_2),
+            uint32_t op_zpass = GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_2),
                                          NV_PGRAPH_CONTROL_2_STENCIL_OP_ZPASS);
 
             assert(stencil_func < ARRAY_SIZE(pgraph_stencil_func_vk_map));
@@ -1311,13 +1277,13 @@ static void create_pipeline(PGRAPHState *pg)
             write_mask |= VK_COLOR_COMPONENT_A_BIT;
         color_blend_attachment.colorWriteMask = write_mask;
 
-        if (pgraph_reg_r(pg, NV_PGRAPH_BLEND) & NV_PGRAPH_BLEND_EN) {
+        if (pgraph_vk_reg_r(pg, NV_PGRAPH_BLEND) & NV_PGRAPH_BLEND_EN) {
             color_blend_attachment.blendEnable = VK_TRUE;
 
             uint32_t sfactor =
-                GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_BLEND), NV_PGRAPH_BLEND_SFACTOR);
+                GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_BLEND), NV_PGRAPH_BLEND_SFACTOR);
             uint32_t dfactor =
-                GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_BLEND), NV_PGRAPH_BLEND_DFACTOR);
+                GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_BLEND), NV_PGRAPH_BLEND_DFACTOR);
             assert(sfactor < ARRAY_SIZE(pgraph_blend_factor_vk_map));
             assert(dfactor < ARRAY_SIZE(pgraph_blend_factor_vk_map));
             color_blend_attachment.srcColorBlendFactor =
@@ -1330,7 +1296,7 @@ static void create_pipeline(PGRAPHState *pg)
                 pgraph_blend_factor_vk_map[dfactor];
 
             uint32_t equation =
-                GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_BLEND), NV_PGRAPH_BLEND_EQN);
+                GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_BLEND), NV_PGRAPH_BLEND_EQN);
             assert(equation < ARRAY_SIZE(pgraph_blend_equation_vk_map));
 
             color_blend_attachment.colorBlendOp =
@@ -1338,7 +1304,7 @@ static void create_pipeline(PGRAPHState *pg)
             color_blend_attachment.alphaBlendOp =
                 pgraph_blend_equation_vk_map[equation];
 
-            uint32_t blend_color = pgraph_reg_r(pg, NV_PGRAPH_BLENDCOLOR);
+            uint32_t blend_color = pgraph_vk_reg_r(pg, NV_PGRAPH_BLENDCOLOR);
             pgraph_argb_pack32_to_rgba_float(blend_color, blend_constant);
         }
     }
@@ -1398,18 +1364,18 @@ static void create_pipeline(PGRAPHState *pg)
     };
 
     // FIXME: Dither
-    // if (pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0) &
+    // if (pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_0) &
     //         NV_PGRAPH_CONTROL_0_DITHERENABLE))
     // FIXME: point size
     // FIXME: Edge Antialiasing
-    // bool anti_aliasing = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_ANTIALIASING),
+    // bool anti_aliasing = GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_ANTIALIASING),
     // NV_PGRAPH_ANTIALIASING_ENABLE);
-    // if (!anti_aliasing && pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER) &
+    // if (!anti_aliasing && pgraph_vk_reg_r(pg, NV_PGRAPH_SETUPRASTER) &
     //                           NV_PGRAPH_SETUPRASTER_LINESMOOTHENABLE) {
     // FIXME: VK_EXT_line_rasterization
     // }
 
-    // if (!anti_aliasing && pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER) &
+    // if (!anti_aliasing && pgraph_vk_reg_r(pg, NV_PGRAPH_SETUPRASTER) &
     //                           NV_PGRAPH_SETUPRASTER_POLYSMOOTHENABLE) {
     // FIXME: No direct analog. Just do it with MSAA.
     // }
@@ -1786,6 +1752,17 @@ static void flush_memory_buffer(PGRAPHState *pg, VkCommandBuffer cmd)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
 
+#if OPT_ALWAYS_DEFERRED_FENCES
+    FrameStagingState *fs = &r->frame_staging[r->current_frame];
+    if (fs->vertex_ram_flush_min >= fs->vertex_ram_flush_max) {
+        return;
+    }
+
+    VkDeviceSize offset = fs->vertex_ram_flush_min;
+    VkDeviceSize size = fs->vertex_ram_flush_max - fs->vertex_ram_flush_min;
+
+    StorageBuffer *vram = &fs->vertex_ram;
+#else
     if (r->vertex_ram_flush_min >= r->vertex_ram_flush_max) {
         return;
     }
@@ -1793,9 +1770,11 @@ static void flush_memory_buffer(PGRAPHState *pg, VkCommandBuffer cmd)
     VkDeviceSize offset = r->vertex_ram_flush_min;
     VkDeviceSize size = r->vertex_ram_flush_max - r->vertex_ram_flush_min;
 
+    StorageBuffer *vram = get_staging_buffer(r, BUFFER_VERTEX_RAM);
+#endif
+
     VK_CHECK(vmaFlushAllocation(
-        r->allocator, r->storage_buffers[BUFFER_VERTEX_RAM].allocation,
-        offset, size));
+        r->allocator, vram->allocation, offset, size));
 
     VkBufferMemoryBarrier barrier = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
@@ -1803,7 +1782,7 @@ static void flush_memory_buffer(PGRAPHState *pg, VkCommandBuffer cmd)
         .dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .buffer = r->storage_buffers[BUFFER_VERTEX_RAM].buffer,
+        .buffer = vram->buffer,
         .offset = offset,
         .size = size,
     };
@@ -1812,8 +1791,13 @@ static void flush_memory_buffer(PGRAPHState *pg, VkCommandBuffer cmd)
                          VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 0, 0, NULL, 1,
                          &barrier, 0, NULL);
 
+#if OPT_ALWAYS_DEFERRED_FENCES
+    fs->vertex_ram_flush_min = VK_WHOLE_SIZE;
+    fs->vertex_ram_flush_max = 0;
+#else
     r->vertex_ram_flush_min = VK_WHOLE_SIZE;
     r->vertex_ram_flush_max = 0;
+#endif
 }
 
 static VkAttachmentLoadOp get_optimal_color_load_op(PGRAPHVkState *r)
@@ -1967,6 +1951,7 @@ const enum NV2A_PROF_COUNTERS_ENUM finish_reason_to_counter_enum[] = {
 void pgraph_vk_flush_all_frames(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
+    pgraph_vk_render_thread_wait_idle(r);
     for (int i = 0; i < NUM_SUBMIT_FRAMES; i++) {
         if (r->frame_submitted[i]) {
             VK_CHECK(vkWaitForFences(r->device, 1, &r->frame_fences[i],
@@ -1984,6 +1969,8 @@ void pgraph_vk_flush_all_frames(PGRAPHState *pg)
             r->frame_staging[i].vertex_inline_staging.buffer_offset = 0;
             r->frame_staging[i].uniform_staging.buffer_offset = 0;
             r->frame_staging[i].staging_src.buffer_offset = 0;
+            r->frame_staging[i].vertex_ram_flush_min = VK_WHOLE_SIZE;
+            r->frame_staging[i].vertex_ram_flush_max = 0;
             bitmap_clear(r->frame_staging[i].uploaded_bitmap,
                          0, r->bitmap_size);
         }
@@ -2021,15 +2008,6 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
 
     NV2A_PHASE_TIMER_BEGIN(finish);
     PGRAPHVkState *r = pg->vk_renderer_state;
-
-    {
-        static int dbg_entry = 0;
-        if (dbg_entry < 100) {
-            DBG_LOG("[FIN-ENTRY] reason=%d in_cb=%d frame=%d",
-                    finish_reason, r->in_command_buffer, r->current_frame);
-            dbg_entry++;
-        }
-    }
 
     if (finish_reason == VK_FINISH_REASON_FLIP_STALL ||
         finish_reason == VK_FINISH_REASON_PRESENTING) {
@@ -2093,7 +2071,10 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
         sync_staging_buffer(pg, cmd, BUFFER_VERTEX_INLINE_STAGING,
                                 BUFFER_VERTEX_INLINE);
         sync_staging_buffer(pg, cmd, BUFFER_UNIFORM_STAGING, BUFFER_UNIFORM);
+#if OPT_ALWAYS_DEFERRED_FENCES
+#else
         bitmap_clear(get_uploaded_bitmap(r), 0, r->bitmap_size);
+#endif
 #if OPT_SYNC_RANGE_SKIP
         r->sync_range_attr_gen = 0;
         r->sync_range_min = UINT32_MAX;
@@ -2128,39 +2109,69 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
         }
 
         nv2a_profile_inc_counter(NV2A_PROF_QUEUE_SUBMIT);
-        vkResetFences(r->device, 1, &r->command_buffer_fence);
         NV2A_PHASE_TIMER_BEGIN(finish_submit);
-        VK_CHECK(vkQueueSubmit(r->queue, ARRAY_SIZE(submit_infos), submit_infos,
-                               r->command_buffer_fence));
-        NV2A_PHASE_TIMER_END(finish_submit);
-        r->frame_submitted[r->current_frame] = true;
-        r->submit_count += 1;
 
-        NV2A_PHASE_TIMER_BEGIN(finish_fence);
+        bool deferred = (finish_reason == VK_FINISH_REASON_FLIP_STALL ||
+                         finish_reason == VK_FINISH_REASON_PRESENTING);
+        if (g_xemu_fast_fences) {
+            deferred = deferred ||
+                finish_reason == VK_FINISH_REASON_NEED_BUFFER_SPACE ||
+                finish_reason == VK_FINISH_REASON_VERTEX_BUFFER_DIRTY;
+        }
 
-#if OPT_ALWAYS_DEFERRED_FENCES
-        {
-            static int dbg_finish_count = 0;
-            bool deferred = (finish_reason == VK_FINISH_REASON_FLIP_STALL ||
-                             finish_reason == VK_FINISH_REASON_PRESENTING);
-            if (g_xemu_fast_fences) {
-                deferred = deferred ||
-                    finish_reason == VK_FINISH_REASON_NEED_BUFFER_SPACE ||
-                    finish_reason == VK_FINISH_REASON_VERTEX_BUFFER_DIRTY;
+        if (r->is_render_thread_context) {
+            vkResetFences(r->device, 1, &r->command_buffer_fence);
+            VK_CHECK(vkQueueSubmit(r->queue, ARRAY_SIZE(submit_infos),
+                                   submit_infos, r->command_buffer_fence));
+            qatomic_inc(&r->submit_count);
+
+            VK_CHECK(vkWaitForFences(r->device, 1, &r->command_buffer_fence,
+                                     VK_TRUE, UINT64_MAX));
+            if (r->pending_post_fence_cb) {
+                r->pending_post_fence_cb(r, NULL,
+                                         r->pending_post_fence_opaque);
+                r->pending_post_fence_cb = NULL;
+                r->pending_post_fence_opaque = NULL;
             }
-            if (dbg_finish_count < 200) {
-                DBG_LOG("[FIN] reason=%d deferred=%d frame=%d submit=%d",
-                        finish_reason, deferred, r->current_frame,
-                        (int)r->submit_count);
-                dbg_finish_count++;
-            }
+            gpu_ts_readback(r, r->current_frame);
+        } else {
+            QemuEvent finish_event;
             if (!deferred) {
-                VK_CHECK(vkWaitForFences(r->device, 1, &r->command_buffer_fence,
-                                         VK_TRUE, UINT64_MAX));
+                qemu_event_init(&finish_event, false);
+            }
+
+            RenderCommand *cmd = g_new0(RenderCommand, 1);
+            cmd->type = RCMD_FINISH;
+            cmd->finish.reason = finish_reason;
+            cmd->finish.aux_command_buffer = r->aux_command_buffer;
+            cmd->finish.command_buffer = r->command_buffer;
+            cmd->finish.semaphore = r->command_buffer_semaphore;
+            cmd->finish.wait_stage = wait_stage;
+            cmd->finish.fence = r->command_buffer_fence;
+            cmd->finish.frame_index = r->current_frame;
+
+            if (r->pending_post_fence_cb) {
+                cmd->finish.post_fence_cb = r->pending_post_fence_cb;
+                cmd->finish.post_fence_opaque = r->pending_post_fence_opaque;
+                r->pending_post_fence_cb = NULL;
+                r->pending_post_fence_opaque = NULL;
+                deferred = true;
+            }
+
+            cmd->finish.deferred = deferred;
+            cmd->finish.completion = deferred ? NULL : &finish_event;
+            pgraph_vk_render_thread_enqueue(r, cmd);
+
+            if (!deferred) {
+                qemu_event_wait(&finish_event);
+                qemu_event_destroy(&finish_event);
                 gpu_ts_readback(r, r->current_frame);
             }
         }
-#endif
+
+        NV2A_PHASE_TIMER_END(finish_submit);
+
+        NV2A_PHASE_TIMER_BEGIN(finish_fence);
 
 #if OPT_TEX_NONDRAW_CMD
         pgraph_vk_staging_reset(pg);
@@ -2177,6 +2188,13 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
             check_budget = true;
         }
 
+        /*
+         * Frame rotation: advance to next frame's command buffers and
+         * propagate per-frame state. Skip when running on the render thread
+         * (inline finish for downloads/flush) -- the render thread only
+         * submits and waits; PFIFO manages frame indices.
+         */
+        if (!r->is_render_thread_context) {
 #if OPT_DEFERRED_FENCES && OPT_N_BUFFERED_SUBMIT
         if (OPT_ALWAYS_DEFERRED_FENCES ||
             finish_reason == VK_FINISH_REASON_FLIP_STALL ||
@@ -2189,22 +2207,12 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
 
             int next_frame = (r->current_frame + 1) % r->num_active_frames;
 
-            {
-                static int dbg_advance_count = 0;
-                if (dbg_advance_count < 200) {
-                    DBG_LOG("[FIN] advance %d->%d next_submitted=%d reason=%d",
-                            r->current_frame, next_frame,
-                            r->frame_submitted[next_frame], finish_reason);
-                    dbg_advance_count++;
-                }
-            }
-
-            if (r->frame_submitted[next_frame]) {
+            if (qatomic_read(&r->frame_submitted[next_frame])) {
                 VK_CHECK(vkWaitForFences(r->device, 1,
                                          &r->frame_fences[next_frame],
                                          VK_TRUE, UINT64_MAX));
                 gpu_ts_readback(r, next_frame);
-                r->frame_submitted[next_frame] = false;
+                qatomic_set(&r->frame_submitted[next_frame], false);
                 for (int i = 0; i < r->deferred_framebuffer_count[next_frame]; i++) {
                     vkDestroyFramebuffer(r->device,
                                          r->deferred_framebuffers[next_frame][i],
@@ -2216,10 +2224,46 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
                 r->frame_staging[next_frame].vertex_inline_staging.buffer_offset = 0;
                 r->frame_staging[next_frame].uniform_staging.buffer_offset = 0;
                 r->frame_staging[next_frame].staging_src.buffer_offset = 0;
-                bitmap_clear(r->frame_staging[next_frame].uploaded_bitmap,
-                             0, r->bitmap_size);
 #endif
             }
+
+#if OPT_ALWAYS_DEFERRED_FENCES
+            {
+                FrameStagingState *cur_fs =
+                    &r->frame_staging[r->current_frame];
+                FrameStagingState *next_fs =
+                    &r->frame_staging[next_frame];
+
+                unsigned long bitmap_longs =
+                    BITS_TO_LONGS(r->bitmap_size);
+                memcpy(next_fs->uploaded_bitmap,
+                       cur_fs->uploaded_bitmap,
+                       bitmap_longs * sizeof(unsigned long));
+
+                next_fs->vertex_ram_flush_min = VK_WHOLE_SIZE;
+                next_fs->vertex_ram_flush_max = 0;
+
+                if (!next_fs->vertex_ram_initialized) {
+                    size_t total = cur_fs->vertex_ram.buffer_size;
+                    memcpy(next_fs->vertex_ram.mapped,
+                           cur_fs->vertex_ram.mapped, total);
+                    next_fs->vertex_ram_flush_min = 0;
+                    next_fs->vertex_ram_flush_max = total;
+                    next_fs->vertex_ram_initialized = true;
+                } else if (cur_fs->vertex_ram_propagate_min <
+                           cur_fs->vertex_ram_propagate_max) {
+                    size_t off = cur_fs->vertex_ram_propagate_min;
+                    size_t len = cur_fs->vertex_ram_propagate_max - off;
+                    memcpy(next_fs->vertex_ram.mapped + off,
+                           cur_fs->vertex_ram.mapped + off, len);
+                    next_fs->vertex_ram_flush_min = off;
+                    next_fs->vertex_ram_flush_max = off + len;
+                }
+
+                cur_fs->vertex_ram_propagate_min = VK_WHOLE_SIZE;
+                cur_fs->vertex_ram_propagate_max = 0;
+            }
+#endif
 
             r->current_frame = next_frame;
             r->command_buffer = r->command_buffers[next_frame * 2];
@@ -2227,6 +2271,7 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
             r->command_buffer_semaphore = r->frame_semaphores[next_frame];
             r->command_buffer_fence = r->frame_fences[next_frame];
         } else {
+            pgraph_vk_render_thread_wait_idle(r);
             VK_CHECK(vkWaitForFences(r->device, 1, &r->command_buffer_fence,
                                      VK_TRUE, UINT64_MAX));
             gpu_ts_readback(r, r->current_frame);
@@ -2241,6 +2286,7 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
             destroy_framebuffers(pg);
         }
 #else
+        pgraph_vk_render_thread_wait_idle(r);
         VK_CHECK(vkWaitForFences(r->device, 1, &r->command_buffer_fence,
                                  VK_TRUE, UINT64_MAX));
         gpu_ts_readback(r, r->current_frame);
@@ -2254,6 +2300,7 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
         r->command_buffer_fence = r->frame_fences[next_frame];
         destroy_framebuffers(pg);
 #endif
+        } /* !is_render_thread_context */
 
 #if OPT_ALWAYS_DEFERRED_FENCES
         /* Descriptor sets are still in use by in-flight GPU frames.
@@ -2297,15 +2344,6 @@ void pgraph_vk_begin_command_buffer(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
     assert(!r->in_command_buffer);
-
-    {
-        static int dbg_begin = 0;
-        if (dbg_begin < 50) {
-            DBG_LOG("[CB-BEGIN] frame=%d draw_time=%lu",
-                    r->current_frame, (unsigned long)pg->draw_time);
-            dbg_begin++;
-        }
-    }
 
     VkCommandBufferBeginInfo command_buffer_begin_info = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -2857,7 +2895,7 @@ static void begin_draw(PGRAPHState *pg)
     if (!pg->clearing) {
 #if OPT_DYNAMIC_STATES
         {
-            uint32_t setupraster = pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER);
+            uint32_t setupraster = pgraph_vk_reg_r(pg, NV_PGRAPH_SETUPRASTER);
             if (!r->dyn_state.valid ||
                 setupraster != r->dyn_state.setupraster) {
                 VkCullModeFlags cull = VK_CULL_MODE_NONE;
@@ -2877,7 +2915,7 @@ static void begin_draw(PGRAPHState *pg)
         }
 
         {
-            uint32_t blend_color = pgraph_reg_r(pg, NV_PGRAPH_BLENDCOLOR);
+            uint32_t blend_color = pgraph_vk_reg_r(pg, NV_PGRAPH_BLENDCOLOR);
             if (!r->dyn_state.valid ||
                 blend_color != r->dyn_state.blendcolor) {
                 float blend_constant[4] = { 0, 0, 0, 0 };
@@ -2889,7 +2927,7 @@ static void begin_draw(PGRAPHState *pg)
 
         if (OPT_DYNAMIC_DEPTH_STENCIL &&
             r->extended_dynamic_state_supported) {
-            uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
+            uint32_t control_0 = pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_0);
             if (!r->dyn_state.valid ||
                 control_0 != r->dyn_state.control_0) {
                 vkCmdSetDepthTestEnable(
@@ -2907,7 +2945,7 @@ static void begin_draw(PGRAPHState *pg)
                                        pgraph_depth_func_vk_map[depth_func]);
 
                 uint32_t swe_mw = GET_MASK(
-                    pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1),
+                    pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_1),
                     NV_PGRAPH_CONTROL_1_STENCIL_MASK_WRITE);
                 if (!(control_0 & NV_PGRAPH_CONTROL_0_STENCIL_WRITE_ENABLE))
                     swe_mw = 0;
@@ -2918,8 +2956,8 @@ static void begin_draw(PGRAPHState *pg)
                 r->dyn_state.control_0 = control_0;
             }
 
-            uint32_t control_1 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1);
-            uint32_t control_2 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_2);
+            uint32_t control_1 = pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_1);
+            uint32_t control_2 = pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_2);
             if (!r->dyn_state.valid ||
                 control_1 != r->dyn_state.control_1 ||
                 control_2 != r->dyn_state.control_2) {
@@ -2966,7 +3004,7 @@ static void begin_draw(PGRAPHState *pg)
                 r->dyn_state.control_2 = control_2;
             }
         } else {
-            uint32_t control_1 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1);
+            uint32_t control_1 = pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_1);
             if (!r->dyn_state.valid ||
                 control_1 != r->dyn_state.control_1) {
                 uint32_t stencil_ref = GET_MASK(control_1,
@@ -2987,8 +3025,8 @@ static void begin_draw(PGRAPHState *pg)
 
 #if OPT_DYNAMIC_BLEND
         if (r->eds3_blend_supported) {
-            uint32_t blend_reg = pgraph_reg_r(pg, NV_PGRAPH_BLEND);
-            uint32_t ctl0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
+            uint32_t blend_reg = pgraph_vk_reg_r(pg, NV_PGRAPH_BLEND);
+            uint32_t ctl0 = pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_0);
             if (!r->dyn_state.valid ||
                 blend_reg != r->dyn_state.blend ||
                 ctl0 != r->dyn_state.color_write_control_0) {
@@ -3120,9 +3158,9 @@ static bool check_rt_as_texture_hazard(PGRAPHState *pg)
 static bool classify_draw_safe(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
-    uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
-    uint32_t blend = pgraph_reg_r(pg, NV_PGRAPH_BLEND);
-    uint32_t control_1 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1);
+    uint32_t control_0 = pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_0);
+    uint32_t blend = pgraph_vk_reg_r(pg, NV_PGRAPH_BLEND);
+    uint32_t control_1 = pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_1);
 
     if (blend & NV_PGRAPH_BLEND_EN) {
         uint32_t src = GET_MASK(blend, NV_PGRAPH_BLEND_SFACTOR);
@@ -3332,12 +3370,12 @@ static bool try_enqueue_draw_indexed(PGRAPHState *pg, DrawQueue *q)
     PrimAssemblyState assembly = {
         .primitive_mode = pg->primitive_mode,
         .polygon_mode = (enum ShaderPolygonMode)GET_MASK(
-            pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
+            pgraph_vk_reg_r(pg, NV_PGRAPH_SETUPRASTER),
             NV_PGRAPH_SETUPRASTER_FRONTFACEMODE),
-        .last_provoking = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
+        .last_provoking = GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_3),
                                    NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX) ==
                           NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX_LAST,
-        .flat_shading = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
+        .flat_shading = GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_3),
                                  NV_PGRAPH_CONTROL_3_SHADEMODE) ==
                         NV_PGRAPH_CONTROL_3_SHADEMODE_FLAT,
     };
@@ -3553,14 +3591,14 @@ static void flush_draw_queue_internal(NV2AState *d)
         PrimAssemblyState assembly = {
             .primitive_mode = prim_mode,
             .polygon_mode = (enum ShaderPolygonMode)GET_MASK(
-                pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
+                pgraph_vk_reg_r(pg, NV_PGRAPH_SETUPRASTER),
                 NV_PGRAPH_SETUPRASTER_FRONTFACEMODE),
             .last_provoking =
-                GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
+                GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_3),
                          NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX) ==
                 NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX_LAST,
             .flat_shading =
-                GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
+                GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_3),
                          NV_PGRAPH_CONTROL_3_SHADEMODE) ==
                 NV_PGRAPH_CONTROL_3_SHADEMODE_FLAT,
         };
@@ -3714,20 +3752,20 @@ static void snapshot_vertex_buffers(PGRAPHState *pg, ReorderWindowEntry *e,
         int attr_idx = r->vertex_attribute_descriptions[i].location;
         int buffer_idx = (inline_map & (1 << attr_idx)) ? BUFFER_VERTEX_INLINE :
                                                           BUFFER_VERTEX_RAM;
-        e->vertex_buffers[i] = r->storage_buffers[buffer_idx].buffer;
+        e->vertex_buffers[i] = get_staging_buffer(r, buffer_idx)->buffer;
         e->vertex_offsets[i] = offset + r->vertex_attribute_offsets[attr_idx];
     }
 }
 
 static void snapshot_dynamic_state(PGRAPHState *pg, ReorderWindowEntry *e)
 {
-    e->dyn_setupraster = pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER);
-    e->dyn_blendcolor = pgraph_reg_r(pg, NV_PGRAPH_BLENDCOLOR);
-    e->dyn_control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
-    e->dyn_control_1 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1);
-    e->dyn_control_2 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_2);
+    e->dyn_setupraster = pgraph_vk_reg_r(pg, NV_PGRAPH_SETUPRASTER);
+    e->dyn_blendcolor = pgraph_vk_reg_r(pg, NV_PGRAPH_BLENDCOLOR);
+    e->dyn_control_0 = pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_0);
+    e->dyn_control_1 = pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_1);
+    e->dyn_control_2 = pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_2);
 #if OPT_DYNAMIC_BLEND
-    e->dyn_blend = pgraph_reg_r(pg, NV_PGRAPH_BLEND);
+    e->dyn_blend = pgraph_vk_reg_r(pg, NV_PGRAPH_BLEND);
     e->dyn_color_write_control_0 = e->dyn_control_0;
 #endif
 
@@ -3845,12 +3883,12 @@ static bool try_snapshot_draw_arrays(NV2AState *d, ReorderWindowEntry *e)
     PrimAssemblyState assembly = {
         .primitive_mode = pg->primitive_mode,
         .polygon_mode = (enum ShaderPolygonMode)GET_MASK(
-            pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
+            pgraph_vk_reg_r(pg, NV_PGRAPH_SETUPRASTER),
             NV_PGRAPH_SETUPRASTER_FRONTFACEMODE),
-        .last_provoking = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
+        .last_provoking = GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_3),
                                    NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX) ==
                           NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX_LAST,
-        .flat_shading = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
+        .flat_shading = GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_3),
                                  NV_PGRAPH_CONTROL_3_SHADEMODE) ==
                         NV_PGRAPH_CONTROL_3_SHADEMODE_FLAT,
     };
@@ -3949,14 +3987,14 @@ static bool try_snapshot_draw_arrays(NV2AState *d, ReorderWindowEntry *e)
         e->draw_count = 1;
     }
 
-    uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
+    uint32_t control_0 = pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_0);
     e->color_write =
         (control_0 & NV_PGRAPH_CONTROL_0_ALPHA_WRITE_ENABLE) ||
         (control_0 & NV_PGRAPH_CONTROL_0_RED_WRITE_ENABLE) ||
         (control_0 & NV_PGRAPH_CONTROL_0_GREEN_WRITE_ENABLE) ||
         (control_0 & NV_PGRAPH_CONTROL_0_BLUE_WRITE_ENABLE);
     e->depth_test = !!(control_0 & NV_PGRAPH_CONTROL_0_ZENABLE);
-    e->stencil_test = !!(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1) &
+    e->stencil_test = !!(pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_1) &
                          NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE);
 
     return true;
@@ -3976,12 +4014,12 @@ static bool try_snapshot_inline_elements(NV2AState *d, ReorderWindowEntry *e)
     PrimAssemblyState assembly = {
         .primitive_mode = pg->primitive_mode,
         .polygon_mode = (enum ShaderPolygonMode)GET_MASK(
-            pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
+            pgraph_vk_reg_r(pg, NV_PGRAPH_SETUPRASTER),
             NV_PGRAPH_SETUPRASTER_FRONTFACEMODE),
-        .last_provoking = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
+        .last_provoking = GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_3),
                                    NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX) ==
                           NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX_LAST,
-        .flat_shading = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
+        .flat_shading = GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_3),
                                  NV_PGRAPH_CONTROL_3_SHADEMODE) ==
                         NV_PGRAPH_CONTROL_3_SHADEMODE_FLAT,
     };
@@ -4069,14 +4107,14 @@ static bool try_snapshot_inline_elements(NV2AState *d, ReorderWindowEntry *e)
     e->index_indirect_offset = pgraph_vk_update_index_buffer(
         pg, draw_indices, index_data_size);
 
-    uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
+    uint32_t control_0 = pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_0);
     e->color_write =
         (control_0 & NV_PGRAPH_CONTROL_0_ALPHA_WRITE_ENABLE) ||
         (control_0 & NV_PGRAPH_CONTROL_0_RED_WRITE_ENABLE) ||
         (control_0 & NV_PGRAPH_CONTROL_0_GREEN_WRITE_ENABLE) ||
         (control_0 & NV_PGRAPH_CONTROL_0_BLUE_WRITE_ENABLE);
     e->depth_test = !!(control_0 & NV_PGRAPH_CONTROL_0_ZENABLE);
-    e->stencil_test = !!(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1) &
+    e->stencil_test = !!(pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_1) &
                          NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE);
 
     return true;
@@ -4462,7 +4500,7 @@ void pgraph_vk_draw_end(NV2AState *d)
         return;
     }
 
-    uint32_t control_0 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_0);
+    uint32_t control_0 = pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_0);
     bool mask_alpha = control_0 & NV_PGRAPH_CONTROL_0_ALPHA_WRITE_ENABLE;
     bool mask_red = control_0 & NV_PGRAPH_CONTROL_0_RED_WRITE_ENABLE;
     bool mask_green = control_0 & NV_PGRAPH_CONTROL_0_GREEN_WRITE_ENABLE;
@@ -4470,7 +4508,7 @@ void pgraph_vk_draw_end(NV2AState *d)
     bool color_write = mask_alpha || mask_red || mask_green || mask_blue;
     bool depth_test = control_0 & NV_PGRAPH_CONTROL_0_ZENABLE;
     bool stencil_test =
-        pgraph_reg_r(pg, NV_PGRAPH_CONTROL_1) & NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE;
+        pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_1) & NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE;
     bool is_nop_draw = !(color_write || depth_test || stencil_test);
 
     if (is_nop_draw) {
@@ -4666,12 +4704,6 @@ static void sync_vertex_ram_buffer(PGRAPHState *pg)
     }
 
 #if OPT_SYNC_EARLY_EXIT
-    /*
-     * Fast path: if every page in the requested regions is already in the
-     * uploaded_bitmap, the data was synced earlier in this command buffer
-     * and the dirty bits were cleared at that time.  Skip the expensive
-     * sort / merge / RCU dirty-bit walk entirely.
-     */
     {
         unsigned long *bmp = get_uploaded_bitmap(r);
         bool all_uploaded = true;
@@ -4686,7 +4718,8 @@ static void sync_vertex_ram_buffer(PGRAPHState *pg)
                 all_uploaded = false;
             }
         }
-        if (all_uploaded && !has_dirty_vertex_pages(r)) {
+        bool dirty = has_dirty_vertex_pages(r);
+        if (all_uploaded && !dirty) {
             OPT_STAT_INC(sync_early_exit);
             r->num_vertex_ram_buffer_syncs = 0;
             return;
@@ -4780,12 +4813,6 @@ static void sync_vertex_ram_buffer(PGRAPHState *pg)
 
             if (dirty) {
                 NV2A_VK_DPRINTF("Memory dirty. Synchronizing...");
-                /*
-                 * Notify the TLB that dirty bits were cleared. Without this,
-                 * the TLB keeps VRAM pages writable and future CPU writes
-                 * bypass the notdirty handler, so dirty bits never get re-set.
-                 * This causes stale vertex data (wrong UI/2D textures).
-                 */
                 physical_memory_dirty_bits_cleared(start, size);
                 vw->dirty_count++;
                 vw->bytes_copied += size;
@@ -4844,8 +4871,8 @@ void pgraph_vk_clear_surface(NV2AState *d, uint32_t parameter)
 
     r->clear_parameter = parameter;
 
-    uint32_t clearrectx = pgraph_reg_r(pg, NV_PGRAPH_CLEARRECTX);
-    uint32_t clearrecty = pgraph_reg_r(pg, NV_PGRAPH_CLEARRECTY);
+    uint32_t clearrectx = pgraph_vk_reg_r(pg, NV_PGRAPH_CLEARRECTX);
+    uint32_t clearrecty = pgraph_vk_reg_r(pg, NV_PGRAPH_CLEARRECTY);
 
     unsigned int xmin = GET_MASK(clearrectx, NV_PGRAPH_CLEARRECTX_XMIN);
     unsigned int xmax = GET_MASK(clearrectx, NV_PGRAPH_CLEARRECTX_XMAX);
@@ -4993,7 +5020,7 @@ static void bind_vertex_buffer(PGRAPHState *pg, uint16_t inline_map,
         int attr_idx = r->vertex_attribute_descriptions[i].location;
         int buffer_idx = (inline_map & (1 << attr_idx)) ? BUFFER_VERTEX_INLINE :
                                                           BUFFER_VERTEX_RAM;
-        buffers[i] = r->storage_buffers[buffer_idx].buffer;
+        buffers[i] = get_staging_buffer(r, buffer_idx)->buffer;
         offsets[i] = offset + r->vertex_attribute_offsets[attr_idx];
     }
 
@@ -5201,15 +5228,20 @@ void pgraph_vk_flush_draw(NV2AState *d)
 
     r->num_vertex_ram_buffer_syncs = 0;
 
+#ifndef NDEBUG
+    RenderCommandSnapshot snap;
+    pgraph_vk_snapshot_state(pg, &snap);
+#endif
+
     PrimAssemblyState assembly = {
         .primitive_mode = pg->primitive_mode,
         .polygon_mode = (enum ShaderPolygonMode)GET_MASK(
-            pgraph_reg_r(pg, NV_PGRAPH_SETUPRASTER),
+            pgraph_vk_reg_r(pg, NV_PGRAPH_SETUPRASTER),
             NV_PGRAPH_SETUPRASTER_FRONTFACEMODE),
-        .last_provoking = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
+        .last_provoking = GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_3),
                                    NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX) ==
                           NV_PGRAPH_CONTROL_3_PROVOKING_VERTEX_LAST,
-        .flat_shading = GET_MASK(pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3),
+        .flat_shading = GET_MASK(pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_3),
                                  NV_PGRAPH_CONTROL_3_SHADEMODE) ==
                         NV_PGRAPH_CONTROL_3_SHADEMODE_FLAT,
     };
@@ -5563,5 +5595,15 @@ inline_array_done:
         NV2A_VK_DPRINTF("EMPTY NV097_SET_BEGIN_END");
         NV2A_UNCONFIRMED("EMPTY NV097_SET_BEGIN_END");
     }
+
+#ifndef NDEBUG
+    assert(snap.primitive_mode == pg->primitive_mode);
+    assert(snap.clearing == pg->clearing);
+    assert(snapshot_reg_r(&snap, NV_PGRAPH_CONTROL_0) ==
+           pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_0));
+    assert(snapshot_reg_r(&snap, NV_PGRAPH_SETUPRASTER) ==
+           pgraph_vk_reg_r(pg, NV_PGRAPH_SETUPRASTER));
+#endif
+
     NV2A_PHASE_TIMER_END(draw_dispatch);
 }

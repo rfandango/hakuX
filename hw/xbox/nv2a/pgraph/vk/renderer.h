@@ -235,6 +235,12 @@ typedef struct FrameStagingState {
     StorageBuffer vertex_inline_staging;
     StorageBuffer uniform_staging;
     StorageBuffer staging_src;
+    StorageBuffer vertex_ram;
+    VkDeviceSize vertex_ram_flush_min;
+    VkDeviceSize vertex_ram_flush_max;
+    VkDeviceSize vertex_ram_propagate_min;
+    VkDeviceSize vertex_ram_propagate_max;
+    bool vertex_ram_initialized;
     unsigned long *uploaded_bitmap;
 } FrameStagingState;
 #endif
@@ -295,6 +301,17 @@ typedef struct DeferredSurfaceDownload {
     BasicSurfaceFormatInfo fmt;
     bool use_compute_to_swizzle;
 } DeferredSurfaceDownload;
+
+typedef struct DownloadCallbackData {
+    DeferredSurfaceDownload downloads[MAX_DEFERRED_DOWNLOADS];
+    int num_downloads;
+    struct {
+        hwaddr vram_addr;
+        size_t dirty_size;
+    } dirty_regions[MAX_DEFERRED_DOWNLOADS];
+    MemoryRegion *vram;
+    QemuEvent *downloads_complete;
+} DownloadCallbackData;
 
 typedef struct ShaderModuleInfo {
     int refcnt;
@@ -410,6 +427,210 @@ typedef struct CompileJob {
 } CompileJob;
 
 #endif /* OPT_ASYNC_COMPILE */
+
+typedef struct SubmitJob SubmitJob;
+typedef void (*SubmitPostFenceCallback)(struct PGRAPHVkState *r,
+                                        SubmitJob *job,
+                                        void *opaque);
+
+struct SubmitJob {
+    VkCommandBuffer aux_command_buffer;
+    VkCommandBuffer command_buffer;
+    VkSemaphore semaphore;
+    VkPipelineStageFlags wait_stage;
+    VkFence fence;
+    int frame_index;
+    bool deferred;
+    SubmitPostFenceCallback post_fence_cb;
+    void *post_fence_opaque;
+    QSIMPLEQ_ENTRY(SubmitJob) entry;
+};
+
+typedef struct SubmitWorker {
+    QemuThread thread;
+    QemuMutex lock;
+    QemuCond cond;
+    QemuEvent complete_event;
+    QSIMPLEQ_HEAD(, SubmitJob) queue;
+    SubmitJob *active_job;
+    bool shutdown;
+    int queue_depth;
+} SubmitWorker;
+
+/*
+ * RenderCommandSnapshot: captures a point-in-time copy of PGRAPHState fields
+ * needed by the draw setup path (begin_pre_draw, begin_draw, create_pipeline,
+ * bind_textures, update_shader_uniforms). Enables the render thread to execute
+ * draws without reading PGRAPHState directly.
+ */
+typedef struct RenderCommandSnapshot {
+    uint32_t regs[0x2000];
+
+    uint32_t shader_state_gen;
+    uint32_t pipeline_state_gen;
+    uint32_t texture_state_gen;
+    uint32_t vertex_attr_gen;
+    uint32_t non_dynamic_reg_gen;
+    uint32_t any_reg_gen;
+
+    bool program_data_dirty;
+    uint32_t program_data[NV2A_MAX_TRANSFORM_PROGRAM_LENGTH][VSH_TOKEN_SIZE];
+
+    VertexAttribute vertex_attributes[NV2A_VERTEXSHADER_ATTRIBUTES];
+    uint16_t compressed_attrs;
+    uint16_t uniform_attrs;
+    uint16_t swizzle_attrs;
+
+    SurfaceShape surface_shape;
+    struct {
+        int clip_x, clip_width;
+        int clip_y, clip_height;
+        int width, height;
+    } surface_binding_dim;
+    unsigned int surface_scale_factor;
+
+    uint32_t primitive_mode;
+    bool clearing;
+    bool texture_matrix_enable[NV2A_MAX_TEXTURES];
+    bool texture_dirty[NV2A_MAX_TEXTURES];
+
+    hwaddr dma_a, dma_b;
+    hwaddr dma_vertex_a, dma_vertex_b;
+    hwaddr dma_color, dma_zeta;
+
+    int frame_time;
+    int draw_time;
+
+    uint32_t vsh_constants[NV2A_VERTEXSHADER_CONSTANTS][4];
+    bool vsh_constants_dirty[NV2A_VERTEXSHADER_CONSTANTS];
+    bool vsh_constants_any_dirty;
+
+    uint32_t ltctxa[NV2A_LTCTXA_COUNT][4];
+    bool ltctxa_dirty[NV2A_LTCTXA_COUNT];
+    bool ltctxa_any_dirty;
+    uint32_t ltctxb[NV2A_LTCTXB_COUNT][4];
+    bool ltctxb_dirty[NV2A_LTCTXB_COUNT];
+    bool ltctxb_any_dirty;
+    uint32_t ltc1[NV2A_LTC1_COUNT][4];
+    bool ltc1_dirty[NV2A_LTC1_COUNT];
+    bool ltc1_any_dirty;
+
+    float material_alpha;
+    float specular_power;
+    float specular_power_back;
+    float specular_params[6];
+    float specular_params_back[6];
+    float point_params[8];
+
+    float light_infinite_half_vector[NV2A_MAX_LIGHTS][3];
+    float light_infinite_direction[NV2A_MAX_LIGHTS][3];
+    float light_local_position[NV2A_MAX_LIGHTS][3];
+    float light_local_attenuation[NV2A_MAX_LIGHTS][3];
+
+    unsigned int inline_array_length;
+    unsigned int inline_elements_length;
+    unsigned int inline_buffer_length;
+    unsigned int draw_arrays_length;
+    unsigned int draw_arrays_min_start;
+    unsigned int draw_arrays_max_count;
+
+    bool zpass_pixel_count_enable;
+} RenderCommandSnapshot;
+
+static inline uint32_t snapshot_reg_r(const RenderCommandSnapshot *snap,
+                                      unsigned int r)
+{
+    assert(r < 0x2000 && r % 4 == 0);
+    return snap->regs[r];
+}
+
+/* pgraph_vk_reg_r defined after PGRAPHVkState */
+
+typedef enum FinishReason {
+    VK_FINISH_REASON_VERTEX_BUFFER_DIRTY,
+    VK_FINISH_REASON_SURFACE_CREATE,
+    VK_FINISH_REASON_SURFACE_DOWN,
+    VK_FINISH_REASON_NEED_BUFFER_SPACE,
+    VK_FINISH_REASON_FRAMEBUFFER_DIRTY,
+    VK_FINISH_REASON_PRESENTING,
+    VK_FINISH_REASON_FLIP_STALL,
+    VK_FINISH_REASON_FLUSH,
+    VK_FINISH_REASON_STALLED,
+} FinishReason;
+
+typedef enum {
+    RCMD_DRAW,
+    RCMD_CLEAR_SURFACE,
+    RCMD_IMAGE_BLIT,
+    RCMD_FINISH,
+    RCMD_SURFACE_UPDATE,
+    RCMD_PROCESS_DOWNLOADS,
+    RCMD_SYNC_DISPLAY,
+    RCMD_FLUSH,
+    RCMD_VERTEX_RAM_UPDATE,
+    RCMD_SHUTDOWN,
+} RenderCommandType;
+
+typedef struct RenderCommand {
+    RenderCommandType type;
+
+    union {
+        struct {
+            RenderCommandSnapshot *snap;
+            int32_t *draw_arrays_start;
+            int32_t *draw_arrays_count;
+            uint32_t *inline_elements;
+            uint32_t *inline_array;
+            int draw_arrays_length;
+            int inline_elements_length;
+            int inline_array_length;
+            int inline_buffer_length;
+            bool draw_arrays_prevent_connect;
+        } draw;
+        struct {
+            uint32_t parameter;
+        } clear;
+        struct {
+            FinishReason reason;
+            QemuEvent *completion;
+            VkCommandBuffer aux_command_buffer;
+            VkCommandBuffer command_buffer;
+            VkSemaphore semaphore;
+            VkPipelineStageFlags wait_stage;
+            VkFence fence;
+            int frame_index;
+            bool deferred;
+            SubmitPostFenceCallback post_fence_cb;
+            void *post_fence_opaque;
+        } finish;
+        struct {
+            hwaddr offset;
+            VkDeviceSize size;
+            void *data;
+        } vertex_ram;
+        struct {
+            bool dirty_surfaces;
+            QemuEvent *completion;
+        } download;
+        struct {
+            QemuEvent *completion;
+        } sync;
+        struct {
+            QemuEvent *completion;
+        } flush_op;
+    };
+    QSIMPLEQ_ENTRY(RenderCommand) entry;
+} RenderCommand;
+
+typedef struct RenderThread {
+    QemuThread thread;
+    QemuMutex lock;
+    QemuCond cond;
+    QemuEvent idle_event;
+    QSIMPLEQ_HEAD(, RenderCommand) queue;
+    bool shutdown;
+    int queue_depth;
+} RenderThread;
 
 typedef struct TextureKey {
     TextureShape state;
@@ -706,6 +927,10 @@ typedef struct ReorderWindow {
 #endif
 
 typedef struct PGRAPHVkState {
+    NV2AState *nv2a;
+    const RenderCommandSnapshot *active_snap;
+    bool is_render_thread_context;
+
     VkInstance instance;
     VkDebugUtilsMessengerEXT debug_messenger;
     int debug_depth;
@@ -1009,6 +1234,12 @@ typedef struct PGRAPHVkState {
         int queue_depth;
     } compile_worker;
 #endif
+
+    SubmitWorker submit_worker;
+    SubmitPostFenceCallback pending_post_fence_cb;
+    void *pending_post_fence_opaque;
+
+    RenderThread render_thread;
 } PGRAPHVkState;
 
 static inline StorageBuffer *get_staging_buffer(PGRAPHVkState *r, int buffer_id)
@@ -1023,6 +1254,8 @@ static inline StorageBuffer *get_staging_buffer(PGRAPHVkState *r, int buffer_id)
         return &r->frame_staging[r->current_frame].uniform_staging;
     case BUFFER_STAGING_SRC:
         return &r->frame_staging[r->current_frame].staging_src;
+    case BUFFER_VERTEX_RAM:
+        return &r->frame_staging[r->current_frame].vertex_ram;
     default:
         return &r->storage_buffers[buffer_id];
     }
@@ -1038,6 +1271,19 @@ static inline unsigned long *get_uploaded_bitmap(PGRAPHVkState *r)
 #else
     return r->uploaded_bitmap;
 #endif
+}
+
+/*
+ * Snapshot-aware register read: uses the active snapshot if the render thread
+ * has one set, otherwise falls through to the live PGRAPHState register file.
+ */
+static inline uint32_t pgraph_vk_reg_r(PGRAPHState *pg, unsigned int reg)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+    if (r->active_snap) {
+        return snapshot_reg_r(r->active_snap, reg);
+    }
+    return pgraph_reg_r(pg, reg);
 }
 
 // renderer.c
@@ -1179,6 +1425,19 @@ void pgraph_vk_compile_worker_shutdown(PGRAPHVkState *r);
 void pgraph_vk_compile_worker_enqueue(PGRAPHVkState *r, CompileJob *job);
 #endif
 
+// submit_worker.c
+void pgraph_vk_submit_worker_init(PGRAPHVkState *r);
+void pgraph_vk_submit_worker_shutdown(PGRAPHVkState *r);
+void pgraph_vk_submit_worker_enqueue(PGRAPHVkState *r, SubmitJob *job);
+void pgraph_vk_submit_worker_wait_idle(PGRAPHVkState *r);
+
+// render_thread.c
+void pgraph_vk_render_thread_init(PGRAPHVkState *r);
+void pgraph_vk_render_thread_shutdown(PGRAPHVkState *r);
+void pgraph_vk_render_thread_enqueue(PGRAPHVkState *r, RenderCommand *cmd);
+void pgraph_vk_render_thread_wait_idle(PGRAPHVkState *r);
+void pgraph_vk_snapshot_state(PGRAPHState *pg, RenderCommandSnapshot *snap);
+
 // shaders.c
 void pgraph_vk_init_shaders(PGRAPHState *pg);
 void pgraph_vk_finalize_shaders(PGRAPHState *pg);
@@ -1193,18 +1452,6 @@ void pgraph_vk_clear_report_value(NV2AState *d);
 void pgraph_vk_get_report(NV2AState *d, uint32_t parameter);
 void pgraph_vk_process_pending_reports(NV2AState *d);
 void pgraph_vk_process_pending_reports_internal(NV2AState *d);
-
-typedef enum FinishReason {
-    VK_FINISH_REASON_VERTEX_BUFFER_DIRTY,
-    VK_FINISH_REASON_SURFACE_CREATE,
-    VK_FINISH_REASON_SURFACE_DOWN,
-    VK_FINISH_REASON_NEED_BUFFER_SPACE,
-    VK_FINISH_REASON_FRAMEBUFFER_DIRTY,
-    VK_FINISH_REASON_PRESENTING,
-    VK_FINISH_REASON_FLIP_STALL,
-    VK_FINISH_REASON_FLUSH,
-    VK_FINISH_REASON_STALLED,
-} FinishReason;
 
 // draw.c
 void pgraph_vk_init_pipelines(PGRAPHState *pg);
