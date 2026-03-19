@@ -407,6 +407,13 @@ struct TCGContext {
     /* Threshold to flush the translated code buffer.  */
     void *code_gen_highwater;
 
+#ifdef XBOX
+    /* Hot arena for tier-1 TBs — keeps hot code packed within L1I. */
+    void *hot_arena_start;
+    void *hot_arena_end;
+    void *hot_arena_ptr;
+#endif
+
     /* Track which vCPU triggers events */
     CPUState *cpu;                      /* *_trans */
 
@@ -721,6 +728,9 @@ static inline bool tcg_op_buf_full(void)
 void *tcg_malloc_internal(TCGContext *s, int size);
 void tcg_pool_reset(TCGContext *s);
 TranslationBlock *tcg_tb_alloc(TCGContext *s);
+#ifdef XBOX
+TranslationBlock *tcg_tb_alloc_hot(TCGContext *s);
+#endif
 
 void tcg_region_reset_all(void);
 

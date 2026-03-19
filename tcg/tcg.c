@@ -1912,6 +1912,27 @@ TranslationBlock *tcg_tb_alloc(TCGContext *s)
     return tb;
 }
 
+#ifdef XBOX
+TranslationBlock *tcg_tb_alloc_hot(TCGContext *s)
+{
+    if (!s->hot_arena_start) {
+        return NULL;
+    }
+    uintptr_t align = qemu_icache_linesize;
+    TranslationBlock *tb;
+    void *next;
+
+    tb = (void *)ROUND_UP((uintptr_t)s->hot_arena_ptr, align);
+    next = (void *)ROUND_UP((uintptr_t)(tb + 1), align);
+
+    if (next > s->hot_arena_end) {
+        return NULL;
+    }
+    s->hot_arena_ptr = next;
+    return tb;
+}
+#endif
+
 void tcg_prologue_init(void)
 {
     TCGContext *s = tcg_ctx;

@@ -41,6 +41,9 @@
 #include "tb-cache-hints.h"
 #ifdef XBOX
 #include "tb-code-hash.h"
+#ifndef TCG_HIGHWATER
+#define TCG_HIGHWATER 1024
+#endif
 #endif
 
 #if defined(CONFIG_VTUNE_JITPROFILING)
@@ -369,8 +372,35 @@ TranslationBlock *tb_gen_code(CPUState *cpu, TCGTBCPUState s)
  skip_recycle:
 #endif
 
+#ifdef XBOX
+    bool hot_alloc = false;
+    void *saved_cgp = NULL, *saved_cgb = NULL, *saved_cghw = NULL;
+    size_t saved_cgbs = 0;
+#endif
+
  buffer_overflow:
     assert_no_pages_locked();
+
+#ifdef XBOX
+    if (!hot_alloc && (s.cflags & CF_TIER1) && tcg_ctx->hot_arena_start) {
+        tb = tcg_tb_alloc_hot(tcg_ctx);
+        if (tb) {
+            hot_alloc = true;
+            saved_cgp  = tcg_ctx->code_gen_ptr;
+            saved_cgb  = tcg_ctx->code_gen_buffer;
+            saved_cgbs = tcg_ctx->code_gen_buffer_size;
+            saved_cghw = tcg_ctx->code_gen_highwater;
+            tcg_ctx->code_gen_ptr         = tcg_ctx->hot_arena_ptr;
+            tcg_ctx->code_gen_buffer      = tcg_ctx->hot_arena_start;
+            tcg_ctx->code_gen_buffer_size = tcg_ctx->hot_arena_end
+                                          - tcg_ctx->hot_arena_start;
+            tcg_ctx->code_gen_highwater   = tcg_ctx->hot_arena_end
+                                          - TCG_HIGHWATER;
+            goto got_tb;
+        }
+    }
+#endif
+
     tb = tcg_tb_alloc(tcg_ctx);
     if (unlikely(!tb)) {
         /* flush must be done */
@@ -386,6 +416,9 @@ TranslationBlock *tb_gen_code(CPUState *cpu, TCGTBCPUState s)
         cpu_loop_exit(cpu);
     }
 
+#ifdef XBOX
+ got_tb:
+#endif
     gen_code_buf = tcg_ctx->code_gen_ptr;
     tb->tc.ptr = tcg_splitwx_to_rx(gen_code_buf);
     if (!(s.cflags & CF_PCREL)) {
@@ -447,6 +480,15 @@ TranslationBlock *tb_gen_code(CPUState *cpu, TCGTBCPUState s)
                           "code_gen_buffer overflow\n");
             tb_unlock_pages(tb);
             tcg_ctx->gen_tb = NULL;
+#ifdef XBOX
+            if (hot_alloc) {
+                tcg_ctx->code_gen_ptr         = saved_cgp;
+                tcg_ctx->code_gen_buffer      = saved_cgb;
+                tcg_ctx->code_gen_buffer_size = saved_cgbs;
+                tcg_ctx->code_gen_highwater   = saved_cghw;
+                hot_alloc = false;
+            }
+#endif
             goto buffer_overflow;
 
         case -2:
@@ -582,9 +624,22 @@ TranslationBlock *tb_gen_code(CPUState *cpu, TCGTBCPUState s)
         }
     }
 
-    qatomic_set(&tcg_ctx->code_gen_ptr, (void *)
-        ROUND_UP((uintptr_t)gen_code_buf + gen_code_size + search_size,
-                 CODE_GEN_ALIGN));
+#ifdef XBOX
+    if (hot_alloc) {
+        tcg_ctx->hot_arena_ptr = (void *)
+            ROUND_UP((uintptr_t)gen_code_buf + gen_code_size + search_size,
+                     CODE_GEN_ALIGN);
+        tcg_ctx->code_gen_ptr         = saved_cgp;
+        tcg_ctx->code_gen_buffer      = saved_cgb;
+        tcg_ctx->code_gen_buffer_size = saved_cgbs;
+        tcg_ctx->code_gen_highwater   = saved_cghw;
+    } else
+#endif
+    {
+        qatomic_set(&tcg_ctx->code_gen_ptr, (void *)
+            ROUND_UP((uintptr_t)gen_code_buf + gen_code_size + search_size,
+                     CODE_GEN_ALIGN));
+    }
 
     /* init jump list */
     qemu_spin_init(&tb->jmp_lock);
@@ -655,7 +710,14 @@ recycle_tb:
             uintptr_t orig_aligned = (uintptr_t)gen_code_buf;
 
             orig_aligned -= ROUND_UP(sizeof(*tb), qemu_icache_linesize);
-            qatomic_set(&tcg_ctx->code_gen_ptr, (void *)orig_aligned);
+#ifdef XBOX
+            if (hot_alloc) {
+                tcg_ctx->hot_arena_ptr = (void *)orig_aligned;
+            } else
+#endif
+            {
+                qatomic_set(&tcg_ctx->code_gen_ptr, (void *)orig_aligned);
+            }
         }
         tcg_tb_remove(tb);
         return existing_tb;

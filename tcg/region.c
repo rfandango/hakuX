@@ -416,6 +416,11 @@ void tcg_region_reset_all(void)
     for (i = 0; i < n_ctxs; i++) {
         TCGContext *s = qatomic_read(&tcg_ctxs[i]);
         tcg_region_initial_alloc__locked(s);
+#ifdef XBOX
+        if (s->hot_arena_start) {
+            s->hot_arena_ptr = s->hot_arena_start;
+        }
+#endif
     }
     qemu_mutex_unlock(&region.lock);
 
@@ -865,6 +870,18 @@ void tcg_region_prologue_set(TCGContext *s)
     /* Deduct the prologue from the first region.  */
     g_assert(region.start_aligned == s->code_gen_buffer);
     region.after_prologue = s->code_ptr;
+
+#ifdef XBOX
+    /*
+     * Carve out a hot arena for tier-1 TBs right after the prologue.
+     * Sized to match a typical ARM64 L1I cache (64 KB).
+     */
+#define HOT_ARENA_SIZE (64 * 1024)
+    s->hot_arena_start = region.after_prologue;
+    s->hot_arena_end   = s->hot_arena_start + HOT_ARENA_SIZE;
+    s->hot_arena_ptr   = s->hot_arena_start;
+    region.after_prologue = s->hot_arena_end;
+#endif
 
     /* Recompute boundaries of the first region. */
     tcg_region_assign(s, 0);

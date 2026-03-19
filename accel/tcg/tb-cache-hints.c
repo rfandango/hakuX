@@ -512,6 +512,10 @@ void tb_cache_rewarm_after_flush(CPUState *cpu)
     }
     rewarm_in_progress = true;
 
+    /* Sort hot-first so tier-1/high-exec_count TBs are placed contiguously
+     * at the start of the code buffer, improving L1I cache locality. */
+    qsort(recorded_hints, recorded_count, sizeof(TBCacheHint), hint_tier_cmp);
+
     int translated = 0;
     int tier1_count = 0;
     int total = recorded_count;

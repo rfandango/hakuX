@@ -94,7 +94,8 @@ static TCGReg tcg_target_call_oarg_reg(TCGCallReturnKind kind, int slot)
 #define TCG_REG_GUEST_BASE TCG_REG_X28
 
 #ifdef XBOX
-#define TCG_REG_XBOX_RAM_BASE TCG_REG_X27
+#define TCG_REG_XBOX_RAM_BASE  TCG_REG_X27
+#define TCG_REG_XBOX_HOST_BASE TCG_REG_X26
 #endif
 
 static bool reloc_pc26(tcg_insn_unit *src_rw, const tcg_insn_unit *target)
@@ -1751,51 +1752,31 @@ static TCGLabelQemuLdst *prepare_host_addr(TCGContext *s, HostAddress *h,
                 ram_mask &= 0xFFFFFFFFULL;
             }
 
-            tcg_insn_unit *label_active_cbz, *label_cb_cbnz, *label_bne;
+            tcg_insn_unit *label_bne;
 
-            /* 1. LDR W_TMP2, [X27, #active] — 0 during boot, 1 after */
-            tcg_out_ld(s, TCG_TYPE_I32, TCG_REG_TMP2,
-                       TCG_REG_XBOX_RAM_BASE,
-                       offsetof(XboxRamFPState, active));
+            /* 1. CBZ X26, →tlb  (X26=0 means preamble disabled fast path) */
+            tcg_insn_unit *label_gate_cbz = s->code_ptr;
+            tcg_out_insn(s, 3201, CBZ, 1, TCG_REG_XBOX_HOST_BASE, 0);
 
-            /* 2. CBZ W_TMP2, →tlb  (not active → full TLB path) */
-            label_active_cbz = s->code_ptr;
-            tcg_out_insn(s, 3201, CBZ, 0, TCG_REG_TMP2, 0);
-
-            /* 3. LDR W_TMP2, [X27, #cb_count] */
-            tcg_out_ld(s, TCG_TYPE_I32, TCG_REG_TMP2,
-                       TCG_REG_XBOX_RAM_BASE,
-                       offsetof(XboxRamFPState, cb_count));
-
-            /* 4. CBNZ W_TMP2, →tlb  (callbacks active → need TLB) */
-            label_cb_cbnz = s->code_ptr;
-            tcg_out_insn(s, 3201, CBNZ, 0, TCG_REG_TMP2, 0);
-
-            /* 5. TST addr, #~(ram_size-1): zero if addr within RAM */
+            /* 2. TST addr, #~(ram_size-1): zero if addr within RAM */
             tcg_out_logicali(s, I3404_ANDSI, addr_type,
                              TCG_REG_XZR, addr_reg, ram_mask);
 
-            /* 6. B.NE →tlb  (addr outside RAM range) */
+            /* 3. B.NE →vram_check  (addr outside RAM range) */
             label_bne = s->code_ptr;
             tcg_out_insn(s, 3202, B_C, TCG_COND_NE, 0);
 
-            /* 7. LDR X_TMP0, [X27, #host_base] */
-            tcg_out_ld(s, TCG_TYPE_PTR, TCG_REG_TMP0,
-                       TCG_REG_XBOX_RAM_BASE,
-                       offsetof(XboxRamFPState, host_base));
+            /* 4. MOV TMP1, X26  (X26 holds host_base from preamble) */
+            tcg_out_mov(s, TCG_TYPE_PTR, TCG_REG_TMP1,
+                        TCG_REG_XBOX_HOST_BASE);
 
-            /* 8. MOV TMP1, TMP0  (base register expected at done) */
-            tcg_out_mov(s, TCG_TYPE_PTR, TCG_REG_TMP1, TCG_REG_TMP0);
-
-            /* 9. B →done  (skip TLB code) */
+            /* 5. B →done  (skip TLB code) */
             xbox_fast_done = s->code_ptr;
             tcg_out_insn(s, 3206, B, 0);
 
             /*
              * VRAM fast path: label_bne (RAM range miss) lands here.
-             * Check if addr falls in the VRAM PCI BAR alias region.
-             * Since Xbox is UMA, VRAM is the same physical RAM, so
-             * host_base + (addr - vram_pci_base) gives the host address.
+             * X27 still points to &xbox_ram_fp so we can load vram_pci_base.
              */
             tcg_insn_unit *label_vram_cbz, *label_vram_bne;
 
@@ -1822,36 +1803,19 @@ static TCGLabelQemuLdst *prepare_host_addr(TCGContext *s, HostAddress *h,
             label_vram_bne = s->code_ptr;
             tcg_out_insn(s, 3202, B_C, TCG_COND_NE, 0);
 
-            /* V6. LDR X_TMP1, [X27, #host_base] */
-            tcg_out_ld(s, TCG_TYPE_PTR, TCG_REG_TMP1,
-                       TCG_REG_XBOX_RAM_BASE,
-                       offsetof(XboxRamFPState, host_base));
-
-            /* V7. TMP1 = host_base - vram_base  (TMP1+addr = host+offset) */
+            /* V6. SUB TMP1 = X26 - TMP0  (host_base - vram_base) */
             tcg_out_insn(s, 3502, SUB, 1,
-                         TCG_REG_TMP1, TCG_REG_TMP1, TCG_REG_TMP0);
+                         TCG_REG_TMP1, TCG_REG_XBOX_HOST_BASE,
+                         TCG_REG_TMP0);
 
-            /* V8. B →done */
+            /* V7. B →done */
             xbox_vram_done = s->code_ptr;
             tcg_out_insn(s, 3206, B, 0);
 
             /* Patch fallback branches to TLB start */
-            reloc_pc19(label_active_cbz, tcg_splitwx_to_rx(s->code_ptr));
-            reloc_pc19(label_cb_cbnz,    tcg_splitwx_to_rx(s->code_ptr));
+            reloc_pc19(label_gate_cbz,   tcg_splitwx_to_rx(s->code_ptr));
             reloc_pc19(label_vram_cbz,   tcg_splitwx_to_rx(s->code_ptr));
             reloc_pc19(label_vram_bne,   tcg_splitwx_to_rx(s->code_ptr));
-
-            static int dbg_fp_gen = 0;
-            if (dbg_fp_gen < 3) {
-                error_report("[TLB-FP] #%d active_off=%d cb_off=%d "
-                             "vram_off=%d addr_reg=%d",
-                             dbg_fp_gen,
-                             (int)offsetof(XboxRamFPState, active),
-                             (int)offsetof(XboxRamFPState, cb_count),
-                             (int)offsetof(XboxRamFPState, vram_pci_base),
-                             addr_reg);
-                dbg_fp_gen++;
-            }
         }
 #endif
 
@@ -4339,6 +4303,7 @@ static void tcg_target_qemu_prologue(TCGContext *s)
     tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_XBOX_RAM_BASE,
                  (uintptr_t)&xbox_ram_fp);
     tcg_regset_set_reg(s->reserved_regs, TCG_REG_XBOX_RAM_BASE);
+    tcg_regset_set_reg(s->reserved_regs, TCG_REG_XBOX_HOST_BASE);
 #endif
 
     tcg_out_mov(s, TCG_TYPE_PTR, TCG_AREG0, tcg_target_call_iarg_regs[0]);
@@ -4375,6 +4340,45 @@ static void tcg_target_qemu_prologue(TCGContext *s)
 static void tcg_out_tb_start(TCGContext *s)
 {
     tcg_out_bti(s, BTI_J);
+
+#ifdef XBOX
+    if (xbox_ram_size) {
+        /*
+         * Preamble: check active/cb_count once per TB and cache
+         * host_base in X26.  X27 (&xbox_ram_fp) stays unchanged
+         * so goto_tb chaining works.  X26 = host_base when the fast
+         * path is usable, 0 otherwise.
+         */
+        tcg_insn_unit *label_no_fp, *label_no_fp2, *label_end;
+
+        tcg_out_ld(s, TCG_TYPE_I32, TCG_REG_TMP0,
+                   TCG_REG_XBOX_RAM_BASE,
+                   offsetof(XboxRamFPState, active));
+        label_no_fp = s->code_ptr;
+        tcg_out_insn(s, 3201, CBZ, 0, TCG_REG_TMP0, 0);
+
+        tcg_out_ld(s, TCG_TYPE_I32, TCG_REG_TMP0,
+                   TCG_REG_XBOX_RAM_BASE,
+                   offsetof(XboxRamFPState, cb_count));
+        label_no_fp2 = s->code_ptr;
+        tcg_out_insn(s, 3201, CBNZ, 0, TCG_REG_TMP0, 0);
+
+        tcg_out_ld(s, TCG_TYPE_PTR, TCG_REG_XBOX_HOST_BASE,
+                   TCG_REG_XBOX_RAM_BASE,
+                   offsetof(XboxRamFPState, host_base));
+
+        label_end = s->code_ptr;
+        tcg_out_insn(s, 3206, B, 0);
+
+        /* .no_fp: X26 = 0 signals per-load fast path is disabled */
+        reloc_pc19(label_no_fp, tcg_splitwx_to_rx(s->code_ptr));
+        reloc_pc19(label_no_fp2, tcg_splitwx_to_rx(s->code_ptr));
+        tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_XBOX_HOST_BASE, 0);
+
+        /* .end_preamble: */
+        reloc_pc26(label_end, tcg_splitwx_to_rx(s->code_ptr));
+    }
+#endif
 }
 
 static void tcg_out_nop_fill(tcg_insn_unit *p, int count)
