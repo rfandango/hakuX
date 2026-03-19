@@ -635,10 +635,24 @@ void pgraph_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
 {
     NV2AState *d = (NV2AState *)opaque;
     PGRAPHState *pg = &d->pgraph;
+    bool needs_pfifo_lock;
 
     nv2a_reg_log_write(NV_PGRAPH, addr, size, val);
 
-    qemu_mutex_lock(&d->pfifo.lock); // FIXME: Factor out fifo lock here
+    switch (addr) {
+    case NV_PGRAPH_INTR:
+    case NV_PGRAPH_INCREMENT:
+    case NV_PGRAPH_FIFO:
+        needs_pfifo_lock = true;
+        break;
+    default:
+        needs_pfifo_lock = false;
+        break;
+    }
+
+    if (needs_pfifo_lock) {
+        qemu_mutex_lock(&d->pfifo.lock);
+    }
     qemu_mutex_lock(&pg->lock);
 
     switch (addr) {
@@ -725,7 +739,9 @@ void pgraph_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
     }
 
     qemu_mutex_unlock(&pg->lock);
-    qemu_mutex_unlock(&d->pfifo.lock);
+    if (needs_pfifo_lock) {
+        qemu_mutex_unlock(&d->pfifo.lock);
+    }
 }
 
 void pgraph_context_switch(NV2AState *d, unsigned int channel_id)

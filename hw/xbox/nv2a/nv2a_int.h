@@ -67,6 +67,19 @@ typedef struct DMAObject {
     hwaddr limit;
 } DMAObject;
 
+/*
+ * NV2A Lock Ordering
+ *
+ * When acquiring multiple locks, they must be taken in this order to avoid
+ * deadlocks:
+ *
+ *   pfifo.lock  →  pgraph.lock  →  pgraph.renderer_lock
+ *
+ * Not all locks need to be held simultaneously. Most PGRAPH MMIO register
+ * accesses only require pgraph.lock. Only registers that call pfifo_kick()
+ * (NV_PGRAPH_INTR, NV_PGRAPH_INCREMENT, NV_PGRAPH_FIFO) additionally require
+ * pfifo.lock, which must be acquired first.
+ */
 typedef struct NV2AState {
     /*< private >*/
     PCIDevice parent_obj;
