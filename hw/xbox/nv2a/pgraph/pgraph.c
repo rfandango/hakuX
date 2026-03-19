@@ -586,7 +586,111 @@ static inline bool fast_entry_apply(PGRAPHState *pg,
     return true;
 }
 
+static inline bool fast_entry_apply_atomic(PGRAPHState *pg,
+                                           const MethodFastPath *f, uint32_t p)
+{
+    if (f->xlat >= XLAT_TEX_DIRTY_0 && f->xlat <= XLAT_TEX_DIRTY_3) {
+        int slot = f->xlat - XLAT_TEX_DIRTY_0;
+        bool changed = (p != qatomic_read(&pg->regs_[f->reg]));
+        pg->texture_dirty[slot] |= changed;
+        pgraph_reg_w_atomic(pg, f->reg, p);
+        return true;
+    }
+    if (f->xlat) {
+        p = fast_xlat(f->xlat, p);
+        if (p == UINT32_MAX) return false;
+    }
+    if (f->mask_idx == 0) {
+        pgraph_reg_w_atomic(pg, f->reg, p);
+    } else {
+        uint32_t rv = qatomic_read(&pg->regs_[f->reg]);
+        SET_MASK(rv, mask_lut[f->mask_idx], p);
+        pgraph_reg_w_atomic(pg, f->reg, rv);
+    }
+    return true;
+}
+
 #endif /* XEMU_OPT_METHOD_FAST_TABLE */
+
+#ifndef XEMU_OPT_LOCKLESS_FAST_DISPATCH
+#define XEMU_OPT_LOCKLESS_FAST_DISPATCH XEMU_OPT_METHOD_FAST_TABLE
+#endif
+
+#if XEMU_OPT_LOCKLESS_FAST_DISPATCH
+
+#ifndef METHOD_ADDR_TO_INDEX
+#define METHOD_ADDR_TO_INDEX(x) ((x) >> 2)
+#endif
+
+int pgraph_method_try_fast(NV2AState *d, unsigned int subchannel,
+                           unsigned int method, uint32_t parameter,
+                           uint32_t *parameters, size_t num_words_available,
+                           size_t max_lookahead_words)
+{
+    PGRAPHState *pg = &d->pgraph;
+
+    if (method < 0x100 ||
+        subchannel != pg->last_subchannel ||
+        pg->cached_graphics_class != NV_KELVIN_PRIMITIVE) {
+        return 0;
+    }
+
+    unsigned int midx = METHOD_ADDR_TO_INDEX(method);
+    if (midx >= 0x800) return 0;
+
+    const MethodFastPath *fast = &method_fast[midx];
+    if (!fast->reg) return 0;
+
+    if (!fast_entry_apply_atomic(pg, fast, parameter)) return 0;
+
+    size_t consumed = 1;
+
+    while (consumed < num_words_available) {
+        unsigned int next_midx = midx + 1;
+        if (next_midx >= 0x800) break;
+        const MethodFastPath *nf = &method_fast[next_midx];
+        if (!nf->reg) break;
+        uint32_t p = ldl_le_p(parameters + consumed);
+        if (!fast_entry_apply_atomic(pg, nf, p)) break;
+        midx = next_midx;
+        consumed++;
+    }
+
+    while (consumed < max_lookahead_words) {
+        uint32_t hdr = ldl_le_p(parameters + consumed);
+        if ((hdr & 0xe0030003) != 0) break;
+        uint32_t next_method = hdr & 0x1ffc;
+        uint32_t next_sub    = (hdr >> 13) & 7;
+        uint32_t next_count  = (hdr >> 18) & 0x7ff;
+        if (next_sub != subchannel || next_method < 0x100
+            || next_count == 0) break;
+        unsigned int nm = METHOD_ADDR_TO_INDEX(next_method);
+        if (nm + next_count > 0x800) break;
+        if (consumed + 1 + next_count > max_lookahead_words) break;
+        bool all_fast = true;
+        for (uint32_t i = 0; i < next_count; i++) {
+            if (!method_fast[nm + i].reg) {
+                all_fast = false;
+                break;
+            }
+        }
+        if (!all_fast) break;
+        consumed++;
+        for (uint32_t i = 0; i < next_count; i++) {
+            const MethodFastPath *cf = &method_fast[nm + i];
+            uint32_t p = ldl_le_p(parameters + consumed);
+            if (!fast_entry_apply_atomic(pg, cf, p)) {
+                consumed -= (i + 1);
+                goto coalesce_done;
+            }
+            consumed++;
+        }
+    }
+coalesce_done:
+    return consumed;
+}
+
+#endif /* XEMU_OPT_LOCKLESS_FAST_DISPATCH */
 
 NV2AState *g_nv2a;
 
@@ -1083,7 +1187,9 @@ unsigned int nv2a_get_surface_scale_factor(void)
 
 #define METHOD_ADDR(gclass, name) \
     gclass ## _ ## name
+#ifndef METHOD_ADDR_TO_INDEX
 #define METHOD_ADDR_TO_INDEX(x) ((x)>>2)
+#endif
 #define METHOD_NAME_STR(gclass, name) \
     tostring(gclass ## _ ## name)
 #define METHOD_FUNC_NAME(gclass, name) \

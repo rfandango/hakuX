@@ -29,6 +29,10 @@
 #define XEMU_OPT_PFIFO_LOCK_BATCH 1
 #endif
 
+#ifndef XEMU_OPT_LOCKLESS_FAST_DISPATCH
+#define XEMU_OPT_LOCKLESS_FAST_DISPATCH XEMU_OPT_PFIFO_LOCK_BATCH
+#endif
+
 #ifndef XEMU_OPT_FIFO_SPIN
 #define XEMU_OPT_FIFO_SPIN 1
 #endif
@@ -307,6 +311,18 @@ static ssize_t pfifo_run_puller(NV2AState *d, uint32_t method_entry,
         SET_MASK(*pull1, NV_PFIFO_CACHE1_PULL1_ENGINE, engine);
 
 #if XEMU_OPT_PFIFO_LOCK_BATCH
+#if XEMU_OPT_LOCKLESS_FAST_DISPATCH
+        if (inc && can_fifo_access(d)) {
+            num_proc = pgraph_method_try_fast(
+                d, subchannel, method, parameter,
+                parameters, num_words_available, max_lookahead_words);
+            if (num_proc > 0) {
+                g_nv2a_stats.cpu_working.method_fast_hit += num_proc;
+                g_nv2a_stats.cpu_working.method_count++;
+                goto puller_done;
+            }
+        }
+#endif
         qemu_mutex_lock(&d->pgraph.lock);
         qemu_mutex_unlock(&d->pfifo.lock);
 
@@ -343,6 +359,7 @@ static ssize_t pfifo_run_puller(NV2AState *d, uint32_t method_entry,
         assert(false);
     }
 
+puller_done:
     if (num_proc > 0) {
         *status |= NV_PFIFO_CACHE1_STATUS_LOW_MARK;
     }
