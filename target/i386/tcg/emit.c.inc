@@ -546,6 +546,9 @@ static inline void gen_unary_fp_sse(DisasContext *s, X86DecodedInsn *decode,
             return;
         }
         fn(tcg_env, OP_PTR0, OP_PTR1, OP_PTR2);
+#if defined(XBOX)
+        g_fpu_profile.sse_arith_scalar++;
+#endif
     } else {
         SSEFunc_0_epp ps, pd, fn;
         ps = s->vex_l ? ps_ymm : ps_xmm;
@@ -556,6 +559,9 @@ static inline void gen_unary_fp_sse(DisasContext *s, X86DecodedInsn *decode,
             return;
         }
         fn(tcg_env, OP_PTR0, OP_PTR2);
+#if defined(XBOX)
+        g_fpu_profile.sse_arith_packed++;
+#endif
     }
 }
 #define UNARY_FP_SSE(uname, lname)                                                 \
@@ -585,10 +591,16 @@ static inline void gen_fp_sse(DisasContext *s, X86DecodedInsn *decode,
     SSEFunc_0_eppp ps, pd, fn;
     if ((s->prefix & (PREFIX_REPZ | PREFIX_REPNZ)) != 0) {
         fn = s->prefix & PREFIX_REPZ ? ss : sd;
+#if defined(XBOX)
+        g_fpu_profile.sse_arith_scalar++;
+#endif
     } else {
         ps = s->vex_l ? ps_ymm : ps_xmm;
         pd = s->vex_l ? pd_ymm : pd_xmm;
         fn = s->prefix & PREFIX_DATA ? pd : ps;
+#if defined(XBOX)
+        g_fpu_profile.sse_arith_packed++;
+#endif
     }
     if (fn) {
         fn(tcg_env, OP_PTR0, OP_PTR1, OP_PTR2);
@@ -4268,6 +4280,9 @@ static void gen_VCMP(DisasContext *s, X86DecodedInsn *decode)
         !!(s->prefix & PREFIX_DATA) /* pd */ + (s->vex_l << 2);
 
     gen_helper_cmp_funcs[index][b](tcg_env, OP_PTR0, OP_PTR1, OP_PTR2);
+#if defined(XBOX)
+    g_fpu_profile.sse_cmp++;
+#endif
 }
 
 static void gen_VCOMI(DisasContext *s, X86DecodedInsn *decode)
@@ -4276,6 +4291,9 @@ static void gen_VCOMI(DisasContext *s, X86DecodedInsn *decode)
     fn = s->prefix & PREFIX_DATA ? gen_helper_comisd : gen_helper_comiss;
     fn(tcg_env, OP_PTR1, OP_PTR2);
     assume_cc_op(s, CC_OP_EFLAGS);
+#if defined(XBOX)
+    g_fpu_profile.sse_cmp++;
+#endif
 }
 
 static void gen_VCVTPD2PS(DisasContext *s, X86DecodedInsn *decode)
@@ -4285,6 +4303,9 @@ static void gen_VCVTPD2PS(DisasContext *s, X86DecodedInsn *decode)
     } else {
         gen_helper_cvtpd2ps_xmm(tcg_env, OP_PTR0, OP_PTR2);
     }
+#if defined(XBOX)
+    g_fpu_profile.sse_cvt++;
+#endif
 }
 
 static void gen_VCVTPS2PD(DisasContext *s, X86DecodedInsn *decode)
@@ -4294,6 +4315,9 @@ static void gen_VCVTPS2PD(DisasContext *s, X86DecodedInsn *decode)
     } else {
         gen_helper_cvtps2pd_xmm(tcg_env, OP_PTR0, OP_PTR2);
     }
+#if defined(XBOX)
+    g_fpu_profile.sse_cvt++;
+#endif
 }
 
 static void gen_VCVTPS2PH(DisasContext *s, X86DecodedInsn *decode)
@@ -4313,11 +4337,17 @@ static void gen_VCVTPS2PH(DisasContext *s, X86DecodedInsn *decode)
 static void gen_VCVTSD2SS(DisasContext *s, X86DecodedInsn *decode)
 {
     gen_helper_cvtsd2ss(tcg_env, OP_PTR0, OP_PTR1, OP_PTR2);
+#if defined(XBOX)
+    g_fpu_profile.sse_cvt++;
+#endif
 }
 
 static void gen_VCVTSS2SD(DisasContext *s, X86DecodedInsn *decode)
 {
     gen_helper_cvtss2sd(tcg_env, OP_PTR0, OP_PTR1, OP_PTR2);
+#if defined(XBOX)
+    g_fpu_profile.sse_cvt++;
+#endif
 }
 
 static void gen_VCVTSI2Sx(DisasContext *s, X86DecodedInsn *decode)
@@ -4348,6 +4378,9 @@ static void gen_VCVTSI2Sx(DisasContext *s, X86DecodedInsn *decode)
     } else {
         gen_helper_cvtsi2ss(tcg_env, OP_PTR0, in);
     }
+#if defined(XBOX)
+    g_fpu_profile.sse_cvt++;
+#endif
 }
 
 static inline void gen_VCVTtSx2SI(DisasContext *s, X86DecodedInsn *decode,
@@ -4393,6 +4426,9 @@ static void gen_VCVTSx2SI(DisasContext *s, X86DecodedInsn *decode)
     gen_VCVTtSx2SI(s, decode,
                    gen_helper_cvtss2si, gen_helper_cvtss2sq,
                    gen_helper_cvtsd2si, gen_helper_cvtsd2sq);
+#if defined(XBOX)
+    g_fpu_profile.sse_cvt++;
+#endif
 }
 
 static void gen_VCVTTSx2SI(DisasContext *s, X86DecodedInsn *decode)
@@ -4400,6 +4436,9 @@ static void gen_VCVTTSx2SI(DisasContext *s, X86DecodedInsn *decode)
     gen_VCVTtSx2SI(s, decode,
                    gen_helper_cvttss2si, gen_helper_cvttss2sq,
                    gen_helper_cvttsd2si, gen_helper_cvttsd2sq);
+#if defined(XBOX)
+    g_fpu_profile.sse_cvt++;
+#endif
 }
 
 static void gen_VEXTRACTx128(DisasContext *s, X86DecodedInsn *decode)
@@ -4671,6 +4710,9 @@ static void gen_VUCOMI(DisasContext *s, X86DecodedInsn *decode)
     fn = s->prefix & PREFIX_DATA ? gen_helper_ucomisd : gen_helper_ucomiss;
     fn(tcg_env, OP_PTR1, OP_PTR2);
     assume_cc_op(s, CC_OP_EFLAGS);
+#if defined(XBOX)
+    g_fpu_profile.sse_cmp++;
+#endif
 }
 
 static void gen_VZEROALL(DisasContext *s, X86DecodedInsn *decode)

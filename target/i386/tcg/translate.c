@@ -37,6 +37,22 @@
 
 static int g_use_fp_jit;
 
+#if defined(XBOX)
+struct FPUProfileCounters {
+    int x87_arith;
+    int x87_load_store;
+    int x87_transcendental;
+    int x87_stack;
+    int sse_arith_packed;
+    int sse_arith_scalar;
+    int sse_cmp;
+    int sse_cvt;
+    int sse_other;
+};
+struct FPUProfileCounters g_fpu_profile;
+int g_fpu_helper_calls;
+#endif
+
 #if defined(XBOX) && (defined(__x86_64__) || defined(__aarch64__))
 #include "ui/xemu-settings.h"
 #define MAP_GEN_HELPER_SOFT_HARD(name) \
@@ -3038,6 +3054,54 @@ static void gen_x87(DisasContext *s, X86DecodedInsn *decode)
     int b = decode->b;
     int modrm = s->modrm;
     int mod, rm, op;
+
+#if defined(XBOX)
+    {
+        int xop = ((b & 7) << 3) | ((modrm >> 3) & 7);
+        int xmod = (modrm >> 6) & 3;
+        if (xmod != 3) {
+            switch (xop) {
+            case 0x00 ... 0x07: case 0x10 ... 0x17:
+            case 0x20 ... 0x27: case 0x30 ... 0x37:
+                g_fpu_profile.x87_arith++;
+                break;
+            case 0x08: case 0x0a: case 0x0b:
+            case 0x18 ... 0x1b: case 0x28 ... 0x2b:
+            case 0x38 ... 0x3b: case 0x1d: case 0x1f:
+            case 0x3d: case 0x3f:
+                g_fpu_profile.x87_load_store++;
+                break;
+            default:
+                g_fpu_profile.x87_stack++;
+                break;
+            }
+        } else {
+            switch (xop) {
+            case 0x00: case 0x01: case 0x02: case 0x03:
+            case 0x04 ... 0x07:
+            case 0x15: case 0x1d: case 0x1e:
+            case 0x20: case 0x21: case 0x22: case 0x23:
+            case 0x24 ... 0x27:
+            case 0x2c: case 0x2d:
+            case 0x30: case 0x31: case 0x32:
+            case 0x34 ... 0x37:
+                g_fpu_profile.x87_arith++;
+                break;
+            case 0x08: case 0x0b: case 0x2a: case 0x2b:
+            case 0x3a: case 0x3b:
+                g_fpu_profile.x87_load_store++;
+                break;
+            case 0x0e:
+            case 0x0f:
+                g_fpu_profile.x87_transcendental++;
+                break;
+            default:
+                g_fpu_profile.x87_stack++;
+                break;
+            }
+        }
+    }
+#endif
 
     if (s->flags & (HF_EM_MASK | HF_TS_MASK)) {
         /* if CR0.EM or CR0.TS are set, generate an FPU exception */

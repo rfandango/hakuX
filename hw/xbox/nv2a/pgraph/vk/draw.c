@@ -89,6 +89,27 @@ static void opt_stats_log_and_reset(void)
                 g_opt_stats.reorder_reject_zpass,
                 g_opt_stats.draws_skipped_pending,
                 g_opt_stats.draws_skipped_frameskip);
+        {
+            extern struct FPUProfileCounters {
+                int x87_arith, x87_load_store, x87_transcendental, x87_stack;
+                int sse_arith_packed, sse_arith_scalar, sse_cmp, sse_cvt, sse_other;
+            } g_fpu_profile;
+            extern int g_fpu_helper_calls;
+            __android_log_print(ANDROID_LOG_INFO, "xemu-fpu",
+                "x87: A%d LS%d T%d St%d | SSE: AP%d AS%d Cmp%d Cvt%d O%d | HlpCalls:%d",
+                g_fpu_profile.x87_arith,
+                g_fpu_profile.x87_load_store,
+                g_fpu_profile.x87_transcendental,
+                g_fpu_profile.x87_stack,
+                g_fpu_profile.sse_arith_packed,
+                g_fpu_profile.sse_arith_scalar,
+                g_fpu_profile.sse_cmp,
+                g_fpu_profile.sse_cvt,
+                g_fpu_profile.sse_other,
+                g_fpu_helper_calls);
+            memset(&g_fpu_profile, 0, sizeof(g_fpu_profile));
+            g_fpu_helper_calls = 0;
+        }
 #endif
         memset(&g_opt_stats, 0, sizeof(g_opt_stats));
     }

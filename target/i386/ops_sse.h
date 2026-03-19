@@ -1079,14 +1079,28 @@ void glue(helper_cvtdq2pd, SUFFIX)(CPUX86State *env, Reg *d, Reg *s)
 #if SHIFT == 1
 void helper_cvtpi2ps(CPUX86State *env, ZMMReg *d, MMXReg *s)
 {
+#if defined(XBOX) && defined(__aarch64__) && XEMU_OPT_NATIVE_FLOAT
+    float f0 = (float)(int32_t)s->MMX_L(0);
+    float f1 = (float)(int32_t)s->MMX_L(1);
+    memcpy(&d->ZMM_S(0), &f0, sizeof(f0));
+    memcpy(&d->ZMM_S(1), &f1, sizeof(f1));
+#else
     d->ZMM_S(0) = int32_to_float32(s->MMX_L(0), &env->sse_status);
     d->ZMM_S(1) = int32_to_float32(s->MMX_L(1), &env->sse_status);
+#endif
 }
 
 void helper_cvtpi2pd(CPUX86State *env, ZMMReg *d, MMXReg *s)
 {
+#if defined(XBOX) && defined(__aarch64__) && XEMU_OPT_NATIVE_FLOAT
+    double d0 = (double)(int32_t)s->MMX_L(0);
+    double d1 = (double)(int32_t)s->MMX_L(1);
+    memcpy(&d->ZMM_D(0), &d0, sizeof(d0));
+    memcpy(&d->ZMM_D(1), &d1, sizeof(d1));
+#else
     d->ZMM_D(0) = int32_to_float64(s->MMX_L(0), &env->sse_status);
     d->ZMM_D(1) = int32_to_float64(s->MMX_L(1), &env->sse_status);
+#endif
 }
 
 void helper_cvtsi2ss(CPUX86State *env, ZMMReg *d, uint32_t val)
@@ -1202,14 +1216,30 @@ void glue(helper_cvtpd2dq, SUFFIX)(CPUX86State *env, ZMMReg *d, ZMMReg *s)
 #if SHIFT == 1
 void helper_cvtps2pi(CPUX86State *env, MMXReg *d, ZMMReg *s)
 {
+#if defined(XBOX) && defined(__aarch64__) && XEMU_OPT_NATIVE_FLOAT
+    float f;
+    memcpy(&f, &s->ZMM_S(0), sizeof(f));
+    d->MMX_L(0) = __builtin_isnan(f) ? INT32_MIN : (int32_t)lrintf(f);
+    memcpy(&f, &s->ZMM_S(1), sizeof(f));
+    d->MMX_L(1) = __builtin_isnan(f) ? INT32_MIN : (int32_t)lrintf(f);
+#else
     d->MMX_L(0) = x86_float32_to_int32(s->ZMM_S(0), &env->sse_status);
     d->MMX_L(1) = x86_float32_to_int32(s->ZMM_S(1), &env->sse_status);
+#endif
 }
 
 void helper_cvtpd2pi(CPUX86State *env, MMXReg *d, ZMMReg *s)
 {
+#if defined(XBOX) && defined(__aarch64__) && XEMU_OPT_NATIVE_FLOAT
+    double dd;
+    memcpy(&dd, &s->ZMM_D(0), sizeof(dd));
+    d->MMX_L(0) = __builtin_isnan(dd) ? INT32_MIN : (int32_t)lrint(dd);
+    memcpy(&dd, &s->ZMM_D(1), sizeof(dd));
+    d->MMX_L(1) = __builtin_isnan(dd) ? INT32_MIN : (int32_t)lrint(dd);
+#else
     d->MMX_L(0) = x86_float64_to_int32(s->ZMM_D(0), &env->sse_status);
     d->MMX_L(1) = x86_float64_to_int32(s->ZMM_D(1), &env->sse_status);
+#endif
 }
 
 int32_t helper_cvtss2si(CPUX86State *env, ZMMReg *s)
@@ -1295,14 +1325,30 @@ void glue(helper_cvttpd2dq, SUFFIX)(CPUX86State *env, ZMMReg *d, ZMMReg *s)
 #if SHIFT == 1
 void helper_cvttps2pi(CPUX86State *env, MMXReg *d, ZMMReg *s)
 {
+#if defined(XBOX) && defined(__aarch64__) && XEMU_OPT_NATIVE_FLOAT
+    float f;
+    memcpy(&f, &s->ZMM_S(0), sizeof(f));
+    d->MMX_L(0) = __builtin_isnan(f) ? INT32_MIN : (int32_t)f;
+    memcpy(&f, &s->ZMM_S(1), sizeof(f));
+    d->MMX_L(1) = __builtin_isnan(f) ? INT32_MIN : (int32_t)f;
+#else
     d->MMX_L(0) = x86_float32_to_int32_round_to_zero(s->ZMM_S(0), &env->sse_status);
     d->MMX_L(1) = x86_float32_to_int32_round_to_zero(s->ZMM_S(1), &env->sse_status);
+#endif
 }
 
 void helper_cvttpd2pi(CPUX86State *env, MMXReg *d, ZMMReg *s)
 {
+#if defined(XBOX) && defined(__aarch64__) && XEMU_OPT_NATIVE_FLOAT
+    double dd;
+    memcpy(&dd, &s->ZMM_D(0), sizeof(dd));
+    d->MMX_L(0) = __builtin_isnan(dd) ? INT32_MIN : (int32_t)dd;
+    memcpy(&dd, &s->ZMM_D(1), sizeof(dd));
+    d->MMX_L(1) = __builtin_isnan(dd) ? INT32_MIN : (int32_t)dd;
+#else
     d->MMX_L(0) = x86_float64_to_int32_round_to_zero(s->ZMM_D(0), &env->sse_status);
     d->MMX_L(1) = x86_float64_to_int32_round_to_zero(s->ZMM_D(1), &env->sse_status);
+#endif
 }
 
 int32_t helper_cvttss2si(CPUX86State *env, ZMMReg *s)
@@ -1596,6 +1642,128 @@ void glue(helper_addsubpd, SUFFIX)(CPUX86State *env, Reg *d, Reg *v, Reg *s)
 
 #endif /* XBOX && __aarch64__ && XEMU_OPT_NATIVE_FLOAT && SHIFT == 1 */
 
+#if defined(XBOX) && defined(__aarch64__) && XEMU_OPT_NATIVE_FLOAT && SHIFT == 1
+/*
+ * NEON-vectorized packed comparisons. Processes all 4 (PS) or 2 (PD) lanes
+ * in a single vector operation instead of per-element scalar loops.
+ */
+
+static inline uint32x4_t neon_cmp_ord_ps(float32x4_t a, float32x4_t b)
+{
+    return vandq_u32(vceqq_f32(a, a), vceqq_f32(b, b));
+}
+
+static inline uint64x2_t neon_cmp_ord_pd(float64x2_t a, float64x2_t b)
+{
+    return vandq_u64(vceqq_f64(a, a), vceqq_f64(b, b));
+}
+
+static inline uint64x2_t neon_notq_u64(uint64x2_t v)
+{
+    return vreinterpretq_u64_u32(vmvnq_u32(vreinterpretq_u32_u64(v)));
+}
+
+#define NEON_CMP_PS(name, expr)                                             \
+    void glue(helper_ ## name ## ps, SUFFIX)(CPUX86State *env,              \
+                                             Reg *d, Reg *v, Reg *s)        \
+    {                                                                       \
+        float32x4_t va = vld1q_f32((const float *)&v->ZMM_S(0));           \
+        float32x4_t vb = vld1q_f32((const float *)&s->ZMM_S(0));          \
+        uint32x4_t r = (expr);                                              \
+        vst1q_u32((uint32_t *)&d->ZMM_L(0), r);                            \
+    }
+
+#define NEON_CMP_PD(name, expr64)                                           \
+    void glue(helper_ ## name ## pd, SUFFIX)(CPUX86State *env,              \
+                                             Reg *d, Reg *v, Reg *s)        \
+    {                                                                       \
+        float64x2_t da = vld1q_f64((const double *)&v->ZMM_D(0));          \
+        float64x2_t db = vld1q_f64((const double *)&s->ZMM_D(0));         \
+        uint64x2_t r = (expr64);                                            \
+        vst1q_u64((uint64_t *)&d->ZMM_Q(0), r);                            \
+    }
+
+/* SSE base predicates (0-7) */
+NEON_CMP_PS(cmpeq,    vceqq_f32(va, vb))
+NEON_CMP_PS(cmplt,    vcltq_f32(va, vb))
+NEON_CMP_PS(cmple,    vcleq_f32(va, vb))
+NEON_CMP_PS(cmpunord, vmvnq_u32(neon_cmp_ord_ps(va, vb)))
+NEON_CMP_PS(cmpneq,   vmvnq_u32(vceqq_f32(va, vb)))
+NEON_CMP_PS(cmpnlt,   vmvnq_u32(vcltq_f32(va, vb)))
+NEON_CMP_PS(cmpnle,   vmvnq_u32(vcleq_f32(va, vb)))
+NEON_CMP_PS(cmpord,   neon_cmp_ord_ps(va, vb))
+
+NEON_CMP_PD(cmpeq,    vceqq_f64(da, db))
+NEON_CMP_PD(cmplt,    vcltq_f64(da, db))
+NEON_CMP_PD(cmple,    vcleq_f64(da, db))
+NEON_CMP_PD(cmpunord, neon_notq_u64(neon_cmp_ord_pd(da, db)))
+NEON_CMP_PD(cmpneq,   neon_notq_u64(vceqq_f64(da, db)))
+NEON_CMP_PD(cmpnlt,   neon_notq_u64(vcltq_f64(da, db)))
+NEON_CMP_PD(cmpnle,   neon_notq_u64(vcleq_f64(da, db)))
+NEON_CMP_PD(cmpord,   neon_cmp_ord_pd(da, db))
+
+/* AVX extended predicates */
+NEON_CMP_PS(cmpequ,    vorrq_u32(vceqq_f32(va, vb), vmvnq_u32(neon_cmp_ord_ps(va, vb))))
+NEON_CMP_PS(cmpnge,    vmvnq_u32(vcgeq_f32(va, vb)))
+NEON_CMP_PS(cmpngt,    vmvnq_u32(vcgtq_f32(va, vb)))
+NEON_CMP_PS(cmpfalse,  vdupq_n_u32(0))
+NEON_CMP_PS(cmpnequ,   vmvnq_u32(vorrq_u32(vceqq_f32(va, vb), vmvnq_u32(neon_cmp_ord_ps(va, vb)))))
+NEON_CMP_PS(cmpge,     vcgeq_f32(va, vb))
+NEON_CMP_PS(cmpgt,     vcgtq_f32(va, vb))
+NEON_CMP_PS(cmptrue,   vdupq_n_u32(0xFFFFFFFF))
+
+NEON_CMP_PD(cmpequ,    vorrq_u64(vceqq_f64(da, db), neon_notq_u64(neon_cmp_ord_pd(da, db))))
+NEON_CMP_PD(cmpnge,    neon_notq_u64(vcgeq_f64(da, db)))
+NEON_CMP_PD(cmpngt,    neon_notq_u64(vcgtq_f64(da, db)))
+NEON_CMP_PD(cmpfalse,  vdupq_n_u64(0))
+NEON_CMP_PD(cmpnequ,   neon_notq_u64(vorrq_u64(vceqq_f64(da, db), neon_notq_u64(neon_cmp_ord_pd(da, db)))))
+NEON_CMP_PD(cmpge,     vcgeq_f64(da, db))
+NEON_CMP_PD(cmpgt,     vcgtq_f64(da, db))
+NEON_CMP_PD(cmptrue,   vdupq_n_u64(UINT64_MAX))
+
+/* "s"/"q" signaling variants use same NEON ops (no exception tracking) */
+NEON_CMP_PS(cmpeqs,    vceqq_f32(va, vb))
+NEON_CMP_PS(cmpltq,    vcltq_f32(va, vb))
+NEON_CMP_PS(cmpleq,    vcleq_f32(va, vb))
+NEON_CMP_PS(cmpunords, vmvnq_u32(neon_cmp_ord_ps(va, vb)))
+NEON_CMP_PS(cmpneqq,   vmvnq_u32(vceqq_f32(va, vb)))
+NEON_CMP_PS(cmpnltq,   vmvnq_u32(vcltq_f32(va, vb)))
+NEON_CMP_PS(cmpnleq,   vmvnq_u32(vcleq_f32(va, vb)))
+NEON_CMP_PS(cmpords,   neon_cmp_ord_ps(va, vb))
+NEON_CMP_PS(cmpequs,   vorrq_u32(vceqq_f32(va, vb), vmvnq_u32(neon_cmp_ord_ps(va, vb))))
+NEON_CMP_PS(cmpngeq,   vmvnq_u32(vcgeq_f32(va, vb)))
+NEON_CMP_PS(cmpngtq,   vmvnq_u32(vcgtq_f32(va, vb)))
+NEON_CMP_PS(cmpfalses, vdupq_n_u32(0))
+NEON_CMP_PS(cmpnequs,  vmvnq_u32(vorrq_u32(vceqq_f32(va, vb), vmvnq_u32(neon_cmp_ord_ps(va, vb)))))
+NEON_CMP_PS(cmpgeq,    vcgeq_f32(va, vb))
+NEON_CMP_PS(cmpgtq,    vcgtq_f32(va, vb))
+NEON_CMP_PS(cmptrues,  vdupq_n_u32(0xFFFFFFFF))
+
+NEON_CMP_PD(cmpeqs,    vceqq_f64(da, db))
+NEON_CMP_PD(cmpltq,    vcltq_f64(da, db))
+NEON_CMP_PD(cmpleq,    vcleq_f64(da, db))
+NEON_CMP_PD(cmpunords, neon_notq_u64(neon_cmp_ord_pd(da, db)))
+NEON_CMP_PD(cmpneqq,   neon_notq_u64(vceqq_f64(da, db)))
+NEON_CMP_PD(cmpnltq,   neon_notq_u64(vcltq_f64(da, db)))
+NEON_CMP_PD(cmpnleq,   neon_notq_u64(vcleq_f64(da, db)))
+NEON_CMP_PD(cmpords,   neon_cmp_ord_pd(da, db))
+NEON_CMP_PD(cmpequs,   vorrq_u64(vceqq_f64(da, db), neon_notq_u64(neon_cmp_ord_pd(da, db))))
+NEON_CMP_PD(cmpngeq,   neon_notq_u64(vcgeq_f64(da, db)))
+NEON_CMP_PD(cmpngtq,   neon_notq_u64(vcgtq_f64(da, db)))
+NEON_CMP_PD(cmpfalses, vdupq_n_u64(0))
+NEON_CMP_PD(cmpnequs,  neon_notq_u64(vorrq_u64(vceqq_f64(da, db), neon_notq_u64(neon_cmp_ord_pd(da, db)))))
+NEON_CMP_PD(cmpgeq,    vcgeq_f64(da, db))
+NEON_CMP_PD(cmpgtq,    vcgtq_f64(da, db))
+NEON_CMP_PD(cmptrues,  vdupq_n_u64(UINT64_MAX))
+
+#undef NEON_CMP_PS
+#undef NEON_CMP_PD
+
+#define SSE_HELPER_CMP_P(name, F, C)
+
+#endif /* XBOX && __aarch64__ && XEMU_OPT_NATIVE_FLOAT && SHIFT == 1 -- NEON CMP */
+
+#if !(defined(XBOX) && defined(__aarch64__) && XEMU_OPT_NATIVE_FLOAT && SHIFT == 1)
 #define SSE_HELPER_CMP_P(name, F, C)                                    \
     void glue(helper_ ## name ## ps, SUFFIX)(CPUX86State *env,          \
                                              Reg *d, Reg *v, Reg *s)    \
@@ -1614,6 +1782,7 @@ void glue(helper_addsubpd, SUFFIX)(CPUX86State *env, Reg *d, Reg *v, Reg *s)
             d->ZMM_Q(i) = C(F(64, v->ZMM_D(i), s->ZMM_D(i))) ? -1 : 0;  \
         }                                                               \
     }
+#endif /* !NEON CMP */
 
 #if SHIFT == 1
 #define SSE_HELPER_CMP(name, F, C)                                          \

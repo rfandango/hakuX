@@ -104,7 +104,6 @@
 #include <string.h>
 
 #ifndef USE_HARD_FPU
-bool g_xemu_fp_safe = true;
 #endif
 
 static inline double fx80_to_f64(floatx80 a)
@@ -182,30 +181,6 @@ static inline floatx80 pack_arm64(floatx80 v, float_status *status)
 }
 
 #ifndef USE_HARD_FPU
-/*
- * Save references to the real softfloat functions before we shadow them.
- * The _soft pointers are used by the runtime dispatch wrappers below.
- */
-static floatx80 (*const floatx80_add_soft)(floatx80, floatx80, float_status *)
-    = floatx80_add;
-static floatx80 (*const floatx80_sub_soft)(floatx80, floatx80, float_status *)
-    = floatx80_sub;
-static floatx80 (*const floatx80_mul_soft)(floatx80, floatx80, float_status *)
-    = floatx80_mul;
-static floatx80 (*const floatx80_div_soft)(floatx80, floatx80, float_status *)
-    = floatx80_div;
-static FloatRelation (*const floatx80_compare_soft)(floatx80, floatx80, float_status *)
-    = floatx80_compare;
-static floatx80 (*const float32_to_floatx80_soft)(float32, float_status *)
-    = float32_to_floatx80;
-static float32  (*const floatx80_to_float32_soft)(floatx80, float_status *)
-    = floatx80_to_float32;
-static floatx80 (*const float64_to_floatx80_soft)(float64, float_status *)
-    = float64_to_floatx80;
-static float64  (*const floatx80_to_float64_soft)(floatx80, float_status *)
-    = floatx80_to_float64;
-static floatx80 (*const int32_to_floatx80_soft)(int32_t, float_status *)
-    = int32_to_floatx80;
 #endif /* !USE_HARD_FPU */
 
 #ifdef USE_HARD_FPU
@@ -350,122 +325,21 @@ static inline double floatx80_modrem_nds(double a, double b, bool mod,
 
 #define floatx80_mod(a, b, s) ((void)(s), fmod((a), (b)))
 
-#else /* !USE_HARD_FPU: runtime dispatch between soft and native */
-
-static inline floatx80 floatx80_add_rt(floatx80 a, floatx80 b, float_status *s)
-{
-    if (__builtin_expect(g_xemu_fp_safe, 1))
-        return pack_arm64(f64_to_fx80(fx80_to_f64(a) + fx80_to_f64(b)), s);
-    return floatx80_add_soft(a, b, s);
-}
-static inline floatx80 floatx80_sub_rt(floatx80 a, floatx80 b, float_status *s)
-{
-    if (__builtin_expect(g_xemu_fp_safe, 1))
-        return pack_arm64(f64_to_fx80(fx80_to_f64(a) - fx80_to_f64(b)), s);
-    return floatx80_sub_soft(a, b, s);
-}
-static inline floatx80 floatx80_mul_rt(floatx80 a, floatx80 b, float_status *s)
-{
-    if (__builtin_expect(g_xemu_fp_safe, 1))
-        return pack_arm64(f64_to_fx80(fx80_to_f64(a) * fx80_to_f64(b)), s);
-    return floatx80_mul_soft(a, b, s);
-}
-static inline floatx80 floatx80_div_rt(floatx80 a, floatx80 b, float_status *s)
-{
-    if (__builtin_expect(g_xemu_fp_safe, 1))
-        return pack_arm64(f64_to_fx80(fx80_to_f64(a) / fx80_to_f64(b)), s);
-    return floatx80_div_soft(a, b, s);
-}
-static inline FloatRelation floatx80_compare_rt(floatx80 a, floatx80 b, float_status *s)
-{
-    if (__builtin_expect(g_xemu_fp_safe, 1)) {
-        double da = fx80_to_f64(a), db = fx80_to_f64(b);
-        if (da < db) return float_relation_less;
-        if (da > db) return float_relation_greater;
-        if (da == db) return float_relation_equal;
-        return float_relation_unordered;
-    }
-    return floatx80_compare_soft(a, b, s);
-}
-static inline floatx80 float32_to_floatx80_rt(float32 val, float_status *s)
-{
-    if (__builtin_expect(g_xemu_fp_safe, 1)) {
-        union { float32 i; float f; } u; u.i = val;
-        return f64_to_fx80((double)u.f);
-    }
-    return float32_to_floatx80_soft(val, s);
-}
-static inline float32 floatx80_to_float32_rt(floatx80 a, float_status *s)
-{
-    if (__builtin_expect(g_xemu_fp_safe, 1)) {
-        union { float f; float32 i; } u; u.f = (float)fx80_to_f64(a);
-        return u.i;
-    }
-    return floatx80_to_float32_soft(a, s);
-}
-static inline floatx80 float64_to_floatx80_rt(float64 val, float_status *s)
-{
-    if (__builtin_expect(g_xemu_fp_safe, 1)) {
-        union { float64 i; double d; } u; u.i = val;
-        return f64_to_fx80(u.d);
-    }
-    return float64_to_floatx80_soft(val, s);
-}
-static inline float64 floatx80_to_float64_rt(floatx80 a, float_status *s)
-{
-    if (__builtin_expect(g_xemu_fp_safe, 1)) {
-        union { double d; float64 i; } u; u.d = fx80_to_f64(a);
-        return u.i;
-    }
-    return floatx80_to_float64_soft(a, s);
-}
-static inline floatx80 int32_to_floatx80_rt(int32_t a, float_status *s)
-{
-    if (__builtin_expect(g_xemu_fp_safe, 1))
-        return f64_to_fx80((double)a);
-    return int32_to_floatx80_soft(a, s);
-}
-
-#define floatx80_add          floatx80_add_rt
-#define floatx80_sub          floatx80_sub_rt
-#define floatx80_mul          floatx80_mul_rt
-#define floatx80_div          floatx80_div_rt
-#define floatx80_compare      floatx80_compare_rt
-#define float32_to_floatx80   float32_to_floatx80_rt
-#define floatx80_to_float32   floatx80_to_float32_rt
-#define float64_to_floatx80   float64_to_floatx80_rt
-#define floatx80_to_float64   floatx80_to_float64_rt
-#define int32_to_floatx80     int32_to_floatx80_rt
+#else /* !USE_HARD_FPU: pure softfloat (no runtime dispatch) */
 
 #endif /* USE_HARD_FPU */
 
 #endif /* XBOX && __aarch64__ */
 
 #if defined(XBOX) && !defined(USE_HARD_FPU)
-#include "exec/tb-flush.h"
-#include "hw/core/cpu.h"
-
 void xemu_set_fp_safe(bool enable)
 {
-#if defined(__aarch64__)
-    if (g_xemu_fp_safe == enable) return;
-    g_xemu_fp_safe = enable;
-    CPUState *cpu = first_cpu;
-    if (cpu) {
-        queue_tb_flush(cpu);
-    }
-#else
     (void)enable;
-#endif
 }
 
 bool xemu_get_fp_safe(void)
 {
-#if defined(__aarch64__)
-    return g_xemu_fp_safe;
-#else
     return false;
-#endif
 }
 #endif /* XBOX && !USE_HARD_FPU */
 
@@ -589,8 +463,11 @@ floatx80 int32_to_floatx80__hard(int32_t a, float_status *status)
 #if defined(XBOX) && (defined(__x86_64__) || defined(__aarch64__))
 #ifdef USE_HARD_FPU
 #define MAP_HELPER_SOFT_HARD(func) helper_ ## func ## __hard
+extern int g_fpu_helper_calls;
+#define FPU_HELPER_COUNT() (g_fpu_helper_calls++)
 #else
 #define MAP_HELPER_SOFT_HARD(func) helper_ ## func ## __soft
+#define FPU_HELPER_COUNT() ((void)0)
 #endif
 
 #define helper_flds_FT0       MAP_HELPER_SOFT_HARD(flds_FT0)
@@ -1204,6 +1081,7 @@ void helper_fucomi_ST0_FT0(CPUX86State *env)
 
 void helper_fadd_ST0_FT0(CPUX86State *env)
 {
+    FPU_HELPER_COUNT();
     int old_flags = save_exception_flags(env);
     ST0 = floatx80_add(ST0, FT0, &env->fp_status);
     merge_exception_flags(env, old_flags);
@@ -1211,6 +1089,7 @@ void helper_fadd_ST0_FT0(CPUX86State *env)
 
 void helper_fmul_ST0_FT0(CPUX86State *env)
 {
+    FPU_HELPER_COUNT();
     int old_flags = save_exception_flags(env);
     ST0 = floatx80_mul(ST0, FT0, &env->fp_status);
     merge_exception_flags(env, old_flags);
@@ -1218,6 +1097,7 @@ void helper_fmul_ST0_FT0(CPUX86State *env)
 
 void helper_fsub_ST0_FT0(CPUX86State *env)
 {
+    FPU_HELPER_COUNT();
     int old_flags = save_exception_flags(env);
     ST0 = floatx80_sub(ST0, FT0, &env->fp_status);
     merge_exception_flags(env, old_flags);
@@ -1225,6 +1105,7 @@ void helper_fsub_ST0_FT0(CPUX86State *env)
 
 void helper_fsubr_ST0_FT0(CPUX86State *env)
 {
+    FPU_HELPER_COUNT();
     int old_flags = save_exception_flags(env);
     ST0 = floatx80_sub(FT0, ST0, &env->fp_status);
     merge_exception_flags(env, old_flags);
@@ -1232,11 +1113,13 @@ void helper_fsubr_ST0_FT0(CPUX86State *env)
 
 void helper_fdiv_ST0_FT0(CPUX86State *env)
 {
+    FPU_HELPER_COUNT();
     ST0 = helper_fdiv(env, ST0, FT0);
 }
 
 void helper_fdivr_ST0_FT0(CPUX86State *env)
 {
+    FPU_HELPER_COUNT();
     ST0 = helper_fdiv(env, FT0, ST0);
 }
 
