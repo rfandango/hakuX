@@ -293,16 +293,12 @@ class SettingsActivity : AppCompatActivity() {
     val btn = findViewById<MaterialButton>(R.id.btn_tier1_threshold)
     val labels = arrayOf("Aggressive (16)", "Early (32)", "Default (64)", "Conservative (128)", "Lazy (256)")
     val values = intArrayOf(16, 32, 64, 128, 256)
-    val current = try { nativeGetTier1Threshold() } catch (_: Throwable) {
-      prefs.getInt("tier1_threshold", 64)
-    }
-    val idx = values.indexOf(current).coerceAtLeast(2)
+    val saved = prefs.getInt("tier1_threshold", 64)
+    val idx = values.indexOf(saved).let { if (it < 0) 2 else it }
     btn.text = labels[idx]
     btn.setOnClickListener {
-      val cur = try { nativeGetTier1Threshold() } catch (_: Throwable) {
-        prefs.getInt("tier1_threshold", 64)
-      }
-      val sel = values.indexOf(cur).coerceAtLeast(2)
+      val cur = prefs.getInt("tier1_threshold", 64)
+      val sel = values.indexOf(cur).let { if (it < 0) 2 else it }
       MaterialAlertDialogBuilder(this)
         .setTitle(R.string.settings_tier1_threshold)
         .setSingleChoiceItems(labels, sel) { dialog, which ->
