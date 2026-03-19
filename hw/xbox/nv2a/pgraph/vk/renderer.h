@@ -99,6 +99,7 @@ struct OptBisectStats {
     int sfp_miss_no_desc;
     int sfp_miss_tex_gen;
     int sfp_miss_reg_gen;
+    int sfp_miss_prim_mode;
     int sfp_miss_prog_dirty;
     int sfp_miss_vtx_gen;
     int sfp_miss_tex_vram;

@@ -35,6 +35,47 @@ static int g_xemu_submit_frames = 3;
 
 struct OptBisectStats g_opt_stats;
 
+#ifdef __ANDROID__
+#define VAF_LOG(...) __android_log_print(ANDROID_LOG_WARN, "xemu-vaf", __VA_ARGS__)
+#else
+#define VAF_LOG(...) do { fprintf(stderr, "[xemu-vaf] "); fprintf(stderr, __VA_ARGS__); fprintf(stderr, "\n"); } while(0)
+#endif
+
+static struct {
+    int sfp_vaf_hit;
+    int sfp_vaf_miss;
+    int bl_vaf_hit;
+    int bl_vaf_miss;
+    int mfp_vaf_hit;
+    int mfp_vaf_miss;
+    int full_path_vag_changed;
+    int full_path_vag_same;
+    int sfp_vaf_uniform_pushed;
+    int sfp_vaf_no_uniform;
+    int bl_vaf_uniform_pushed;
+    int mfp_vaf_uniform_pushed;
+} g_vaf_stats;
+
+static int g_vaf_detail_budget = 20;
+static bool g_vaf_disabled = false;
+
+static void vaf_stats_log_and_reset(void)
+{
+    static int vaf_frame = 0;
+    if (++vaf_frame % 60 == 0) {
+        VAF_LOG("disabled=%d SFP_hit:%d miss:%d BL_hit:%d miss:%d MFP_hit:%d miss:%d "
+                "FULL_chg:%d same:%d push(sfp:%d/%d bl:%d mfp:%d)",
+                g_vaf_disabled,
+                g_vaf_stats.sfp_vaf_hit, g_vaf_stats.sfp_vaf_miss,
+                g_vaf_stats.bl_vaf_hit, g_vaf_stats.bl_vaf_miss,
+                g_vaf_stats.mfp_vaf_hit, g_vaf_stats.mfp_vaf_miss,
+                g_vaf_stats.full_path_vag_changed, g_vaf_stats.full_path_vag_same,
+                g_vaf_stats.sfp_vaf_uniform_pushed, g_vaf_stats.sfp_vaf_no_uniform,
+                g_vaf_stats.bl_vaf_uniform_pushed, g_vaf_stats.mfp_vaf_uniform_pushed);
+        memset(&g_vaf_stats, 0, sizeof(g_vaf_stats));
+    }
+}
+
 static void opt_stats_log_and_reset(void)
 {
 #if NV2A_PERF_LOG
@@ -42,7 +83,7 @@ static void opt_stats_log_and_reset(void)
     if (++frame_counter % 60 == 0) {
 #ifdef __ANDROID__
         __android_log_print(ANDROID_LOG_INFO, "xemu-sfp",
-                "SFP:%d/%d BLtx:%d PTx:%d VAF:%d TxPool:%d/%d SRS:%d SEE:%d miss: clr%d noPl%d noCb%d noRp%d noFb%d fbD%d shC%d piD%d dsR%d uni%d noDs%d tG%d ndG%d prD%d vG%d tV%d",
+                "SFP:%d/%d BLtx:%d PTx:%d VAF:%d TxPool:%d/%d SRS:%d SEE:%d miss: clr%d noPl%d noCb%d noRp%d noFb%d fbD%d shC%d piD%d dsR%d uni%d noDs%d tG%d ndG%d pmM%d prD%d vG%d tV%d",
                 g_opt_stats.super_fast_hits,
                 g_opt_stats.super_fast_misses,
                 g_opt_stats.bindless_tex_fast,
@@ -65,6 +106,7 @@ static void opt_stats_log_and_reset(void)
                 g_opt_stats.sfp_miss_no_desc,
                 g_opt_stats.sfp_miss_tex_gen,
                 g_opt_stats.sfp_miss_reg_gen,
+                g_opt_stats.sfp_miss_prim_mode,
                 g_opt_stats.sfp_miss_prog_dirty,
                 g_opt_stats.sfp_miss_vtx_gen,
                 g_opt_stats.sfp_miss_tex_vram);
@@ -111,9 +153,11 @@ static void opt_stats_log_and_reset(void)
             g_fpu_helper_calls = 0;
         }
 #endif
+        vaf_stats_log_and_reset();
         memset(&g_opt_stats, 0, sizeof(g_opt_stats));
     }
 #else
+    vaf_stats_log_and_reset();
     memset(&g_opt_stats, 0, sizeof(g_opt_stats));
 #endif
 }
@@ -2475,6 +2519,7 @@ static void begin_pre_draw(PGRAPHState *pg)
 #else
         else if (pg->any_reg_gen != r->last_any_reg_gen) { OPT_STAT_INC(sfp_miss_reg_gen); sfp_ok = false; }
 #endif
+        else if (pg->primitive_mode != r->shader_binding->state.geom.primitive_mode) { OPT_STAT_INC(sfp_miss_prim_mode); sfp_ok = false; }
         else if (pg->program_data_dirty) { OPT_STAT_INC(sfp_miss_prog_dirty); sfp_ok = false; }
 
         if (sfp_ok) {
@@ -2499,6 +2544,7 @@ static void begin_pre_draw(PGRAPHState *pg)
             }
 
             if (tex_vram_clean) {
+                bool sfp_had_tex_change = false;
 #if OPT_BINDLESS_TEXTURES
                 if (r->bindless_textures_supported &&
                     pg->texture_state_gen != r->last_texture_state_gen) {
@@ -2532,6 +2578,7 @@ static void begin_pre_draw(PGRAPHState *pg)
                             }
                             r->texture_bindings_changed = false;
                             r->pipeline_state_dirty = false;
+                            sfp_had_tex_change = true;
                         }
                         push_texture_descriptors(pg);
                         OPT_STAT_INC(push_tex_fast);
@@ -2548,8 +2595,10 @@ static void begin_pre_draw(PGRAPHState *pg)
                     }
                 }
                 if (sfp_ok && pg->vertex_attr_gen != r->pipeline_vertex_attr_gen) {
-                    if (r->num_active_vertex_attribute_descriptions == r->pipeline_num_active_attr_descs &&
-                        r->num_active_vertex_binding_descriptions == r->pipeline_num_active_bind_descs &&
+                    bool count_match =
+                        r->num_active_vertex_attribute_descriptions == r->pipeline_num_active_attr_descs &&
+                        r->num_active_vertex_binding_descriptions == r->pipeline_num_active_bind_descs;
+                    bool desc_match = !g_vaf_disabled && count_match &&
                         !memcmp(r->vertex_attribute_descriptions,
                                 r->pipeline_binding->key.attribute_descriptions,
                                 r->num_active_vertex_attribute_descriptions *
@@ -2557,12 +2606,76 @@ static void begin_pre_draw(PGRAPHState *pg)
                         !memcmp(r->vertex_binding_descriptions,
                                 r->pipeline_binding->key.binding_descriptions,
                                 r->num_active_vertex_binding_descriptions *
-                                    sizeof(r->vertex_binding_descriptions[0]))) {
+                                    sizeof(r->vertex_binding_descriptions[0]));
+                    if (desc_match) {
                         r->pipeline_vertex_attr_gen = pg->vertex_attr_gen;
                         r->pipeline_num_active_attr_descs = r->num_active_vertex_attribute_descriptions;
                         r->pipeline_num_active_bind_descs = r->num_active_vertex_binding_descriptions;
+                        push_vertex_attr_values(pg);
+                        g_vaf_stats.sfp_vaf_hit++;
+                        if (r->use_push_constants_for_uniform_attrs &&
+                            r->shader_binding->state.vsh.uniform_attrs) {
+                            g_vaf_stats.sfp_vaf_uniform_pushed++;
+                        } else {
+                            g_vaf_stats.sfp_vaf_no_uniform++;
+                        }
+                        if (g_vaf_detail_budget > 0) {
+                            g_vaf_detail_budget--;
+                            VAF_LOG("SFP-HIT nAttr=%d nBind=%d uniMask=0x%x "
+                                    "pipeline=%p gen %u->%u",
+                                    r->num_active_vertex_attribute_descriptions,
+                                    r->num_active_vertex_binding_descriptions,
+                                    r->shader_binding->state.vsh.uniform_attrs,
+                                    (void*)r->pipeline_binding->pipeline,
+                                    r->pipeline_vertex_attr_gen,
+                                    pg->vertex_attr_gen);
+                            for (int _i = 0; _i < r->num_active_vertex_attribute_descriptions; _i++) {
+                                VAF_LOG("  attr[%d] loc=%u bind=%u fmt=%u off=%u",
+                                        _i,
+                                        r->vertex_attribute_descriptions[_i].location,
+                                        r->vertex_attribute_descriptions[_i].binding,
+                                        r->vertex_attribute_descriptions[_i].format,
+                                        r->vertex_attribute_descriptions[_i].offset);
+                            }
+                        }
                         OPT_STAT_INC(vtx_attr_fast);
                     } else {
+                        g_vaf_stats.sfp_vaf_miss++;
+                        if (g_vaf_detail_budget > 0) {
+                            g_vaf_detail_budget--;
+                            VAF_LOG("SFP-MISS nAttr=%d/%d nBind=%d/%d gen %u->%u "
+                                    "countMatch=%d texCleared=%d",
+                                    r->num_active_vertex_attribute_descriptions,
+                                    r->pipeline_num_active_attr_descs,
+                                    r->num_active_vertex_binding_descriptions,
+                                    r->pipeline_num_active_bind_descs,
+                                    r->pipeline_vertex_attr_gen,
+                                    pg->vertex_attr_gen,
+                                    count_match,
+                                    sfp_had_tex_change);
+                            if (count_match) {
+                                for (int _i = 0; _i < r->num_active_vertex_attribute_descriptions; _i++) {
+                                    VkVertexInputAttributeDescription *cur = &r->vertex_attribute_descriptions[_i];
+                                    VkVertexInputAttributeDescription *key = &r->pipeline_binding->key.attribute_descriptions[_i];
+                                    if (cur->location != key->location || cur->binding != key->binding ||
+                                        cur->format != key->format || cur->offset != key->offset) {
+                                        VAF_LOG("  attr[%d] DIFF cur(l=%u b=%u f=%u o=%u) key(l=%u b=%u f=%u o=%u)",
+                                                _i, cur->location, cur->binding, cur->format, cur->offset,
+                                                key->location, key->binding, key->format, key->offset);
+                                    }
+                                }
+                                for (int _i = 0; _i < r->num_active_vertex_binding_descriptions; _i++) {
+                                    VkVertexInputBindingDescription *cur = &r->vertex_binding_descriptions[_i];
+                                    VkVertexInputBindingDescription *key = &r->pipeline_binding->key.binding_descriptions[_i];
+                                    if (cur->binding != key->binding || cur->stride != key->stride ||
+                                        cur->inputRate != key->inputRate) {
+                                        VAF_LOG("  bind[%d] DIFF cur(b=%u s=%u r=%u) key(b=%u s=%u r=%u)",
+                                                _i, cur->binding, cur->stride, cur->inputRate,
+                                                key->binding, key->stride, key->inputRate);
+                                    }
+                                }
+                            }
+                        }
                         sfp_ok = false;
                         OPT_STAT_INC(sfp_miss_vtx_gen);
                     }
@@ -2593,6 +2706,7 @@ static void begin_pre_draw(PGRAPHState *pg)
         !r->need_descriptor_rebind &&
         !r->uniforms_changed &&
         !pg->program_data_dirty &&
+        pg->primitive_mode == r->shader_binding->state.geom.primitive_mode &&
         pg->non_dynamic_reg_gen == r->last_non_dynamic_reg_gen &&
         (pg->texture_state_gen != r->last_texture_state_gen ||
          r->texture_vram_gen != r->last_texture_vram_gen)) {
@@ -2603,8 +2717,10 @@ static void begin_pre_draw(PGRAPHState *pg)
         r->last_texture_vram_gen = r->texture_vram_gen;
         bool bl_ok = (pg->any_reg_gen == r->last_any_reg_gen);
         if (bl_ok && pg->vertex_attr_gen != r->pipeline_vertex_attr_gen) {
-            if (r->num_active_vertex_attribute_descriptions == r->pipeline_num_active_attr_descs &&
-                r->num_active_vertex_binding_descriptions == r->pipeline_num_active_bind_descs &&
+            bool bl_count_match =
+                r->num_active_vertex_attribute_descriptions == r->pipeline_num_active_attr_descs &&
+                r->num_active_vertex_binding_descriptions == r->pipeline_num_active_bind_descs;
+            bool bl_desc_match = !g_vaf_disabled && bl_count_match &&
                 !memcmp(r->vertex_attribute_descriptions,
                         r->pipeline_binding->key.attribute_descriptions,
                         r->num_active_vertex_attribute_descriptions *
@@ -2612,12 +2728,20 @@ static void begin_pre_draw(PGRAPHState *pg)
                 !memcmp(r->vertex_binding_descriptions,
                         r->pipeline_binding->key.binding_descriptions,
                         r->num_active_vertex_binding_descriptions *
-                            sizeof(r->vertex_binding_descriptions[0]))) {
+                            sizeof(r->vertex_binding_descriptions[0]));
+            if (bl_desc_match) {
                 r->pipeline_vertex_attr_gen = pg->vertex_attr_gen;
                 r->pipeline_num_active_attr_descs = r->num_active_vertex_attribute_descriptions;
                 r->pipeline_num_active_bind_descs = r->num_active_vertex_binding_descriptions;
+                push_vertex_attr_values(pg);
+                g_vaf_stats.bl_vaf_hit++;
+                if (r->use_push_constants_for_uniform_attrs &&
+                    r->shader_binding->state.vsh.uniform_attrs) {
+                    g_vaf_stats.bl_vaf_uniform_pushed++;
+                }
                 OPT_STAT_INC(vtx_attr_fast);
             } else {
+                g_vaf_stats.bl_vaf_miss++;
                 bl_ok = false;
             }
         }
@@ -2665,7 +2789,8 @@ static void begin_pre_draw(PGRAPHState *pg)
         pg->primitive_mode == r->shader_binding->state.geom.primitive_mode &&
         !pg->program_data_dirty) {
         if (pg->vertex_attr_gen != r->pipeline_vertex_attr_gen) {
-            if (r->num_active_vertex_attribute_descriptions != r->pipeline_num_active_attr_descs ||
+            if (g_vaf_disabled ||
+                r->num_active_vertex_attribute_descriptions != r->pipeline_num_active_attr_descs ||
                 r->num_active_vertex_binding_descriptions != r->pipeline_num_active_bind_descs ||
                 memcmp(r->vertex_attribute_descriptions,
                        r->pipeline_binding->key.attribute_descriptions,
@@ -2675,11 +2800,17 @@ static void begin_pre_draw(PGRAPHState *pg)
                        r->pipeline_binding->key.binding_descriptions,
                        r->num_active_vertex_binding_descriptions *
                            sizeof(r->vertex_binding_descriptions[0]))) {
+                g_vaf_stats.mfp_vaf_miss++;
                 goto mfp_miss;
             }
             r->pipeline_vertex_attr_gen = pg->vertex_attr_gen;
             r->pipeline_num_active_attr_descs = r->num_active_vertex_attribute_descriptions;
             r->pipeline_num_active_bind_descs = r->num_active_vertex_binding_descriptions;
+            g_vaf_stats.mfp_vaf_hit++;
+            if (r->use_push_constants_for_uniform_attrs &&
+                r->shader_binding->state.vsh.uniform_attrs) {
+                g_vaf_stats.mfp_vaf_uniform_pushed++;
+            }
             OPT_STAT_INC(vtx_attr_fast);
         }
         r->pre_draw_skipped = false;
@@ -2726,6 +2857,12 @@ mfp_miss: (void)0;
 #endif
 
     r->pre_draw_skipped = false;
+
+    if (pg->vertex_attr_gen != r->pipeline_vertex_attr_gen) {
+        g_vaf_stats.full_path_vag_changed++;
+    } else {
+        g_vaf_stats.full_path_vag_same++;
+    }
 
     NV2A_PHASE_TIMER_BEGIN(draw_pipeline);
     if (pg->clearing) {
