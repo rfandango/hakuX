@@ -298,6 +298,15 @@ void tcg_gen_mb(TCGBar mb_type)
 {
 #ifdef CONFIG_USER_ONLY
     bool parallel = tcg_ctx->gen_tb->cflags & CF_PARALLEL;
+#elif defined(XBOX)
+    /*
+     * Xbox has a single CPU and never sets CF_PARALLEL.  All I/O device
+     * threads (NV2A, APU, etc.) access guest memory through the QEMU
+     * memory API or under BQL, which provides its own ordering.
+     * Eliding per-instruction DMB barriers saves ~30-50 cycles per
+     * guest memory operation on ARM64.
+     */
+    bool parallel = tcg_ctx->gen_tb->cflags & CF_PARALLEL;
 #else
     /*
      * It is tempting to elide the barrier in a uniprocessor context.

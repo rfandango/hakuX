@@ -25,6 +25,7 @@
 
 #define CONFIG_TCG 1
 #define CONFIG_SOFTMMU 1
+#define CONFIG_MEMBARRIER 1
 
 #define CONFIG_IOVEC 1
 
