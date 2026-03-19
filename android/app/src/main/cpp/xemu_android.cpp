@@ -43,6 +43,8 @@ extern "C" void xemu_set_frame_skip(bool enable);
 extern "C" bool xemu_get_frame_skip(void);
 extern "C" void xemu_set_submit_frames(int count);
 extern "C" int xemu_get_submit_frames(void);
+extern "C" void xemu_set_tier1_threshold(int value);
+extern "C" int xemu_get_tier1_threshold(void);
 extern "C" bool runstate_is_running(void);
 extern "C" void xemu_android_pause_emulation(void);
 extern "C" void xemu_android_resume_emulation(void);
@@ -791,6 +793,12 @@ static SetupFiles SyncSetupFiles() {
   xemu_set_submit_frames(submit_frames);
   __android_log_print(ANDROID_LOG_INFO, "xemu-android",
                       "submit frames: %d", submit_frames);
+
+  int tier1_threshold = GetPrefInt(env, activity, "tier1_threshold", 64);
+  xemu_set_tier1_threshold(tier1_threshold);
+  __android_log_print(ANDROID_LOG_INFO, "xemu-android",
+                      "tier1 threshold: %d", tier1_threshold);
+
   std::string filterPref = GetPrefString(env, activity, "filtering");
   if (!filterPref.empty()) ds.filtering = filterPref;
   std::string arPref = GetPrefString(env, activity, "aspect_ratio");
@@ -1335,6 +1343,18 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_rfandango_xemuandroid_SettingsActivity_nativeSetSubmitFrames(JNIEnv *, jobject, jint count)
 {
     xemu_set_submit_frames(static_cast<int>(count));
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_rfandango_xemuandroid_SettingsActivity_nativeGetTier1Threshold(JNIEnv *, jobject)
+{
+    return static_cast<jint>(xemu_get_tier1_threshold());
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_rfandango_xemuandroid_SettingsActivity_nativeSetTier1Threshold(JNIEnv *, jobject, jint value)
+{
+    xemu_set_tier1_threshold(static_cast<int>(value));
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

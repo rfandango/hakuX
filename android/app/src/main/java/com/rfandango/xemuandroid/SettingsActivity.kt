@@ -161,6 +161,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     setupSubmitFramesPicker()
+    setupTier1ThresholdPicker()
 
     val switchValidation = findViewById<MaterialSwitch>(R.id.switch_validation_layers)
     switchValidation.isChecked = prefs.getBoolean("validation_layers", false)
@@ -280,6 +281,33 @@ class SettingsActivity : AppCompatActivity() {
         .setSingleChoiceItems(labels, sel) { dialog, which ->
           prefs.edit().putInt("submit_frames", values[which]).apply()
           try { nativeSetSubmitFrames(values[which]) } catch (_: Throwable) {}
+          btn.text = labels[which]
+          dialog.dismiss()
+        }
+        .setNegativeButton(android.R.string.cancel, null)
+        .show()
+    }
+  }
+
+  private fun setupTier1ThresholdPicker() {
+    val btn = findViewById<MaterialButton>(R.id.btn_tier1_threshold)
+    val labels = arrayOf("Aggressive (16)", "Early (32)", "Default (64)", "Conservative (128)", "Lazy (256)")
+    val values = intArrayOf(16, 32, 64, 128, 256)
+    val current = try { nativeGetTier1Threshold() } catch (_: Throwable) {
+      prefs.getInt("tier1_threshold", 64)
+    }
+    val idx = values.indexOf(current).coerceAtLeast(2)
+    btn.text = labels[idx]
+    btn.setOnClickListener {
+      val cur = try { nativeGetTier1Threshold() } catch (_: Throwable) {
+        prefs.getInt("tier1_threshold", 64)
+      }
+      val sel = values.indexOf(cur).coerceAtLeast(2)
+      MaterialAlertDialogBuilder(this)
+        .setTitle(R.string.settings_tier1_threshold)
+        .setSingleChoiceItems(labels, sel) { dialog, which ->
+          prefs.edit().putInt("tier1_threshold", values[which]).apply()
+          try { nativeSetTier1Threshold(values[which]) } catch (_: Throwable) {}
           btn.text = labels[which]
           dialog.dismiss()
         }
@@ -513,6 +541,8 @@ class SettingsActivity : AppCompatActivity() {
   private external fun nativeSetFrameSkip(enable: Boolean)
   private external fun nativeGetSubmitFrames(): Int
   private external fun nativeSetSubmitFrames(count: Int)
+  private external fun nativeGetTier1Threshold(): Int
+  private external fun nativeSetTier1Threshold(value: Int)
 
   companion object {
     private const val FATX_SUPERBLOCK_SIZE = 4096

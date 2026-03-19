@@ -450,6 +450,24 @@
             android:textAppearance="@style/TextAppearance.Material3.BodySmall"
             android:textColor="@color/xemu_text_muted" />
 
+          <!-- Tier-1 Recompilation Threshold -->
+          <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_tier1_threshold"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Default (64)"
+            android:textColor="@color/xemu_text_muted" />
+          <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="2dp"
+            android:text="@string/settings_tier1_threshold_desc"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            android:textColor="@color/xemu_text_muted" />
+
           <!-- Vulkan Validation Layers -->
           <com.google.android.material.materialswitch.MaterialSwitch
             android:id="@+id/switch_validation_layers"

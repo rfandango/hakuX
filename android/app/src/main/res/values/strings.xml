@@ -159,6 +159,9 @@
   <string name="settings_submit_frames">Submit frame buffering</string>
   <string name="settings_submit_frames_desc">Number of GPU submission frames. Higher values increase parallelism but use more memory and add latency. Single = lowest memory, Triple = best throughput. Takes effect immediately.</string>
 
+  <string name="settings_tier1_threshold">Tier-1 recompilation threshold</string>
+  <string name="settings_tier1_threshold_desc">How many times a code block must execute before it is recompiled with optimizations. Lower = more aggressive optimization (more CPU overhead). Higher = fewer optimizations (less overhead). Takes effect immediately.</string>
+
   <string name="settings_validation_layers">Vulkan validation layers</string>
   <string name="settings_validation_layers_desc">Enable Vulkan validation for graphics debugging. Significant performance impact. Requires app restart.</string>
 </resources>

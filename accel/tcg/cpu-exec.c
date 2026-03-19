@@ -63,6 +63,28 @@
 
 static int tier1_promotion_budget = TIER1_PROMOTION_BUDGET;
 
+static int g_tier1_threshold = TB_TIER1_THRESHOLD;
+static uint64_t g_tier1_promotions_total;
+static uint64_t g_tier1_promotions_dropped;
+
+void xemu_set_tier1_threshold(int value)
+{
+    if (value < 8) value = 8;
+    if (value > 512) value = 512;
+    g_tier1_threshold = value;
+}
+
+int xemu_get_tier1_threshold(void)
+{
+    return g_tier1_threshold;
+}
+
+void xemu_get_tier1_stats(uint64_t *promoted, uint64_t *dropped)
+{
+    if (promoted) *promoted = g_tier1_promotions_total;
+    if (dropped) *dropped = g_tier1_promotions_dropped;
+}
+
 /*
  * Deferred tier-1 promotion request table.
  *
@@ -157,10 +179,13 @@ static void tb_request_tier1_promotion(CPUState *cpu, TranslationBlock *tb)
  */
 static inline void tier1_maybe_promote(CPUState *cpu, TranslationBlock *tb)
 {
-    if (tb->tier == 0 && tb->exec_count >= TB_TIER1_THRESHOLD) {
+    if (tb->tier == 0 && tb->exec_count >= (uint32_t)g_tier1_threshold) {
         if (tier1_promotion_budget > 0) {
             tier1_promotion_budget--;
+            g_tier1_promotions_total++;
             tb_request_tier1_promotion(cpu, tb);
+        } else {
+            g_tier1_promotions_dropped++;
         }
     }
 }
@@ -275,12 +300,22 @@ static inline void tier1_maybe_form_superblock(CPUState *cpu,
 #define TIER1_BUDGET_RESET_INTERVAL 100000
 static uint32_t tier1_budget_counter;
 
+static uint32_t tier1_log_counter;
+#define TIER1_LOG_INTERVAL 50
+
 static inline void tier1_maybe_reset_budget(void)
 {
     if (++tier1_budget_counter >= TIER1_BUDGET_RESET_INTERVAL) {
         tier1_budget_counter = 0;
         tier1_promotion_budget = TIER1_PROMOTION_BUDGET;
         superblock_budget = SUPERBLOCK_BUDGET;
+        if (++tier1_log_counter >= TIER1_LOG_INTERVAL) {
+            tier1_log_counter = 0;
+            qemu_printf("[tier1] threshold=%d promoted=%lu dropped=%lu\n",
+                        g_tier1_threshold,
+                        (unsigned long)g_tier1_promotions_total,
+                        (unsigned long)g_tier1_promotions_dropped);
+        }
     }
 }
 
@@ -1298,7 +1333,7 @@ cpu_exec_loop(CPUState *cpu, SyncClocks *sc)
 #ifdef XBOX
             {
                 uint32_t c = tb->exec_count;
-                if (c < TB_TIER1_THRESHOLD * 2) {
+                if (c < (uint32_t)g_tier1_threshold * 2) {
                     tb->exec_count = c + 1;
                 }
                 tier1_maybe_promote(cpu, tb);
