@@ -120,6 +120,7 @@ static void snapshot_cpu_timing(void)
 
     SMOOTH_CNT(p->kick_count, w->kick_count);
     SMOOTH_CNT(p->kick_count_spun, w->kick_count_spun);
+    SMOOTH_CNT(p->kick_count_idle, w->kick_count_idle);
     SMOOTH_CNT(p->pusher_words, w->pusher_words);
     SMOOTH_CNT(p->method_count, w->method_count);
     SMOOTH_CNT(p->method_fast_hit, w->method_fast_hit);
@@ -150,6 +151,7 @@ static void snapshot_cpu_timing(void)
     w->puller_method_ns  = 0;
     w->kick_count        = 0;
     w->kick_count_spun   = 0;
+    w->kick_count_idle   = 0;
     w->pusher_words      = 0;
     w->method_count      = 0;
     w->method_fast_hit   = 0;
@@ -339,10 +341,13 @@ void nv2a_profile_get_cpu_timing_str(char *buf, int bufsize)
     float spin_pct = p->kick_count > 0
                      ? p->kick_count_spun / p->kick_count * 100.0f
                      : 0.0f;
+    float idle_pct = p->kick_count > 0
+                     ? p->kick_count_idle / p->kick_count * 100.0f
+                     : 0.0f;
     snprintf(buf, bufsize,
              "CPU: K:%.0f W:%.1fK M:%.0f(Fh:%.0f Ni:%.0f) "
              "Lock:%.1fms Push:%.1fms "
-             "SpH:%.0f%% TbH:%.1f%%",
+             "SpH:%.0f%% IdS:%.0f%% TbH:%.1f%%",
              p->kick_count,
              p->pusher_words / 1000.0f,
              p->method_count,
@@ -351,6 +356,7 @@ void nv2a_profile_get_cpu_timing_str(char *buf, int bufsize)
              p->lock_wait_ms,
              p->pusher_run_ms,
              spin_pct,
+             idle_pct,
              p->tb_hit_pct);
 }
 

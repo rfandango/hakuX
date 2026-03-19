@@ -34,7 +34,7 @@
 #endif
 
 #if XEMU_OPT_FIFO_SPIN
-#define FIFO_SPIN_NS 1000000 /* 1 ms */
+#define FIFO_SPIN_ACTIVE_NS 100000 /* 100µs active spin window */
 #endif
 
 #if defined(__ANDROID__) && XEMU_OPT_THREAD_AFFINITY
@@ -578,7 +578,9 @@ void *pfifo_thread(void *arg)
     rcu_register_thread();
 
     qemu_mutex_lock(&d->pfifo.lock);
+    bool was_active = true;
     while (true) {
+        was_active = d->pfifo.fifo_kick;
         d->pfifo.fifo_kick = false;
 
         pgraph_process_pending(d);
@@ -602,30 +604,36 @@ void *pfifo_thread(void *arg)
             int64_t idle_t0 = nv2a_clock_ns();
 
 #if XEMU_OPT_FIFO_SPIN
-            qemu_mutex_unlock(&d->pfifo.lock);
+            if (was_active) {
+                qemu_mutex_unlock(&d->pfifo.lock);
 
-            bool spun_awake = false;
-            int64_t spin_deadline = idle_t0 + FIFO_SPIN_NS;
-            for (unsigned spin_i = 0; ; spin_i++) {
-                if (qatomic_read(&d->pfifo.fifo_kick)) {
-                    spun_awake = true;
-                    break;
-                }
-                if ((spin_i & 0xFF) == 0 &&
-                    nv2a_clock_ns() >= spin_deadline) {
-                    break;
-                }
+                bool spun_awake = false;
+                int64_t spin_deadline = idle_t0 + FIFO_SPIN_ACTIVE_NS;
+                for (unsigned spin_i = 0; ; spin_i++) {
+                    if (qatomic_read(&d->pfifo.fifo_kick)) {
+                        spun_awake = true;
+                        break;
+                    }
+                    if ((spin_i & 0xFF) == 0 &&
+                        nv2a_clock_ns() >= spin_deadline) {
+                        break;
+                    }
 #ifdef __aarch64__
-                __asm__ volatile("yield" ::: "memory");
+                    __asm__ volatile("yield" ::: "memory");
 #endif
-            }
-            if (spun_awake) {
-                g_nv2a_stats.cpu_working.kick_count_spun++;
-            }
+                }
+                if (spun_awake) {
+                    g_nv2a_stats.cpu_working.kick_count_spun++;
+                }
 
-            qemu_mutex_lock(&d->pfifo.lock);
+                qemu_mutex_lock(&d->pfifo.lock);
 
-            if (!spun_awake && !d->pfifo.fifo_kick) {
+                if (!spun_awake && !d->pfifo.fifo_kick) {
+                    qemu_cond_signal(&d->pfifo.fifo_idle_cond);
+                    qemu_cond_wait(&d->pfifo.fifo_cond, &d->pfifo.lock);
+                }
+            } else {
+                g_nv2a_stats.cpu_working.kick_count_idle++;
                 qemu_cond_signal(&d->pfifo.fifo_idle_cond);
                 qemu_cond_wait(&d->pfifo.fifo_cond, &d->pfifo.lock);
             }

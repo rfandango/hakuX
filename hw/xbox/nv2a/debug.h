@@ -228,6 +228,7 @@ typedef struct CpuTimingWork {
     int64_t puller_method_ns;
     uint32_t kick_count;
     uint32_t kick_count_spun;
+    uint32_t kick_count_idle;
     uint32_t pusher_words;
     uint32_t method_count;
     uint32_t method_fast_hit;
@@ -245,6 +246,7 @@ typedef struct CpuTimingStats {
     float puller_method_ms;
     float kick_count;
     float kick_count_spun;
+    float kick_count_idle;
     float pusher_words;
     float method_count;
     float method_fast_hit;
