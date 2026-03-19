@@ -42,12 +42,11 @@ static void opt_stats_log_and_reset(void)
     if (++frame_counter % 60 == 0) {
 #ifdef __ANDROID__
         __android_log_print(ANDROID_LOG_INFO, "xemu-sfp",
-                "SFP:%d/%d BLtx:%d PTx:%d UnF:%d VAF:%d TxPool:%d/%d SRS:%d SEE:%d miss: clr%d noPl%d noCb%d noRp%d noFb%d fbD%d shC%d piD%d dsR%d uni%d noDs%d tG%d ndG%d prD%d vG%d tV%d",
+                "SFP:%d/%d BLtx:%d PTx:%d VAF:%d TxPool:%d/%d SRS:%d SEE:%d miss: clr%d noPl%d noCb%d noRp%d noFb%d fbD%d shC%d piD%d dsR%d uni%d noDs%d tG%d ndG%d prD%d vG%d tV%d",
                 g_opt_stats.super_fast_hits,
                 g_opt_stats.super_fast_misses,
                 g_opt_stats.bindless_tex_fast,
                 g_opt_stats.push_tex_fast,
-                g_opt_stats.sfp_uniform_fast,
                 g_opt_stats.vtx_attr_fast,
                 g_opt_stats.tex_pool_hits,
                 g_opt_stats.tex_pool_misses,
@@ -2410,8 +2409,6 @@ void pgraph_vk_end_nondraw_commands(PGRAPHState *pg, VkCommandBuffer cmd)
 // buffer. For other reasons though (like descriptor set amount, surface
 // changes, etc) we do flush often.
 
-static bool upload_draw_uniforms(PGRAPHState *pg, size_t offsets_out[2]);
-
 static void begin_pre_draw(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
@@ -2526,15 +2523,7 @@ static void begin_pre_draw(PGRAPHState *pg)
 #endif
                 if (sfp_ok) {
                     if (pg->any_reg_gen != r->last_any_reg_gen) {
-                        size_t ubo_offsets[2];
-                        if (upload_draw_uniforms(pg, ubo_offsets)) {
-                            r->uniform_buffer_offsets[0] = ubo_offsets[0];
-                            r->uniform_buffer_offsets[1] = ubo_offsets[1];
-                            bind_descriptor_sets(pg);
-                            OPT_STAT_INC(sfp_uniform_fast);
-                        } else {
-                            sfp_ok = false;
-                        }
+                        sfp_ok = false;
                     }
                 }
                 if (sfp_ok && pg->vertex_attr_gen != r->pipeline_vertex_attr_gen) {
@@ -2591,18 +2580,7 @@ static void begin_pre_draw(PGRAPHState *pg)
         pgraph_vk_bind_textures(d_tex);
         r->last_texture_state_gen = pg->texture_state_gen;
         r->last_texture_vram_gen = r->texture_vram_gen;
-        bool bl_ok = true;
-        if (pg->any_reg_gen != r->last_any_reg_gen) {
-            size_t ubo_offsets[2];
-            if (upload_draw_uniforms(pg, ubo_offsets)) {
-                r->uniform_buffer_offsets[0] = ubo_offsets[0];
-                r->uniform_buffer_offsets[1] = ubo_offsets[1];
-                bind_descriptor_sets(pg);
-                OPT_STAT_INC(sfp_uniform_fast);
-            } else {
-                bl_ok = false;
-            }
-        }
+        bool bl_ok = (pg->any_reg_gen == r->last_any_reg_gen);
         if (bl_ok && pg->vertex_attr_gen != r->pipeline_vertex_attr_gen) {
             if (r->num_active_vertex_attribute_descriptions == r->pipeline_num_active_attr_descs &&
                 r->num_active_vertex_binding_descriptions == r->pipeline_num_active_bind_descs &&

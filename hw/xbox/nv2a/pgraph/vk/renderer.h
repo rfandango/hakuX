@@ -104,7 +104,6 @@ struct OptBisectStats {
     int sfp_miss_tex_vram;
     int bindless_tex_fast;
     int push_tex_fast;
-    int sfp_uniform_fast;
     int vtx_attr_fast;
     int pipeline_early_hits;
     int pipeline_early_misses;
