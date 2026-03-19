@@ -784,8 +784,15 @@ static void pgraph_vk_flip_stall(NV2AState *d)
 #ifdef XBOX
     {
         extern volatile int32_t *xbox_ram_fp_active_ptr;
+        extern uintptr_t *xbox_ram_fp_vram_base_ptr;
         if (xbox_ram_fp_active_ptr &&
             !qatomic_read(xbox_ram_fp_active_ptr)) {
+            if (xbox_ram_fp_vram_base_ptr) {
+                pcibus_t bar1 = pci_get_bar_addr(PCI_DEVICE(d), 1);
+                *xbox_ram_fp_vram_base_ptr = (uintptr_t)bar1;
+                error_report("[TLB-FP] vram_pci_base=0x%lx (BAR1)",
+                             (unsigned long)bar1);
+            }
             qatomic_set(xbox_ram_fp_active_ptr, 1);
             error_report("[TLB-FP] activated after first flip");
         }

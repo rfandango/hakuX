@@ -504,6 +504,7 @@ typedef struct {
     uintptr_t host_base;          /* offset 0: host pointer to guest RAM */
     volatile int32_t active;      /* offset 8: 1 = fast path usable (boot done, no callbacks) */
     volatile int32_t cb_count;    /* offset 12: >0 when mem-access callbacks active */
+    uintptr_t vram_pci_base;     /* offset 16: NV2A VRAM PCI BAR address, 0 = not configured */
 } XboxRamFPState;
 
 extern XboxRamFPState xbox_ram_fp;

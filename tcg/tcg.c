@@ -255,6 +255,7 @@ XboxRamFPState xbox_ram_fp;
 uint64_t  xbox_ram_size;
 volatile int32_t *xbox_ram_fp_cb_count_ptr = &xbox_ram_fp.cb_count;
 volatile int32_t *xbox_ram_fp_active_ptr = &xbox_ram_fp.active;
+uintptr_t *xbox_ram_fp_vram_base_ptr = &xbox_ram_fp.vram_pci_base;
 #endif
 
 TCGContext **tcg_ctxs;

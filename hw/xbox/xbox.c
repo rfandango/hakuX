@@ -203,6 +203,7 @@ static void xbox_memory_init(PCMachineState *pcms,
         xbox_ram_fp.host_base = (uintptr_t)memory_region_get_ram_ptr(ram);
         xbox_ram_fp.active = 0;
         xbox_ram_fp.cb_count = 0;
+        xbox_ram_fp.vram_pci_base = 0;
         xbox_ram_size = machine->ram_size;
         error_report("[TLB-INIT] host_base=0x%lx ram_size=0x%lx active=%d",
                      (unsigned long)xbox_ram_fp.host_base,
