@@ -84,10 +84,45 @@ class LauncherActivity : Activity() {
     }
 
     val needsSetup = !setupComplete || !hasMcpx || !hasFlash || !hasHdd || !hasGamesFolder
-    val next = if (needsSetup) SetupWizardActivity::class.java else GameLibraryActivity::class.java
 
-    startActivity(Intent(this, next))
+    if (needsSetup) {
+      startActivity(Intent(this, SetupWizardActivity::class.java))
+      finish()
+      return
+    }
+
+    val romUri = resolveRomUri()
+    if (romUri != null) {
+      tryPersistPermission(romUri)
+      prefs.edit()
+        .putString("dvdUri", romUri.toString())
+        .remove("dvdPath")
+        .apply()
+      startActivity(Intent(this, MainActivity::class.java))
+      finish()
+      return
+    }
+
+    startActivity(Intent(this, GameLibraryActivity::class.java))
     finish()
+  }
+
+  private fun resolveRomUri(): Uri? {
+    val data = intent?.data
+    if (data != null) return data
+
+    val extra = intent?.getStringExtra("rom_path")
+    if (extra != null) {
+      val f = File(extra)
+      if (f.isFile) return Uri.fromFile(f)
+    }
+    return null
+  }
+
+  private fun tryPersistPermission(uri: Uri) {
+    try {
+      contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    } catch (_: Exception) { }
   }
 
   private fun hasPersistedReadPermission(uri: Uri): Boolean {
