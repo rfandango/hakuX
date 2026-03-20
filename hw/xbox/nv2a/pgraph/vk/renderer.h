@@ -72,8 +72,8 @@
 #define OPT_DESC_REBIND_SKIP    1
 #define OPT_PIPELINE_EARLY_EXIT 1
 #define OPT_MEDIUM_FAST_PATH    1
-#define OPT_DRAW_MERGING        0
-#define OPT_INDEXED_DRAW_MERGING 0
+#define OPT_DRAW_MERGING        1
+#define OPT_INDEXED_DRAW_MERGING 1
 #define OPT_DRAW_MERGE_MAX      128
 #define OPT_VALIDATE_GEN_COUNTERS 0
 #define OPT_REORDER_SAFE_WINDOWS 1
@@ -137,6 +137,10 @@ struct OptBisectStats {
     int tex_pool_misses;
     int sync_range_skip;
     int sync_early_exit;
+    int draw_merge_enqueued;
+    int draw_merge_flushed;
+    int draw_merge_break_compat;
+    int draw_merge_break_full;
 };
 extern struct OptBisectStats g_opt_stats;
 #if NV2A_PERF_LOG
@@ -837,9 +841,18 @@ typedef struct DrawQueue {
     uint32_t pipeline_state_gen;
     uint32_t texture_state_gen;
     uint32_t any_reg_gen;
+    uint32_t non_dynamic_reg_gen;
     uint32_t vertex_attr_gen;
     uint32_t texture_vram_gen;
     int primitive_mode;
+
+    uint32_t dyn_setupraster;
+    uint32_t dyn_blendcolor;
+    uint32_t dyn_control_0;
+    uint32_t dyn_control_1;
+    uint32_t dyn_control_2;
+    uint32_t dyn_control_3;
+    uint32_t dyn_blend;
 
     uint32_t min_start;
     uint32_t max_end;
