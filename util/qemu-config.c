@@ -7,7 +7,7 @@
 #include "qemu/option.h"
 #include "qemu/config-file.h"
 
-QemuOptsList *vm_config_groups[48];
+QemuOptsList *vm_config_groups[64];
 QemuOptsList *drive_config_groups[5];
 
 static QemuOptsList *find_list(QemuOptsList **lists, const char *group,
@@ -65,6 +65,9 @@ void qemu_add_drive_opts(QemuOptsList *list)
     entries = ARRAY_SIZE(drive_config_groups);
     entries--; /* keep list NULL terminated */
     for (i = 0; i < entries; i++) {
+        if (drive_config_groups[i] == list) {
+            return;
+        }
         if (drive_config_groups[i] == NULL) {
             drive_config_groups[i] = list;
             return;
@@ -81,6 +84,9 @@ void qemu_add_opts(QemuOptsList *list)
     entries = ARRAY_SIZE(vm_config_groups);
     entries--; /* keep list NULL terminated */
     for (i = 0; i < entries; i++) {
+        if (vm_config_groups[i] == list) {
+            return;
+        }
         if (vm_config_groups[i] == NULL) {
             vm_config_groups[i] = list;
             return;
