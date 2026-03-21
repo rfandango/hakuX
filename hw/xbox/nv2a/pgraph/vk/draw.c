@@ -1187,6 +1187,13 @@ static void create_pipeline(PGRAPHState *pg)
             pgraph_vk_reg_r(pg, NV_PGRAPH_CONTROL_1) & NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE;
     }
 
+    if (!r->shader_binding ||
+        !r->shader_binding->vsh.module_info ||
+        !r->shader_binding->psh.module_info) {
+        NV2A_VK_DGROUP_END();
+        return;
+    }
+
     int num_active_shader_stages = 0;
     VkPipelineShaderStageCreateInfo shader_stages[3];
 

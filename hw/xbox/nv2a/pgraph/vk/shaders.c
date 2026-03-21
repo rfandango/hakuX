@@ -805,6 +805,7 @@ static bool try_finalize_shader_binding(PGRAPHVkState *r,
     ShaderModuleCacheEntry *geom_entry = binding->pending_geom_entry;
     ShaderModuleCacheEntry *psh_entry = binding->pending_psh_entry;
 
+    if (!vsh_entry || !psh_entry) return false;
     if (!qatomic_read(&vsh_entry->ready)) return false;
     if (geom_entry && !qatomic_read(&geom_entry->ready)) return false;
     if (!qatomic_read(&psh_entry->ready)) return false;
