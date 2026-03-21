@@ -3961,6 +3961,19 @@ static void flush_draw_queue_internal(NV2AState *d)
         pgraph_vk_begin_debug_marker(r, r->command_buffer, RGBA_BLUE,
                                      "Merged Indexed (%d)", entry_count);
         begin_draw(pg);
+        if (r->pre_draw_skipped) {
+#if OPT_BINDLESS_TEXTURES
+            if (r->bindless_textures_supported && !r->bindless_set_bound) {
+                bind_bindless_set(pg);
+                r->bindless_set_bound = true;
+            }
+#endif
+            bind_descriptor_sets(pg);
+            push_vertex_attr_values(pg);
+#if OPT_BINDLESS_TEXTURES
+            push_texture_indices(pg);
+#endif
+        }
         bind_vertex_buffer(pg, remap.attributes, 0);
 
         DM_LOG("FLUSH-DQ-IDX count=%d total_idx=%u min_el=%u max_el=%u "
@@ -4052,6 +4065,19 @@ static void flush_draw_queue_internal(NV2AState *d)
         pgraph_vk_begin_debug_marker(r, r->command_buffer, RGBA_BLUE,
                                      "Merged Draw Arrays (%d)", entry_count);
         begin_draw(pg);
+        if (r->pre_draw_skipped) {
+#if OPT_BINDLESS_TEXTURES
+            if (r->bindless_textures_supported && !r->bindless_set_bound) {
+                bind_bindless_set(pg);
+                r->bindless_set_bound = true;
+            }
+#endif
+            bind_descriptor_sets(pg);
+            push_vertex_attr_values(pg);
+#if OPT_BINDLESS_TEXTURES
+            push_texture_indices(pg);
+#endif
+        }
         bind_vertex_buffer(pg, remap.attributes, 0);
 
         DM_LOG("FLUSH-DQ-DA count=%d min=%u max=%u bindless=%d skip=%d pipe=%p layout=%p ubo_ds_idx=%d",
