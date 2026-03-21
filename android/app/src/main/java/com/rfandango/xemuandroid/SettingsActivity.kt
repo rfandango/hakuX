@@ -127,6 +127,17 @@ class SettingsActivity : AppCompatActivity() {
       try { nativeSetDrawReorder(checked) } catch (_: Throwable) {}
     }
 
+    val switchDrawMerge = findViewById<MaterialSwitch>(R.id.switch_draw_merge)
+    try {
+      switchDrawMerge.isChecked = nativeGetDrawMerge()
+    } catch (_: Throwable) {
+      switchDrawMerge.isChecked = prefs.getBoolean("draw_merge", false)
+    }
+    switchDrawMerge.setOnCheckedChangeListener { _, checked ->
+      prefs.edit().putBoolean("draw_merge", checked).apply()
+      try { nativeSetDrawMerge(checked) } catch (_: Throwable) {}
+    }
+
     val switchBindless = findViewById<MaterialSwitch>(R.id.switch_bindless_textures)
     try {
       switchBindless.isChecked = nativeGetBindlessTextures()
@@ -529,6 +540,8 @@ class SettingsActivity : AppCompatActivity() {
   private external fun nativeSetFastFences(enable: Boolean)
   private external fun nativeGetDrawReorder(): Boolean
   private external fun nativeSetDrawReorder(enable: Boolean)
+  private external fun nativeGetDrawMerge(): Boolean
+  private external fun nativeSetDrawMerge(enable: Boolean)
   private external fun nativeGetBindlessTextures(): Boolean
   private external fun nativeSetBindlessTextures(enable: Boolean)
   private external fun nativeGetAsyncCompile(): Boolean

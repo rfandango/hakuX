@@ -60,25 +60,7 @@ static struct {
 static int g_vaf_detail_budget = 20;
 static bool g_vaf_disabled = false;
 
-#ifdef __ANDROID__
-#define DM_LOG(...) __android_log_print(ANDROID_LOG_WARN, "xemu-dm-dbg", __VA_ARGS__)
-#else
-#define DM_LOG(...) do { fprintf(stderr, "[xemu-dm-dbg] "); fprintf(stderr, __VA_ARGS__); fprintf(stderr, "\n"); } while(0)
-#endif
-static int g_dm_log_budget = 500;
-
-static int g_dm_flush_calls = 0;
-static int g_dm_flush_vkcmd_draw = 0;
-static int g_dm_flush_vkcmd_draw_indexed = 0;
-static int g_dm_flush_vkcmd_draw_indirect = 0;
-static int g_dm_flush_async_skips = 0;
-static int g_dm_flush_no_binding = 0;
-static int g_dm_flush_sfp = 0;
-static int g_dm_flush_full_path = 0;
-static int g_dm_flush_ubo_same = 0;
-static int g_dm_flush_ubo_diff = 0;
-static int g_dm_in_flush = 0;
-static int g_dm_sfp_fail_reason = 0;
+#define DM_LOG(...) do {} while(0)
 
 static void vaf_stats_log_and_reset(void)
 {
@@ -152,40 +134,6 @@ static void opt_stats_log_and_reset(void)
                 g_opt_stats.reorder_reject_zpass,
                 g_opt_stats.draws_skipped_pending,
                 g_opt_stats.draws_skipped_frameskip);
-        __android_log_print(ANDROID_LOG_INFO, "xemu-dm",
-                "DM: enq:%d flush:%d brk_compat:%d brk_full:%d budget_left:%d",
-                g_opt_stats.draw_merge_enqueued,
-                g_opt_stats.draw_merge_flushed,
-                g_opt_stats.draw_merge_break_compat,
-                g_opt_stats.draw_merge_break_full,
-                g_dm_log_budget);
-        __android_log_print(ANDROID_LOG_INFO, "xemu-dm",
-                "DM-GPU: flushes:%d vkDraw:%d vkDrawIdx:%d vkDrawInd:%d async_skip:%d no_bind:%d",
-                g_dm_flush_calls,
-                g_dm_flush_vkcmd_draw,
-                g_dm_flush_vkcmd_draw_indexed,
-                g_dm_flush_vkcmd_draw_indirect,
-                g_dm_flush_async_skips,
-                g_dm_flush_no_binding);
-        __android_log_print(ANDROID_LOG_INFO, "xemu-dm",
-                "DM-PATH: sfp:%d full:%d ubo_same:%d ubo_diff:%d sfp_fail:%d",
-                g_dm_flush_sfp,
-                g_dm_flush_full_path,
-                g_dm_flush_ubo_same,
-                g_dm_flush_ubo_diff,
-                g_dm_sfp_fail_reason);
-        g_dm_flush_calls = 0;
-        g_dm_flush_vkcmd_draw = 0;
-        g_dm_flush_vkcmd_draw_indexed = 0;
-        g_dm_flush_vkcmd_draw_indirect = 0;
-        g_dm_flush_async_skips = 0;
-        g_dm_flush_no_binding = 0;
-        g_dm_flush_sfp = 0;
-        g_dm_flush_full_path = 0;
-        g_dm_flush_ubo_same = 0;
-        g_dm_flush_ubo_diff = 0;
-        g_dm_sfp_fail_reason = 0;
-        g_dm_log_budget = 500;
         {
             extern struct FPUProfileCounters {
                 int x87_arith, x87_load_store, x87_transcendental, x87_stack;
@@ -2550,49 +2498,45 @@ static void begin_pre_draw(PGRAPHState *pg)
 #if OPT_SUPER_FAST_PATH
     {
         bool sfp_ok = true;
-        int sfp_reason = 0;
-        if (pg->clearing)                { OPT_STAT_INC(sfp_miss_clearing); sfp_ok = false; sfp_reason = 1; }
-        else if (!r->pipeline_binding)   { OPT_STAT_INC(sfp_miss_no_pipeline); sfp_ok = false; sfp_reason = 2; }
-        else if (r->pipeline_binding->pipeline == VK_NULL_HANDLE) { OPT_STAT_INC(sfp_miss_no_pipeline); sfp_ok = false; sfp_reason = 3; }
-        else if (r->pipeline_binding_changed) { OPT_STAT_INC(sfp_miss_pipe_dirty); sfp_ok = false; sfp_reason = 4; }
-        else if (!r->in_command_buffer)  { OPT_STAT_INC(sfp_miss_no_cmdbuf); sfp_ok = false; sfp_reason = 5; }
-        else if (!r->in_render_pass)     { OPT_STAT_INC(sfp_miss_no_rp); sfp_ok = false; sfp_reason = 6; }
-        else if (r->framebuffer_index <= 0) { OPT_STAT_INC(sfp_miss_no_fb); sfp_ok = false; sfp_reason = 7; }
-        else if (r->framebuffer_dirty)   { OPT_STAT_INC(sfp_miss_fb_dirty); sfp_ok = false; sfp_reason = 8; }
-        else if (r->shader_bindings_changed) { OPT_STAT_INC(sfp_miss_shader_changed); sfp_ok = false; sfp_reason = 9; }
-        else if (r->pipeline_state_dirty) { OPT_STAT_INC(sfp_miss_pipe_dirty); sfp_ok = false; sfp_reason = 10; }
-        else if (r->need_descriptor_rebind) { OPT_STAT_INC(sfp_miss_desc_rebind); sfp_ok = false; sfp_reason = 11; }
-        else if (r->uniforms_changed)    { OPT_STAT_INC(sfp_miss_uniforms); sfp_ok = false; sfp_reason = 12; }
+        if (pg->clearing)                { OPT_STAT_INC(sfp_miss_clearing); sfp_ok = false; }
+        else if (!r->pipeline_binding)   { OPT_STAT_INC(sfp_miss_no_pipeline); sfp_ok = false; }
+        else if (r->pipeline_binding->pipeline == VK_NULL_HANDLE) { OPT_STAT_INC(sfp_miss_no_pipeline); sfp_ok = false; }
+        else if (r->pipeline_binding_changed) { OPT_STAT_INC(sfp_miss_pipe_dirty); sfp_ok = false; }
+        else if (!r->in_command_buffer)  { OPT_STAT_INC(sfp_miss_no_cmdbuf); sfp_ok = false; }
+        else if (!r->in_render_pass)     { OPT_STAT_INC(sfp_miss_no_rp); sfp_ok = false; }
+        else if (r->framebuffer_index <= 0) { OPT_STAT_INC(sfp_miss_no_fb); sfp_ok = false; }
+        else if (r->framebuffer_dirty)   { OPT_STAT_INC(sfp_miss_fb_dirty); sfp_ok = false; }
+        else if (r->shader_bindings_changed) { OPT_STAT_INC(sfp_miss_shader_changed); sfp_ok = false; }
+        else if (r->pipeline_state_dirty) { OPT_STAT_INC(sfp_miss_pipe_dirty); sfp_ok = false; }
+        else if (r->need_descriptor_rebind) { OPT_STAT_INC(sfp_miss_desc_rebind); sfp_ok = false; }
+        else if (r->uniforms_changed)    { OPT_STAT_INC(sfp_miss_uniforms); sfp_ok = false; }
 #if OPT_BINDLESS_TEXTURES
         else if (r->bindless_textures_supported
                      ? (r->ubo_descriptor_set_index <= 0)
                      : r->push_descriptors_supported
                          ? (r->push_ubo_set_index <= 0)
-                         : (r->descriptor_set_index <= 0)) { OPT_STAT_INC(sfp_miss_no_desc); sfp_ok = false; sfp_reason = 13; }
+                         : (r->descriptor_set_index <= 0)) { OPT_STAT_INC(sfp_miss_no_desc); sfp_ok = false; }
 #else
         else if (r->push_descriptors_supported
                      ? (r->push_ubo_set_index <= 0)
-                     : (r->descriptor_set_index <= 0)) { OPT_STAT_INC(sfp_miss_no_desc); sfp_ok = false; sfp_reason = 13; }
+                     : (r->descriptor_set_index <= 0)) { OPT_STAT_INC(sfp_miss_no_desc); sfp_ok = false; }
 #endif
 #if OPT_BINDLESS_TEXTURES
         else if (!r->bindless_textures_supported &&
                  !r->push_descriptors_supported &&
-                 pg->texture_state_gen != r->last_texture_state_gen) { OPT_STAT_INC(sfp_miss_tex_gen); sfp_ok = false; sfp_reason = 14; }
+                 pg->texture_state_gen != r->last_texture_state_gen) { OPT_STAT_INC(sfp_miss_tex_gen); sfp_ok = false; }
 #else
         else if (!r->push_descriptors_supported &&
-                 pg->texture_state_gen != r->last_texture_state_gen) { OPT_STAT_INC(sfp_miss_tex_gen); sfp_ok = false; sfp_reason = 14; }
+                 pg->texture_state_gen != r->last_texture_state_gen) { OPT_STAT_INC(sfp_miss_tex_gen); sfp_ok = false; }
 #endif
 #if OPT_DYNAMIC_REG_FILTER
-        else if (pg->non_dynamic_reg_gen != r->last_non_dynamic_reg_gen) { OPT_STAT_INC(sfp_miss_reg_gen); sfp_ok = false; sfp_reason = 15; }
+        else if (pg->non_dynamic_reg_gen != r->last_non_dynamic_reg_gen) { OPT_STAT_INC(sfp_miss_reg_gen); sfp_ok = false; }
 #else
-        else if (pg->any_reg_gen != r->last_any_reg_gen) { OPT_STAT_INC(sfp_miss_reg_gen); sfp_ok = false; sfp_reason = 15; }
+        else if (pg->any_reg_gen != r->last_any_reg_gen) { OPT_STAT_INC(sfp_miss_reg_gen); sfp_ok = false; }
 #endif
-        else if (pg->primitive_mode != r->shader_binding->state.geom.primitive_mode) { OPT_STAT_INC(sfp_miss_prim_mode); sfp_ok = false; sfp_reason = 16; }
-        else if (pg->program_data_dirty) { OPT_STAT_INC(sfp_miss_prog_dirty); sfp_ok = false; sfp_reason = 17; }
+        else if (pg->primitive_mode != r->shader_binding->state.geom.primitive_mode) { OPT_STAT_INC(sfp_miss_prim_mode); sfp_ok = false; }
+        else if (pg->program_data_dirty) { OPT_STAT_INC(sfp_miss_prog_dirty); sfp_ok = false; }
 
-        if (!sfp_ok && g_dm_in_flush && !g_dm_sfp_fail_reason) {
-            g_dm_sfp_fail_reason = sfp_reason;
-        }
         if (sfp_ok) {
             bool tex_vram_clean = (r->texture_vram_gen == r->last_texture_vram_gen);
             if (!tex_vram_clean) {
@@ -2663,8 +2607,6 @@ static void begin_pre_draw(PGRAPHState *pg)
                 if (sfp_ok) {
                     if (pg->any_reg_gen != r->last_any_reg_gen) {
                         sfp_ok = false;
-                        if (g_dm_in_flush && !g_dm_sfp_fail_reason)
-                            g_dm_sfp_fail_reason = 18;
                     }
                 }
                 if (sfp_ok && pg->vertex_attr_gen != r->pipeline_vertex_attr_gen) {
@@ -2758,19 +2700,10 @@ static void begin_pre_draw(PGRAPHState *pg)
                     r->last_non_dynamic_reg_gen = pg->non_dynamic_reg_gen;
                     OPT_STAT_INC(super_fast_hits);
                     r->pre_draw_skipped = true;
-                    if (g_dm_log_budget > 0 && g_xemu_draw_merge) {
-                        g_dm_log_budget--;
-                        DM_LOG("SFP-HIT bindless_bound=%d pipe_changed=%d pipe=%p layout=%p",
-                               r->bindless_set_bound, r->pipeline_binding_changed,
-                               (void*)(r->pipeline_binding ? r->pipeline_binding->pipeline : 0),
-                               (void*)(r->pipeline_binding ? r->pipeline_binding->layout : 0));
-                    }
                     return;
                 }
             }
             OPT_STAT_INC(sfp_miss_tex_vram);
-            if (g_dm_in_flush && !g_dm_sfp_fail_reason)
-                g_dm_sfp_fail_reason = 19;
         }
     }
     OPT_STAT_INC(super_fast_misses);
@@ -2836,13 +2769,6 @@ static void begin_pre_draw(PGRAPHState *pg)
             r->pre_draw_skipped = true;
             NV2A_VK_DGROUP_END();
             OPT_STAT_INC(bindless_tex_fast);
-            if (g_dm_log_budget > 0 && g_xemu_draw_merge) {
-                g_dm_log_budget--;
-                DM_LOG("BL-HIT bindless_bound=%d pipe_changed=%d pipe=%p layout=%p",
-                       r->bindless_set_bound, r->pipeline_binding_changed,
-                       (void*)(r->pipeline_binding ? r->pipeline_binding->pipeline : 0),
-                       (void*)(r->pipeline_binding ? r->pipeline_binding->layout : 0));
-            }
             return;
         }
         NV2A_VK_DGROUP_END();
@@ -2943,13 +2869,6 @@ static void begin_pre_draw(PGRAPHState *pg)
             create_frame_buffer(pg);
         }
         pgraph_vk_ensure_command_buffer(pg);
-        if (g_dm_log_budget > 0 && g_xemu_draw_merge) {
-            g_dm_log_budget--;
-            DM_LOG("MFP-HIT pre_draw_skipped=%d bindless_bound=%d pipe_changed=%d pipe=%p layout=%p",
-                   r->pre_draw_skipped, r->bindless_set_bound, r->pipeline_binding_changed,
-                   (void*)(r->pipeline_binding ? r->pipeline_binding->pipeline : 0),
-                   (void*)(r->pipeline_binding ? r->pipeline_binding->layout : 0));
-        }
         return;
     }
 mfp_miss: (void)0;
@@ -2989,16 +2908,6 @@ mfp_miss: (void)0;
             OPT_STAT_INC(draws_skipped_pending);
             r->async_draw_skip = true;
             r->pre_draw_skipped = true;
-            if (g_dm_log_budget > 0 && g_xemu_draw_merge) {
-                g_dm_log_budget--;
-                DM_LOG("ASYNC-SKIP pipe=%p pending=%d pipeline=%p layout=%p pipe_changed=%d bindless_bound=%d",
-                       (void*)r->pipeline_binding,
-                       r->pipeline_binding ? r->pipeline_binding->pending : -1,
-                       (void*)(r->pipeline_binding ? r->pipeline_binding->pipeline : 0),
-                       (void*)(r->pipeline_binding ? r->pipeline_binding->layout : 0),
-                       r->pipeline_binding_changed,
-                       r->bindless_set_bound);
-            }
             pgraph_vk_ensure_command_buffer(pg);
             return;
         }
@@ -3087,14 +2996,6 @@ static void begin_draw(PGRAPHState *pg)
     }
 
     if (must_bind_pipeline) {
-        if (g_dm_log_budget > 0 && g_xemu_draw_merge) {
-            g_dm_log_budget--;
-            DM_LOG("BEGIN_DRAW bind_pipe pipe=%p layout=%p pre_draw_skipped=%d bindless_bound=%d was_in_rp=%d",
-                   (void*)r->pipeline_binding->pipeline,
-                   (void*)r->pipeline_binding->layout,
-                   r->pre_draw_skipped, r->bindless_set_bound,
-                   r->in_render_pass);
-        }
         nv2a_profile_inc_counter(NV2A_PROF_PIPELINE_BIND);
         vkCmdBindPipeline(r->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                           r->pipeline_binding->pipeline);
@@ -3326,12 +3227,6 @@ static void begin_draw(PGRAPHState *pg)
         if (!r->pre_draw_skipped) {
 #if OPT_BINDLESS_TEXTURES
             if (r->bindless_textures_supported && !r->bindless_set_bound) {
-                if (g_dm_log_budget > 0 && g_xemu_draw_merge) {
-                    g_dm_log_budget--;
-                    DM_LOG("BIND_SET0 layout=%p pipe=%p",
-                           (void*)r->pipeline_binding->layout,
-                           (void*)r->pipeline_binding->pipeline);
-                }
                 bind_bindless_set(pg);
                 r->bindless_set_bound = true;
             }
@@ -3579,9 +3474,6 @@ static bool try_enqueue_draw_arrays(PGRAPHState *pg, DrawQueue *q)
         if (!upload_draw_uniforms(pg, ubo_offsets)) {
             return false;
         }
-    } else if (q->count == 0) {
-        ubo_offsets[0] = r->uniform_buffer_offsets[0];
-        ubo_offsets[1] = r->uniform_buffer_offsets[1];
     } else {
         ubo_offsets[0] = q->entries[q->count - 1].uniform_offsets[0];
         ubo_offsets[1] = q->entries[q->count - 1].uniform_offsets[1];
@@ -3697,9 +3589,6 @@ static bool try_enqueue_draw_indexed(PGRAPHState *pg, DrawQueue *q)
         if (!upload_draw_uniforms(pg, ubo_offsets)) {
             return false;
         }
-    } else if (q->count == 0) {
-        ubo_offsets[0] = r->uniform_buffer_offsets[0];
-        ubo_offsets[1] = r->uniform_buffer_offsets[1];
     } else {
         ubo_offsets[0] = q->entries[q->count - 1].uniform_offsets[0];
         ubo_offsets[1] = q->entries[q->count - 1].uniform_offsets[1];
@@ -3759,10 +3648,6 @@ static void rebind_ubo_dynamic_offsets(PGRAPHState *pg, uint32_t off0,
     uint32_t dyn_off[2] = { off0, off1 };
 
     if (!r->pipeline_binding || !r->pipeline_binding->layout) {
-        DM_LOG("ERROR rebind_ubo: pipe=%p layout=%p",
-               (void*)r->pipeline_binding,
-               (void*)(r->pipeline_binding ? r->pipeline_binding->layout : 0));
-        g_dm_flush_no_binding++;
         return;
     }
 
@@ -3805,7 +3690,6 @@ static void flush_draw_queue_internal(NV2AState *d)
     }
 
     OPT_STAT_INC(draw_merge_flushed);
-    g_dm_flush_calls++;
 
     int entry_count = q->count;
     int prim_mode = q->primitive_mode;
@@ -3903,6 +3787,12 @@ static void flush_draw_queue_internal(NV2AState *d)
     typeof(r->dyn_state) saved_dyn_state = r->dyn_state;
 #endif
 
+    VertexAttribute saved_vertex_attrs[NV2A_VERTEXSHADER_ATTRIBUTES];
+    memcpy(saved_vertex_attrs, pg->vertex_attributes,
+           sizeof(saved_vertex_attrs));
+    memcpy(pg->vertex_attributes, q->saved_vertex_attrs,
+           sizeof(pg->vertex_attributes));
+
     pgraph_vk_ensure_command_buffer(pg);
 
     r->num_vertex_ram_buffer_syncs = 0;
@@ -3911,14 +3801,6 @@ static void flush_draw_queue_internal(NV2AState *d)
         uint32_t provoking = (total_indices > 0)
             ? q->index_buf[total_indices - 1]
             : max_element;
-
-        if (g_dm_log_budget > 0) {
-            DM_LOG("FLUSH-DQ-VTX min=%u max=%u prov=%u "
-                   "vag=%u last_vag=%u cached=%d",
-                   min_element, max_element, provoking,
-                   pg->vertex_attr_gen, r->last_vertex_attr_gen,
-                   r->cached_num_active_bindings);
-        }
 
         pgraph_vk_bind_vertex_attributes(d, min_element, max_element,
                                          false, 0, provoking);
@@ -3930,30 +3812,8 @@ static void flush_draw_queue_internal(NV2AState *d)
         size_t index_data_size = total_indices * sizeof(uint32_t);
         ensure_buffer_space(pg, BUFFER_INDEX_STAGING, index_data_size);
 
-        if (g_dm_log_budget > 0) {
-            DM_LOG("FLUSH-PRE: any_reg=%u r_last_any=%u q_any=%u "
-                   "shader=%u pipe_st=%u tex=%u vag=%u "
-                   "rp=%d cb=%d fb_idx=%d pipe_chg=%d shd_chg=%d pipe_dirty=%d "
-                   "desc_rebind=%d uni_chg=%d",
-                   pg->any_reg_gen, r->last_any_reg_gen, saved_any_reg_gen,
-                   pg->shader_state_gen, pg->pipeline_state_gen,
-                   pg->texture_state_gen, pg->vertex_attr_gen,
-                   r->in_render_pass, r->in_command_buffer,
-                   r->framebuffer_index, r->pipeline_binding_changed,
-                   r->shader_bindings_changed, r->pipeline_state_dirty,
-                   r->need_descriptor_rebind, r->uniforms_changed);
-        }
-        g_dm_in_flush = 1;
         begin_pre_draw(pg);
-        g_dm_in_flush = 0;
-        if (r->pre_draw_skipped) {
-            g_dm_flush_sfp++;
-        } else {
-            g_dm_flush_full_path++;
-        }
         if (r->async_draw_skip) {
-            DM_LOG("FLUSH-DQ-IDX async_skip count=%d", entry_count);
-            g_dm_flush_async_skips++;
             goto flush_dq_restore;
         }
         copy_remapped_attributes_to_inline_buffer(pg, remap, 0,
@@ -3976,43 +3836,35 @@ static void flush_draw_queue_internal(NV2AState *d)
         }
         bind_vertex_buffer(pg, remap.attributes, 0);
 
-        DM_LOG("FLUSH-DQ-IDX count=%d total_idx=%u min_el=%u max_el=%u "
-               "bindless=%d skip=%d pipe=%p layout=%p ubo_ds_idx=%d",
-               entry_count, total_indices, min_element, max_element,
-               r->bindless_set_bound, r->pre_draw_skipped,
-               (void*)(r->pipeline_binding ? r->pipeline_binding->pipeline : 0),
-               (void*)(r->pipeline_binding ? r->pipeline_binding->layout : 0),
-               r->ubo_descriptor_set_index);
-
         VkDeviceSize buffer_offset = pgraph_vk_update_index_buffer(
             pg, q->index_buf, index_data_size);
         vkCmdBindIndexBuffer(r->command_buffer,
                              r->storage_buffers[BUFFER_INDEX].buffer,
                              buffer_offset, VK_INDEX_TYPE_UINT32);
 
-        for (int i = 0; i < entry_count; i++) {
-            if (g_dm_log_budget > 0) {
-                DM_LOG("  IDX[%d/%d] off=%u cnt=%u ubo=[%zu,%zu]",
-                       i, entry_count, idx_offsets[i], idx_counts[i],
-                       ubo_offsets[i][0], ubo_offsets[i][1]);
+        if (!has_uniform_changes) {
+            rebind_ubo_dynamic_offsets(pg, (uint32_t)ubo_offsets[0][0],
+                                       (uint32_t)ubo_offsets[0][1]);
+            vkCmdDrawIndexed(r->command_buffer, total_indices, 1, 0, 0, 0);
+        } else {
+            int i = 0;
+            while (i < entry_count) {
+                size_t cur_off0 = ubo_offsets[i][0];
+                size_t cur_off1 = ubo_offsets[i][1];
+                rebind_ubo_dynamic_offsets(pg, (uint32_t)cur_off0,
+                                           (uint32_t)cur_off1);
+                int j = i;
+                while (j < entry_count &&
+                       ubo_offsets[j][0] == cur_off0 &&
+                       ubo_offsets[j][1] == cur_off1) {
+                    j++;
+                }
+                uint32_t first = idx_offsets[i];
+                uint32_t count = idx_offsets[j - 1] + idx_counts[j - 1] - first;
+                vkCmdDrawIndexed(r->command_buffer, count, 1, first, 0, 0);
+                i = j;
             }
-            if (idx_offsets[i] + idx_counts[i] > total_indices) {
-                DM_LOG("ERROR IDX OOB: off=%u cnt=%u total=%u",
-                       idx_offsets[i], idx_counts[i], total_indices);
-            }
-            if (i > 0 && (ubo_offsets[i][0] != ubo_offsets[i-1][0] ||
-                          ubo_offsets[i][1] != ubo_offsets[i-1][1])) {
-                g_dm_flush_ubo_diff++;
-            } else {
-                g_dm_flush_ubo_same++;
-            }
-            rebind_ubo_dynamic_offsets(pg, (uint32_t)ubo_offsets[i][0],
-                                       (uint32_t)ubo_offsets[i][1]);
-            vkCmdDrawIndexed(r->command_buffer, idx_counts[i], 1,
-                             idx_offsets[i], 0, 0);
-            g_dm_flush_vkcmd_draw_indexed++;
         }
-        DM_LOG("FLUSH-DQ-IDX-DONE count=%d", entry_count);
     } else {
         PrimAssemblyState assembly = {
             .primitive_mode = prim_mode,
@@ -4048,17 +3900,8 @@ static void flush_draw_queue_internal(NV2AState *d)
             ensure_buffer_space(pg, BUFFER_INDEX_STAGING, indirect_size);
         }
 
-        g_dm_in_flush = 1;
         begin_pre_draw(pg);
-        g_dm_in_flush = 0;
-        if (r->pre_draw_skipped) {
-            g_dm_flush_sfp++;
-        } else {
-            g_dm_flush_full_path++;
-        }
         if (r->async_draw_skip) {
-            DM_LOG("FLUSH-DQ-DA async_skip count=%d", entry_count);
-            g_dm_flush_async_skips++;
             goto flush_dq_restore;
         }
         copy_remapped_attributes_to_inline_buffer(pg, remap, 0, max_end);
@@ -4080,13 +3923,6 @@ static void flush_draw_queue_internal(NV2AState *d)
         }
         bind_vertex_buffer(pg, remap.attributes, 0);
 
-        DM_LOG("FLUSH-DQ-DA count=%d min=%u max=%u bindless=%d skip=%d pipe=%p layout=%p ubo_ds_idx=%d",
-               entry_count, min_start, max_end,
-               r->bindless_set_bound, r->pre_draw_skipped,
-               (void*)(r->pipeline_binding ? r->pipeline_binding->pipeline : 0),
-               (void*)(r->pipeline_binding ? r->pipeline_binding->layout : 0),
-               r->ubo_descriptor_set_index);
-
         if (prim_rw.num_indices > 0) {
             size_t rewrite_size = prim_rw.num_indices * sizeof(uint32_t);
             VkDeviceSize buffer_offset = pgraph_vk_update_index_buffer(
@@ -4096,7 +3932,6 @@ static void flush_draw_queue_internal(NV2AState *d)
                                  buffer_offset, VK_INDEX_TYPE_UINT32);
             vkCmdDrawIndexed(r->command_buffer, prim_rw.num_indices,
                              1, 0, 0, 0);
-            g_dm_flush_vkcmd_draw_indexed += entry_count;
         } else if (!has_uniform_changes && entry_count > 1) {
             VkDrawIndirectCommand cmds[DRAW_QUEUE_MAX];
             for (int i = 0; i < entry_count; i++) {
@@ -4116,7 +3951,6 @@ static void flush_draw_queue_internal(NV2AState *d)
                               r->storage_buffers[BUFFER_INDEX].buffer,
                               buffer_offset, entry_count,
                               sizeof(VkDrawIndirectCommand));
-            g_dm_flush_vkcmd_draw_indirect += entry_count;
         } else if (has_uniform_changes) {
             int i = 0;
             while (i < entry_count) {
@@ -4154,24 +3988,20 @@ static void flush_draw_queue_internal(NV2AState *d)
                                       r->storage_buffers[BUFFER_INDEX].buffer,
                                       buf_off, group_count,
                                       sizeof(VkDrawIndirectCommand));
-                    g_dm_flush_vkcmd_draw_indirect += group_count;
                 } else {
                     vkCmdDraw(r->command_buffer, counts_arr[i], 1,
                               starts[i], 0);
-                    g_dm_flush_vkcmd_draw++;
                 }
 
                 i = j;
             }
         } else {
             vkCmdDraw(r->command_buffer, counts_arr[0], 1, starts[0], 0);
-            g_dm_flush_vkcmd_draw++;
         }
     }
 
     end_draw(pg);
     pgraph_vk_end_debug_marker(r, r->command_buffer);
-    DM_LOG("FLUSH-DQ-COMPLETE indexed=%d count=%d", is_indexed, entry_count);
 
 flush_dq_restore:
     pg->primitive_mode = saved_primitive_mode;
@@ -4197,6 +4027,8 @@ flush_dq_restore:
     pg->regs_[NV_PGRAPH_CONTROL_2] = saved_reg_control_2;
     pg->regs_[NV_PGRAPH_CONTROL_3] = saved_reg_control_3;
     pg->regs_[NV_PGRAPH_BLEND] = saved_reg_blend;
+    memcpy(pg->vertex_attributes, saved_vertex_attrs,
+           sizeof(pg->vertex_attributes));
 #if OPT_DYNAMIC_STATES
     r->dyn_state = saved_dyn_state;
 #endif
@@ -4911,11 +4743,6 @@ static void flush_reorder_window_internal(NV2AState *d)
 
 #if OPT_BINDLESS_TEXTURES
     if (r->bindless_textures_supported && !r->bindless_set_bound) {
-        if (g_dm_log_budget > 0 && g_xemu_draw_merge) {
-            g_dm_log_budget--;
-            DM_LOG("RW-BIND-SET0 layout=%p count=%d",
-                   (void*)w->entries[0].layout, w->count);
-        }
         vkCmdBindDescriptorSets(r->command_buffer,
                                 VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 w->entries[0].layout, 0, 1,
@@ -5059,23 +4886,10 @@ void pgraph_vk_draw_end(NV2AState *d)
     if (g_xemu_draw_merge && pg->draw_arrays_length && !pg->clearing) {
         DrawQueue *q = &r->draw_queue;
 
-        if (g_dm_log_budget > 0) {
-            g_dm_log_budget--;
-            DM_LOG("DM-ENTER-DA q_active=%d q_count=%d q_indexed=%d "
-                   "bindless=%d pipe_chg=%d pipe=%p",
-                   q->active, q->count, q->indexed,
-                   r->bindless_set_bound, r->pipeline_binding_changed,
-                   (void*)(r->pipeline_binding ? r->pipeline_binding->pipeline : 0));
-        }
-
         if (q->active) {
             if (q->indexed || !check_draw_mergeable(pg, q)) {
                 OPT_STAT_INC(draw_merge_break_compat);
                 if (q->count > 0) {
-                    if (g_dm_log_budget > 0) {
-                        g_dm_log_budget--;
-                        DM_LOG("DM-FLUSH-COMPAT count=%d", q->count);
-                    }
                     flush_draw_queue_internal(d);
                 }
                 q->active = false;
@@ -5086,27 +4900,14 @@ void pgraph_vk_draw_end(NV2AState *d)
             if (q->count >= OPT_DRAW_MERGE_MAX ||
                 !try_enqueue_draw_arrays(pg, q)) {
                 OPT_STAT_INC(draw_merge_break_full);
-                if (g_dm_log_budget > 0) {
-                    g_dm_log_budget--;
-                    DM_LOG("DM-FLUSH-FULL count=%d", q->count);
-                }
                 flush_draw_queue_internal(d);
                 q->active = false;
             } else {
                 OPT_STAT_INC(draw_merge_enqueued);
-                if (g_dm_log_budget > 0) {
-                    g_dm_log_budget--;
-                    DM_LOG("DM-ENQUEUE count=%d", q->count);
-                }
                 goto post_draw;
             }
         }
 
-        if (g_dm_log_budget > 0) {
-            DM_LOG("DM-NORMAL-DRAW bindless_bound=%d pipe_changed=%d pipe=%p",
-                   r->bindless_set_bound, r->pipeline_binding_changed,
-                   (void*)(r->pipeline_binding ? r->pipeline_binding->pipeline : 0));
-        }
         pgraph_vk_flush_draw(d);
 
 #if OPT_ASYNC_COMPILE
@@ -5128,6 +4929,8 @@ void pgraph_vk_draw_end(NV2AState *d)
         q->dyn_control_2 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_2);
         q->dyn_control_3 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3);
         q->dyn_blend = pgraph_reg_r(pg, NV_PGRAPH_BLEND);
+        memcpy(q->saved_vertex_attrs, pg->vertex_attributes,
+               sizeof(q->saved_vertex_attrs));
         q->active = true;
         q->indexed = false;
         q->has_uniform_changes = false;
@@ -5140,23 +4943,10 @@ void pgraph_vk_draw_end(NV2AState *d)
     if (g_xemu_draw_merge && pg->inline_elements_length && !pg->clearing) {
         DrawQueue *q = &r->draw_queue;
 
-        if (g_dm_log_budget > 0) {
-            g_dm_log_budget--;
-            DM_LOG("DM-ENTER-IE q_active=%d q_count=%d q_indexed=%d "
-                   "bindless=%d pipe_chg=%d pipe=%p",
-                   q->active, q->count, q->indexed,
-                   r->bindless_set_bound, r->pipeline_binding_changed,
-                   (void*)(r->pipeline_binding ? r->pipeline_binding->pipeline : 0));
-        }
-
         if (q->active) {
             if (!q->indexed || !check_draw_mergeable(pg, q)) {
                 OPT_STAT_INC(draw_merge_break_compat);
                 if (q->count > 0) {
-                    if (g_dm_log_budget > 0) {
-                        g_dm_log_budget--;
-                        DM_LOG("DM-IE-FLUSH-COMPAT count=%d", q->count);
-                    }
                     flush_draw_queue_internal(d);
                 }
                 q->active = false;
@@ -5167,27 +4957,14 @@ void pgraph_vk_draw_end(NV2AState *d)
             if (q->count >= OPT_DRAW_MERGE_MAX ||
                 !try_enqueue_draw_indexed(pg, q)) {
                 OPT_STAT_INC(draw_merge_break_full);
-                if (g_dm_log_budget > 0) {
-                    g_dm_log_budget--;
-                    DM_LOG("DM-IE-FLUSH-FULL count=%d", q->count);
-                }
                 flush_draw_queue_internal(d);
                 q->active = false;
             } else {
                 OPT_STAT_INC(draw_merge_enqueued);
-                if (g_dm_log_budget > 0) {
-                    g_dm_log_budget--;
-                    DM_LOG("DM-IE-ENQUEUE count=%d", q->count);
-                }
                 goto post_draw;
             }
         }
 
-        if (g_dm_log_budget > 0) {
-            DM_LOG("DM-IE-NORMAL-DRAW bindless_bound=%d pipe_changed=%d pipe=%p",
-                   r->bindless_set_bound, r->pipeline_binding_changed,
-                   (void*)(r->pipeline_binding ? r->pipeline_binding->pipeline : 0));
-        }
         pgraph_vk_flush_draw(d);
 
 #if OPT_ASYNC_COMPILE
@@ -5209,6 +4986,8 @@ void pgraph_vk_draw_end(NV2AState *d)
         q->dyn_control_2 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_2);
         q->dyn_control_3 = pgraph_reg_r(pg, NV_PGRAPH_CONTROL_3);
         q->dyn_blend = pgraph_reg_r(pg, NV_PGRAPH_BLEND);
+        memcpy(q->saved_vertex_attrs, pg->vertex_attributes,
+               sizeof(q->saved_vertex_attrs));
         q->active = true;
         q->indexed = true;
         q->has_uniform_changes = false;
@@ -5874,15 +5653,6 @@ void pgraph_vk_flush_draw(NV2AState *d)
         bind_vertex_buffer(pg, remap.attributes, 0);
         NV2A_PHASE_TIMER_END(draw_setup);
 
-        if (g_dm_log_budget > 0 && g_xemu_draw_merge) {
-            g_dm_log_budget--;
-            DM_LOG("PRE-DRAW-ARRAYS bindless_bound=%d pre_draw_skipped=%d pipe=%p layout=%p pipe_changed=%d",
-                   r->bindless_set_bound, r->pre_draw_skipped,
-                   (void*)(r->pipeline_binding ? r->pipeline_binding->pipeline : 0),
-                   (void*)(r->pipeline_binding ? r->pipeline_binding->layout : 0),
-                   r->pipeline_binding_changed);
-        }
-
         NV2A_PHASE_TIMER_BEGIN(draw_vk_cmd);
         if (prim_rw.num_indices > 0) {
             size_t rewrite_size = prim_rw.num_indices * sizeof(uint32_t);
@@ -5995,15 +5765,6 @@ draw_arrays_done:
         begin_draw(pg);
         bind_vertex_buffer(pg, remap.attributes, 0);
         NV2A_PHASE_TIMER_END(draw_setup);
-
-        if (g_dm_log_budget > 0 && g_xemu_draw_merge) {
-            g_dm_log_budget--;
-            DM_LOG("PRE-DRAW-INLINE bindless_bound=%d pre_draw_skipped=%d pipe=%p layout=%p pipe_changed=%d",
-                   r->bindless_set_bound, r->pre_draw_skipped,
-                   (void*)(r->pipeline_binding ? r->pipeline_binding->pipeline : 0),
-                   (void*)(r->pipeline_binding ? r->pipeline_binding->layout : 0),
-                   r->pipeline_binding_changed);
-        }
 
         NV2A_PHASE_TIMER_BEGIN(draw_vk_cmd);
         vkCmdBindIndexBuffer(r->command_buffer,

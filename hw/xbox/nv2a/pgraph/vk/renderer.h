@@ -861,6 +861,8 @@ typedef struct DrawQueue {
     uint32_t max_element;
     uint32_t total_indices;
     uint32_t *index_buf;
+
+    VertexAttribute saved_vertex_attrs[NV2A_VERTEXSHADER_ATTRIBUTES];
 } DrawQueue;
 #endif
 

@@ -35,6 +35,8 @@ extern "C" void xemu_set_fp_jit(bool enable);
 extern "C" bool xemu_get_fp_jit(void);
 extern "C" void xemu_set_draw_reorder(bool enable);
 extern "C" bool xemu_get_draw_reorder(void);
+extern "C" void xemu_set_draw_merge(bool enable);
+extern "C" bool xemu_get_draw_merge(void);
 extern "C" void xemu_set_bindless_textures(bool enable);
 extern "C" bool xemu_get_bindless_textures(void);
 extern "C" void xemu_set_async_compile(bool enable);
@@ -774,6 +776,11 @@ static SetupFiles SyncSetupFiles() {
   __android_log_print(ANDROID_LOG_INFO, "xemu-android",
                       "draw reorder: %s", draw_reorder ? "ON" : "OFF");
 
+  bool draw_merge = GetPrefBool(env, activity, "draw_merge", false);
+  xemu_set_draw_merge(draw_merge);
+  __android_log_print(ANDROID_LOG_INFO, "xemu-android",
+                      "draw merge: %s", draw_merge ? "ON" : "OFF");
+
   bool bindless_tex = GetPrefBool(env, activity, "bindless_textures", false);
   xemu_set_bindless_textures(bindless_tex);
   __android_log_print(ANDROID_LOG_INFO, "xemu-android",
@@ -1295,6 +1302,18 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_rfandango_xemuandroid_SettingsActivity_nativeSetDrawReorder(JNIEnv *, jobject, jboolean enable)
 {
     xemu_set_draw_reorder(enable == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_rfandango_xemuandroid_SettingsActivity_nativeGetDrawMerge(JNIEnv *, jobject)
+{
+    return xemu_get_draw_merge() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_rfandango_xemuandroid_SettingsActivity_nativeSetDrawMerge(JNIEnv *, jobject, jboolean enable)
+{
+    xemu_set_draw_merge(enable == JNI_TRUE);
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
