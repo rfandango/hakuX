@@ -1727,10 +1727,16 @@ void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
 #if OPT_ALWAYS_DEFERRED_FENCES
         staging_base = pgraph_vk_staging_alloc(pg, uploaded_image_size);
         if (staging_base == VK_WHOLE_SIZE) {
-            pgraph_vk_flush_all_frames(pg);
-            pgraph_vk_staging_reset(pg);
-            staging_base = pgraph_vk_staging_alloc(pg, uploaded_image_size);
-            assert(staging_base != VK_WHOLE_SIZE);
+            if (pgraph_vk_staging_reclaim_any(pg)) {
+                pgraph_vk_staging_reset(pg);
+                staging_base = pgraph_vk_staging_alloc(pg, uploaded_image_size);
+            }
+            if (staging_base == VK_WHOLE_SIZE) {
+                pgraph_vk_flush_all_frames(pg);
+                pgraph_vk_staging_reset(pg);
+                staging_base = pgraph_vk_staging_alloc(pg, uploaded_image_size);
+                assert(staging_base != VK_WHOLE_SIZE);
+            }
         }
 #else
         pgraph_vk_staging_reset(pg);

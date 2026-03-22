@@ -59,7 +59,7 @@
 #define OPT_SURF_BATCH_UPLOAD   1
 #define OPT_TRIPLE_BUFFERING    1
 #define OPT_LARGER_POOLS        1
-#define NUM_GFX_DESCRIPTOR_SETS (OPT_LARGER_POOLS ? 8192 : 1024)
+#define NUM_GFX_DESCRIPTOR_SETS (OPT_LARGER_POOLS ? 16384 : 1024)
 #define OPT_ALWAYS_DEFERRED_FENCES 1
 #define OPT_PRECISE_BARRIERS    1
 #define OPT_SYNC_EARLY_EXIT     1
@@ -808,7 +808,7 @@ typedef struct PGRAPHVkComputeState {
     VkDescriptorPool descriptor_pool;
     VkDescriptorSetLayout descriptor_set_layout;
 #if OPT_LARGER_POOLS
-    VkDescriptorSet descriptor_sets[2048];
+    VkDescriptorSet descriptor_sets[4096];
 #else
     VkDescriptorSet descriptor_sets[1024];
 #endif
@@ -969,6 +969,7 @@ typedef struct PGRAPHVkState {
     VkDescriptorSet *push_ubo_sets;
     int push_ubo_set_count;
     int push_ubo_set_index;
+    int push_ubo_set_base_count;
     VkDescriptorImageInfo push_tex_infos[NV2A_MAX_TEXTURES];
     bool push_tex_dirty;
 
@@ -1003,12 +1004,25 @@ typedef struct PGRAPHVkState {
     VkFence aux_fence;
     bool in_aux_command_buffer;
 
-    VkFramebuffer framebuffers[50];
+#define MAX_FRAMEBUFFERS 256
+    VkFramebuffer framebuffers[MAX_FRAMEBUFFERS];
     int framebuffer_index;
     bool framebuffer_dirty;
 
+#define FB_CACHE_MAX 32
+    struct {
+        VkRenderPass render_pass;
+        VkImageView color_view;
+        VkImageView zeta_view;
+        uint32_t width;
+        uint32_t height;
+        VkFramebuffer framebuffer;
+    } fb_cache[FB_CACHE_MAX];
+    int fb_cache_count;
+    VkFramebuffer current_framebuffer;
+
 #if OPT_DEFERRED_FENCES && OPT_N_BUFFERED_SUBMIT
-    VkFramebuffer deferred_framebuffers[NUM_SUBMIT_FRAMES][50];
+    VkFramebuffer deferred_framebuffers[NUM_SUBMIT_FRAMES][MAX_FRAMEBUFFERS];
     int deferred_framebuffer_count[NUM_SUBMIT_FRAMES];
 #endif
 
@@ -1056,7 +1070,10 @@ typedef struct PGRAPHVkState {
     VkDescriptorSet *descriptor_sets;
     int descriptor_set_count;
     int descriptor_set_index;
+    int descriptor_set_base_count;
     bool need_descriptor_rebind;
+
+    GArray *descriptor_overflow_pools;
 
 #if OPT_BINDLESS_TEXTURES
     VkDescriptorSetLayout bindless_set_layout;
@@ -1067,6 +1084,7 @@ typedef struct PGRAPHVkState {
     VkDescriptorSet *ubo_descriptor_sets;
     int ubo_descriptor_set_count;
     int ubo_descriptor_set_index;
+    int ubo_descriptor_set_base_count;
     uint64_t bindless_slot_bitmap[MAX_BINDLESS_TEXTURES / 64];
 #endif
 
@@ -1351,6 +1369,7 @@ VkDeviceSize pgraph_vk_append_to_buffer(PGRAPHState *pg, int index, void **data,
                                         VkDeviceAddress alignment);
 VkDeviceSize pgraph_vk_staging_alloc(PGRAPHState *pg, VkDeviceSize size);
 void pgraph_vk_staging_reset(PGRAPHState *pg);
+bool pgraph_vk_staging_reclaim_any(PGRAPHState *pg);
 
 // command.c
 void pgraph_vk_init_command_buffers(PGRAPHState *pg);
@@ -1458,6 +1477,7 @@ void pgraph_vk_init_shaders(PGRAPHState *pg);
 void pgraph_vk_finalize_shaders(PGRAPHState *pg);
 void pgraph_vk_update_descriptor_sets(PGRAPHState *pg);
 void pgraph_vk_bind_shaders(PGRAPHState *pg);
+void pgraph_vk_reclaim_descriptor_overflow(PGRAPHVkState *r);
 void pgraph_vk_update_shader_uniforms(PGRAPHState *pg);
 
 // reports.c

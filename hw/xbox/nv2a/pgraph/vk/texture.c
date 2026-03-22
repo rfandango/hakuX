@@ -508,10 +508,16 @@ static void upload_texture_image(PGRAPHState *pg, int texture_idx,
 #if OPT_ALWAYS_DEFERRED_FENCES
         staging_base = pgraph_vk_staging_alloc(pg, texture_data_size);
         if (staging_base == VK_WHOLE_SIZE) {
-            pgraph_vk_flush_all_frames(pg);
-            pgraph_vk_staging_reset(pg);
-            staging_base = pgraph_vk_staging_alloc(pg, texture_data_size);
-            assert(staging_base != VK_WHOLE_SIZE);
+            if (pgraph_vk_staging_reclaim_any(pg)) {
+                pgraph_vk_staging_reset(pg);
+                staging_base = pgraph_vk_staging_alloc(pg, texture_data_size);
+            }
+            if (staging_base == VK_WHOLE_SIZE) {
+                pgraph_vk_flush_all_frames(pg);
+                pgraph_vk_staging_reset(pg);
+                staging_base = pgraph_vk_staging_alloc(pg, texture_data_size);
+                assert(staging_base != VK_WHOLE_SIZE);
+            }
         }
 #else
         pgraph_vk_staging_reset(pg);

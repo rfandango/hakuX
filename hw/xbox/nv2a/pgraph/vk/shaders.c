@@ -231,6 +231,7 @@ static void create_bindless_descriptor_resources(PGRAPHState *pg)
 
     /* UBO pool: cycling sets like the current descriptor pool */
     r->ubo_descriptor_set_count = NUM_GFX_DESCRIPTOR_SETS;
+    r->ubo_descriptor_set_base_count = NUM_GFX_DESCRIPTOR_SETS;
     VkDescriptorPoolSize ubo_pool_size = {
         .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
         .descriptorCount = 2 * r->ubo_descriptor_set_count,
@@ -285,7 +286,7 @@ static void destroy_bindless_descriptor_resources(PGRAPHState *pg)
 
 #endif /* OPT_BINDLESS_TEXTURES */
 
-#define NUM_PUSH_UBO_SETS 256
+#define NUM_PUSH_UBO_SETS 1024
 
 static void create_push_descriptor_resources(PGRAPHState *pg)
 {
@@ -336,6 +337,7 @@ static void create_push_descriptor_resources(PGRAPHState *pg)
                                          &r->push_ubo_set_layout));
 
     r->push_ubo_set_count = NUM_PUSH_UBO_SETS;
+    r->push_ubo_set_base_count = NUM_PUSH_UBO_SETS;
     VkDescriptorPoolSize pool_size = {
         .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
         .descriptorCount = 2 * r->push_ubo_set_count,
@@ -393,6 +395,108 @@ static bool use_push_descriptors(PGRAPHVkState *r)
     return true;
 }
 
+#define DESCRIPTOR_GROW_BATCH 4096
+
+static bool grow_descriptor_ring(PGRAPHVkState *r,
+                                 VkDescriptorSetLayout layout,
+                                 VkDescriptorSet **sets_ptr,
+                                 int *count_ptr,
+                                 bool include_samplers)
+{
+    int batch = DESCRIPTOR_GROW_BATCH;
+    VkDescriptorPoolSize pool_sizes[2];
+    int pool_size_count = 0;
+
+    pool_sizes[pool_size_count++] = (VkDescriptorPoolSize){
+        .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+        .descriptorCount = 2 * batch,
+    };
+    if (include_samplers) {
+        pool_sizes[pool_size_count++] = (VkDescriptorPoolSize){
+            .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = NV2A_MAX_TEXTURES * batch,
+        };
+    }
+
+    VkDescriptorPool new_pool;
+    VkDescriptorPoolCreateInfo pool_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .poolSizeCount = pool_size_count,
+        .pPoolSizes = pool_sizes,
+        .maxSets = batch,
+        .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+    };
+    VkResult result = vkCreateDescriptorPool(r->device, &pool_info, NULL,
+                                             &new_pool);
+    if (result != VK_SUCCESS) {
+        return false;
+    }
+
+    VkDescriptorSet *new_sets = g_malloc(batch * sizeof(VkDescriptorSet));
+    VkDescriptorSetLayout *layouts = g_malloc(batch * sizeof(VkDescriptorSetLayout));
+    for (int i = 0; i < batch; i++) {
+        layouts[i] = layout;
+    }
+    VkDescriptorSetAllocateInfo alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = new_pool,
+        .descriptorSetCount = batch,
+        .pSetLayouts = layouts,
+    };
+    result = vkAllocateDescriptorSets(r->device, &alloc_info, new_sets);
+    g_free(layouts);
+    if (result != VK_SUCCESS) {
+        vkDestroyDescriptorPool(r->device, new_pool, NULL);
+        g_free(new_sets);
+        return false;
+    }
+
+    int old_count = *count_ptr;
+    *sets_ptr = g_realloc(*sets_ptr,
+                          (old_count + batch) * sizeof(VkDescriptorSet));
+    memcpy(*sets_ptr + old_count, new_sets, batch * sizeof(VkDescriptorSet));
+    *count_ptr = old_count + batch;
+    g_free(new_sets);
+
+    g_array_append_val(r->descriptor_overflow_pools, new_pool);
+    return true;
+}
+
+void pgraph_vk_reclaim_descriptor_overflow(PGRAPHVkState *r)
+{
+    if (!r->descriptor_overflow_pools ||
+        r->descriptor_overflow_pools->len == 0) {
+        return;
+    }
+
+    for (guint i = 0; i < r->descriptor_overflow_pools->len; i++) {
+        VkDescriptorPool pool =
+            g_array_index(r->descriptor_overflow_pools, VkDescriptorPool, i);
+        vkDestroyDescriptorPool(r->device, pool, NULL);
+    }
+    g_array_set_size(r->descriptor_overflow_pools, 0);
+
+    r->descriptor_set_count = r->descriptor_set_base_count;
+    r->descriptor_sets = g_realloc(
+        r->descriptor_sets,
+        r->descriptor_set_base_count * sizeof(VkDescriptorSet));
+
+#if OPT_BINDLESS_TEXTURES
+    if (r->ubo_descriptor_set_base_count) {
+        r->ubo_descriptor_set_count = r->ubo_descriptor_set_base_count;
+        r->ubo_descriptor_sets = g_realloc(
+            r->ubo_descriptor_sets,
+            r->ubo_descriptor_set_base_count * sizeof(VkDescriptorSet));
+    }
+#endif
+    if (r->push_ubo_set_base_count) {
+        r->push_ubo_set_count = r->push_ubo_set_base_count;
+        r->push_ubo_sets = g_realloc(
+            r->push_ubo_sets,
+            r->push_ubo_set_base_count * sizeof(VkDescriptorSet));
+    }
+}
+
 void pgraph_vk_update_descriptor_sets(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
@@ -417,33 +521,47 @@ void pgraph_vk_update_descriptor_sets(PGRAPHState *pg)
 
 #if OPT_BINDLESS_TEXTURES
     int *ds_index_ptr;
-    int ds_count;
-    VkDescriptorSet *ds_array;
+    int *ds_count_ptr;
+    VkDescriptorSet **ds_array_ptr;
+    VkDescriptorSetLayout ds_layout;
+    bool ds_include_samplers;
     if (r->bindless_textures_supported) {
         ds_index_ptr = &r->ubo_descriptor_set_index;
-        ds_count = r->ubo_descriptor_set_count;
-        ds_array = r->ubo_descriptor_sets;
+        ds_count_ptr = &r->ubo_descriptor_set_count;
+        ds_array_ptr = &r->ubo_descriptor_sets;
+        ds_layout = r->ubo_set_layout;
+        ds_include_samplers = false;
     } else if (push_desc) {
         ds_index_ptr = &r->push_ubo_set_index;
-        ds_count = r->push_ubo_set_count;
-        ds_array = r->push_ubo_sets;
+        ds_count_ptr = &r->push_ubo_set_count;
+        ds_array_ptr = &r->push_ubo_sets;
+        ds_layout = r->push_ubo_set_layout;
+        ds_include_samplers = false;
     } else {
         ds_index_ptr = &r->descriptor_set_index;
-        ds_count = r->descriptor_set_count;
-        ds_array = r->descriptor_sets;
+        ds_count_ptr = &r->descriptor_set_count;
+        ds_array_ptr = &r->descriptor_sets;
+        ds_layout = r->descriptor_set_layout;
+        ds_include_samplers = true;
     }
 #else
     int *ds_index_ptr;
-    int ds_count;
-    VkDescriptorSet *ds_array;
+    int *ds_count_ptr;
+    VkDescriptorSet **ds_array_ptr;
+    VkDescriptorSetLayout ds_layout;
+    bool ds_include_samplers;
     if (push_desc) {
         ds_index_ptr = &r->push_ubo_set_index;
-        ds_count = r->push_ubo_set_count;
-        ds_array = r->push_ubo_sets;
+        ds_count_ptr = &r->push_ubo_set_count;
+        ds_array_ptr = &r->push_ubo_sets;
+        ds_layout = r->push_ubo_set_layout;
+        ds_include_samplers = false;
     } else {
         ds_index_ptr = &r->descriptor_set_index;
-        ds_count = r->descriptor_set_count;
-        ds_array = r->descriptor_sets;
+        ds_count_ptr = &r->descriptor_set_count;
+        ds_array_ptr = &r->descriptor_sets;
+        ds_layout = r->descriptor_set_layout;
+        ds_include_samplers = true;
     }
 #endif
 
@@ -459,7 +577,7 @@ void pgraph_vk_update_descriptor_sets(PGRAPHState *pg)
         r->need_descriptor_rebind ||
         !(*ds_index_ptr);
 
-    if (need_new_descriptor_set && *ds_index_ptr >= ds_count) {
+    if (need_new_descriptor_set && *ds_index_ptr >= *ds_count_ptr) {
         pgraph_vk_finish(pg, VK_FINISH_REASON_NEED_BUFFER_SPACE);
 #if OPT_ALWAYS_DEFERRED_FENCES
         pgraph_vk_flush_all_frames(pg);
@@ -524,7 +642,7 @@ void pgraph_vk_update_descriptor_sets(PGRAPHState *pg)
     OPT_STAT_INC(desc_rebind_full);
 #endif
 
-    if (*ds_index_ptr >= ds_count) {
+    if (*ds_index_ptr >= *ds_count_ptr) {
         pgraph_vk_finish(pg, VK_FINISH_REASON_NEED_BUFFER_SPACE);
 #if OPT_ALWAYS_DEFERRED_FENCES
         pgraph_vk_flush_all_frames(pg);
@@ -532,7 +650,7 @@ void pgraph_vk_update_descriptor_sets(PGRAPHState *pg)
         *ds_index_ptr = 0;
     }
 
-    assert(*ds_index_ptr < ds_count);
+    assert(*ds_index_ptr < *ds_count_ptr);
 
 #if OPT_BINDLESS_TEXTURES
     if (r->bindless_textures_supported) {
@@ -546,7 +664,7 @@ void pgraph_vk_update_descriptor_sets(PGRAPHState *pg)
             };
             descriptor_writes[i] = (VkWriteDescriptorSet){
                 .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .dstSet = ds_array[*ds_index_ptr],
+                .dstSet = (*ds_array_ptr)[*ds_index_ptr],
                 .dstBinding = i,
                 .dstArrayElement = 0,
                 .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
@@ -568,7 +686,7 @@ void pgraph_vk_update_descriptor_sets(PGRAPHState *pg)
             };
             descriptor_writes[i] = (VkWriteDescriptorSet){
                 .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .dstSet = ds_array[*ds_index_ptr],
+                .dstSet = (*ds_array_ptr)[*ds_index_ptr],
                 .dstBinding = i,
                 .dstArrayElement = 0,
                 .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
@@ -589,7 +707,7 @@ void pgraph_vk_update_descriptor_sets(PGRAPHState *pg)
             };
             descriptor_writes[i] = (VkWriteDescriptorSet){
                 .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .dstSet = ds_array[*ds_index_ptr],
+                .dstSet = (*ds_array_ptr)[*ds_index_ptr],
                 .dstBinding = i == 0 ? VSH_UBO_BINDING : PSH_UBO_BINDING,
                 .dstArrayElement = 0,
                 .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
@@ -615,7 +733,7 @@ void pgraph_vk_update_descriptor_sets(PGRAPHState *pg)
             };
             descriptor_writes[2 + i] = (VkWriteDescriptorSet){
                 .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .dstSet = ds_array[*ds_index_ptr],
+                .dstSet = (*ds_array_ptr)[*ds_index_ptr],
                 .dstBinding = PSH_TEX_BINDING + i,
                 .dstArrayElement = 0,
                 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -1285,6 +1403,9 @@ void pgraph_vk_init_shaders(PGRAPHState *pg)
     PGRAPHVkState *r = pg->vk_renderer_state;
 
     r->descriptor_set_count = NUM_GFX_DESCRIPTOR_SETS;
+    r->descriptor_set_base_count = NUM_GFX_DESCRIPTOR_SETS;
+    r->descriptor_overflow_pools =
+        g_array_new(FALSE, FALSE, sizeof(VkDescriptorPool));
     pgraph_vk_init_glsl_compiler();
     create_descriptor_pool(pg);
     create_descriptor_set_layout(pg);
@@ -1327,6 +1448,17 @@ void pgraph_vk_finalize_shaders(PGRAPHState *pg)
 #if OPT_BINDLESS_TEXTURES
     destroy_bindless_descriptor_resources(pg);
 #endif
+
+    if (r->descriptor_overflow_pools) {
+        for (guint i = 0; i < r->descriptor_overflow_pools->len; i++) {
+            VkDescriptorPool pool = g_array_index(
+                r->descriptor_overflow_pools, VkDescriptorPool, i);
+            vkDestroyDescriptorPool(r->device, pool, NULL);
+        }
+        g_array_free(r->descriptor_overflow_pools, TRUE);
+        r->descriptor_overflow_pools = NULL;
+    }
+
     destroy_descriptor_sets(pg);
     destroy_descriptor_set_layout(pg);
     destroy_descriptor_pool(pg);

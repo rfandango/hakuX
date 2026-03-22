@@ -80,9 +80,9 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
 
     const size_t mib = 1024 * 1024;
     size_t vram_size = memory_region_size(d->vram);
-    size_t staging_size = vram_size;
-    if (staging_size < (16 * mib)) {
-        staging_size = 16 * mib;
+    size_t staging_size = vram_size * 2;
+    if (staging_size < (32 * mib)) {
+        staging_size = 32 * mib;
     }
     size_t compute_size = vram_size * 2;
     if (compute_size < (64 * mib)) {
@@ -186,9 +186,9 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
     int nframes = xemu_get_submit_frames();
 
     size_t uniform_size;
-    if (nframes >= 3)      uniform_size = 32 * mib;
-    else if (nframes == 2) uniform_size = 16 * mib;
-    else                   uniform_size = 8 * mib;
+    if (nframes >= 3)      uniform_size = 64 * mib;
+    else if (nframes == 2) uniform_size = 32 * mib;
+    else                   uniform_size = 16 * mib;
 
     r->storage_buffers[BUFFER_UNIFORM] = (StorageBuffer){
         .alloc_info = device_alloc_create_info,
@@ -240,20 +240,20 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
 #if OPT_ALWAYS_DEFERRED_FENCES
     size_t idx_max, vtx_max, uni_max, stg_max;
     if (nframes >= 3) {
+        idx_max = 32 * mib;
+        vtx_max = 128 * mib;
+        uni_max = 64 * mib;
+        stg_max = 128 * mib;
+    } else if (nframes == 2) {
         idx_max = 16 * mib;
         vtx_max = 64 * mib;
         uni_max = 32 * mib;
         stg_max = 64 * mib;
-    } else if (nframes == 2) {
+    } else {
         idx_max = 8 * mib;
         vtx_max = 32 * mib;
         uni_max = 16 * mib;
         stg_max = 32 * mib;
-    } else {
-        idx_max = 4 * mib;
-        vtx_max = 16 * mib;
-        uni_max = 8 * mib;
-        stg_max = 16 * mib;
     }
 
     for (int i = 0; i < NUM_SUBMIT_FRAMES; i++) {
@@ -469,3 +469,28 @@ void pgraph_vk_staging_reset(PGRAPHState *pg)
     PGRAPHVkState *r = pg->vk_renderer_state;
     get_staging_buffer(r, BUFFER_STAGING_SRC)->buffer_offset = 0;
 }
+
+#if OPT_ALWAYS_DEFERRED_FENCES
+bool pgraph_vk_staging_reclaim_any(PGRAPHState *pg)
+{
+    PGRAPHVkState *r = pg->vk_renderer_state;
+
+    for (int i = 0; i < r->num_active_frames; i++) {
+        if (i == r->current_frame) {
+            continue;
+        }
+        if (!qatomic_read(&r->frame_submitted[i])) {
+            continue;
+        }
+        VkResult result = vkGetFenceStatus(r->device, r->frame_fences[i]);
+        if (result == VK_SUCCESS) {
+            r->frame_staging[i].staging_src.buffer_offset = 0;
+            r->frame_staging[i].index_staging.buffer_offset = 0;
+            r->frame_staging[i].vertex_inline_staging.buffer_offset = 0;
+            r->frame_staging[i].uniform_staging.buffer_offset = 0;
+            return true;
+        }
+    }
+    return false;
+}
+#endif
