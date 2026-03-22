@@ -1134,11 +1134,17 @@ extern "C" int SDL_main(int argc, char* argv[]) {
       return 1;
     }
     LogInfo("SDL_main: qemu thread started");
-    (void)qemu_thread;
     xemu_android_display_wait_ready();
     LogInfo("SDL_main: display ready, entering render loop");
     xemu_android_display_loop();
-    return 0;
+
+    LogInfo("SDL_main: display loop exited, waiting for QEMU thread");
+    int qemu_rc = 0;
+    SDL_WaitThread(qemu_thread, &qemu_rc);
+    LogInfoInt("SDL_main: QEMU thread exited with %d", qemu_rc);
+
+    LogInfo("SDL_main: QEMU cleanup complete, terminating process");
+    _exit(qemu_rc);
   }
 
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);

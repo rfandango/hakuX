@@ -869,6 +869,8 @@ void sdl2_poll_events(struct sdl2_console *scon)
             break;
 #ifdef __ANDROID__
         case SDL_APP_TERMINATING:
+            shutdown_action = SHUTDOWN_ACTION_POWEROFF;
+            qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_UI);
             g_android_should_quit = true;
             __android_log_print(ANDROID_LOG_INFO, "xemu-android",
                                 "android: app terminating");
@@ -1382,8 +1384,11 @@ void xemu_android_display_wait_ready(void)
 
 void xemu_android_display_loop(void)
 {
-    // Mirror the desktop main-loop rendering path.
 #ifdef __ANDROID__
+    g_android_should_quit = false;
+    g_android_paused = false;
+    g_android_vm_pause_requested = false;
+    g_android_vm_resume_requested = false;
     __android_log_print(ANDROID_LOG_INFO, "xemu-android",
                         "xemu_android_display_loop: start");
 #endif
@@ -1466,6 +1471,8 @@ void xemu_android_resume_emulation(void)
 
 void xemu_android_request_exit(void)
 {
+    shutdown_action = SHUTDOWN_ACTION_POWEROFF;
+    qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_UI);
     g_android_should_quit = true;
 }
 #endif

@@ -43,6 +43,8 @@
 #endif
 #endif
 
+static int g_qemu_exit_status;
+
 static void *qemu_default_main(void *opaque)
 {
     int status;
@@ -54,7 +56,12 @@ static void *qemu_default_main(void *opaque)
     bql_unlock();
     replay_mutex_unlock();
 
+#ifdef __ANDROID__
+    g_qemu_exit_status = status;
+    return NULL;
+#else
     exit(status);
+#endif
 }
 
 int (*qemu_main)(void);
@@ -69,7 +76,11 @@ static int qemu_xemu_main(void)
     replay_mutex_unlock();
 
     qemu_default_main(NULL);
+#ifdef __ANDROID__
+    return g_qemu_exit_status;
+#else
     g_assert_not_reached();
+#endif
 }
 
 int (*qemu_main)(void) = qemu_xemu_main;
