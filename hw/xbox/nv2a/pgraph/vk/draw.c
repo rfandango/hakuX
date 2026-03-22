@@ -5430,12 +5430,18 @@ void pgraph_vk_set_surface_dirty(PGRAPHState *pg, bool color, bool zeta)
 
     if (r->color_binding) {
         r->color_binding->draw_dirty |= color;
+        if (color) {
+            r->color_binding->draw_generation++;
+        }
         r->color_binding->frame_time = pg->frame_time;
         r->color_binding->cleared = false;
     }
 
     if (r->zeta_binding) {
         r->zeta_binding->draw_dirty |= zeta;
+        if (zeta) {
+            r->zeta_binding->draw_generation++;
+        }
         r->zeta_binding->frame_time = pg->frame_time;
         r->zeta_binding->cleared = false;
     }

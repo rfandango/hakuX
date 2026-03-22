@@ -172,6 +172,16 @@ static bool download_surface_record_deferred(NV2AState *d,
 
     bool downscale = (pg->surface_scale_factor != 1);
 
+    unsigned int dl_row_start = 0;
+    unsigned int dl_row_count = surface->height;
+    bool partial = surface->download_row_count > 0 &&
+                   surface->download_row_count < surface->height &&
+                   !is_ds && !surface->swizzle && !downscale;
+    if (partial) {
+        dl_row_start = surface->download_row_start;
+        dl_row_count = surface->download_row_count;
+    }
+
     if (r->num_deferred_downloads >= MAX_DEFERRED_DOWNLOADS) {
         return false;
     }
@@ -179,7 +189,7 @@ static bool download_surface_record_deferred(NV2AState *d,
     size_t staging_size = is_ds
         ? (4 * surface->width * surface->height)
         : (surface->host_fmt.host_bytes_per_pixel *
-           surface->width * surface->height);
+           surface->width * dl_row_count);
 
     VkDeviceSize aligned_offset = ROUND_UP(r->staging_dst_offset, 16);
     if (aligned_offset + staging_size >
@@ -382,8 +392,9 @@ static bool download_surface_record_deferred(NV2AState *d,
                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
             surface_image_loc = surface->image_scratch;
         } else {
+            copy_regions[0].imageOffset.y = partial ? dl_row_start : 0;
             copy_regions[0].imageExtent =
-                (VkExtent3D){ scaled_width, scaled_height, 1 };
+                (VkExtent3D){ scaled_width, partial ? dl_row_count : scaled_height, 1 };
             surface_image_loc = surface->image;
         }
 
@@ -434,9 +445,9 @@ static bool download_surface_record_deferred(NV2AState *d,
         &r->deferred_downloads[r->num_deferred_downloads++];
     dl->staging_offset = aligned_offset;
     dl->download_size = staging_size;
-    dl->dest_ptr = pixels;
+    dl->dest_ptr = partial ? pixels + dl_row_start * surface->pitch : pixels;
     dl->width = surface->width;
-    dl->height = surface->height;
+    dl->height = partial ? dl_row_count : surface->height;
     dl->pitch = surface->pitch;
     dl->bytes_per_pixel = surface->fmt.bytes_per_pixel;
     dl->swizzle = surface->swizzle;
@@ -559,6 +570,19 @@ static void download_surface_to_buffer(NV2AState *d, SurfaceBinding *surface,
 
     bool downscale = (pg->surface_scale_factor != 1);
 
+    unsigned int dl_row_start = 0;
+    unsigned int dl_row_count = surface->height;
+    bool partial = surface->download_row_count > 0 &&
+                   surface->download_row_count < surface->height &&
+                   !use_compute_to_convert_depth_stencil_format &&
+                   !use_compute_to_swizzle &&
+                   !surface->swizzle && !downscale;
+    if (partial) {
+        dl_row_start = surface->download_row_start;
+        dl_row_count = surface->download_row_count;
+        pixels += dl_row_start * surface->pitch;
+    }
+
     trace_nv2a_pgraph_surface_download(
         surface->color ? "COLOR" : "ZETA",
         surface->swizzle ? "sz" : "lin", surface->vram_addr,
@@ -646,8 +670,9 @@ static void download_surface_to_buffer(NV2AState *d, SurfaceBinding *surface,
             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         surface_image_loc = surface->image_scratch;
     } else {
+        copy_regions[0].imageOffset.y = partial ? dl_row_start : 0;
         copy_regions[0].imageExtent =
-            (VkExtent3D){ scaled_width, scaled_height, 1 };
+            (VkExtent3D){ scaled_width, partial ? dl_row_count : scaled_height, 1 };
         surface_image_loc = surface->image;
     }
 
@@ -667,8 +692,9 @@ static void download_surface_to_buffer(NV2AState *d, SurfaceBinding *surface,
     // Copy image to staging buffer, or to compute_dst if we need to pack it
     //
 
+    unsigned int dl_height = partial ? dl_row_count : surface->height;
     size_t downloaded_image_size = surface->host_fmt.host_bytes_per_pixel *
-                                   surface->width * surface->height;
+                                   surface->width * dl_height;
     assert((downloaded_image_size) <=
            r->storage_buffers[BUFFER_STAGING_DST].buffer_size);
 
@@ -918,7 +944,7 @@ static void download_surface_to_buffer(NV2AState *d, SurfaceBinding *surface,
     } else {
         memcpy_image(gl_read_buf, mapped_memory_ptr, surface->pitch,
                      surface->width * surface->fmt.bytes_per_pixel,
-                     surface->height);
+                     dl_height);
 
         if (surface->swizzle) {
             swizzle_rect(swizzle_buf, surface->width, surface->height, pixels,
@@ -948,7 +974,9 @@ static void download_surface(NV2AState *d, SurfaceBinding *surface, bool force)
                                    DIRTY_MEMORY_NV2A_TEX);
 
     surface->download_pending = false;
+    surface->download_row_count = 0;
     surface->draw_dirty = false;
+    surface->download_generation = surface->draw_generation;
 }
 
 void pgraph_vk_wait_for_surface_download(SurfaceBinding *surface)
@@ -969,6 +997,7 @@ void pgraph_vk_wait_for_surface_download(SurfaceBinding *surface)
     if (require_download) {
         qemu_mutex_lock(&d->pfifo.lock);
         qemu_event_reset(&d->pgraph.vk_renderer_state->downloads_complete);
+        surface->download_row_count = 0;
         qatomic_set(&surface->download_pending, true);
         qatomic_set(&d->pgraph.vk_renderer_state->downloads_pending, true);
         pfifo_kick(d);
@@ -1044,7 +1073,9 @@ void pgraph_vk_process_pending_downloads(NV2AState *d)
                                        surface->pitch * surface->height,
                                        DIRTY_MEMORY_NV2A_TEX);
         surface->download_pending = false;
+        surface->download_row_count = 0;
         surface->draw_dirty = false;
+        surface->download_generation = surface->draw_generation;
     }
 
     qatomic_set(&r->downloads_pending, false);
@@ -1118,7 +1149,9 @@ void pgraph_vk_download_dirty_surfaces(NV2AState *d)
                                        surface->pitch * surface->height,
                                        DIRTY_MEMORY_NV2A_TEX);
         surface->download_pending = false;
+        surface->download_row_count = 0;
         surface->draw_dirty = false;
+        surface->download_generation = surface->draw_generation;
     }
 
     qatomic_set(&r->download_dirty_surfaces_pending, false);
@@ -1148,8 +1181,44 @@ static void surface_access_callback(void *opaque, MemoryRegion *mr, hwaddr addr,
             trace_nv2a_pgraph_surface_cpu_read(surface->vram_addr, offset);
         }
 
-        if (surface->draw_dirty) {
-            surface->download_pending = true;
+        if (surface->draw_dirty &&
+            surface->download_generation != surface->draw_generation) {
+
+            unsigned int row_start = 0;
+            unsigned int row_count = surface->height;
+
+            if (!surface->swizzle && surface->pitch > 0 &&
+                surface->host_fmt.vk_format != VK_FORMAT_D24_UNORM_S8_UINT &&
+                surface->host_fmt.vk_format != VK_FORMAT_D32_SFLOAT_S8_UINT) {
+                hwaddr surf_offset = (addr > surface->vram_addr)
+                    ? addr - surface->vram_addr : 0;
+                hwaddr surf_end = addr + len - surface->vram_addr;
+                if (surf_end > surface->size) {
+                    surf_end = surface->size;
+                }
+
+                row_start = surf_offset / surface->pitch;
+                unsigned int row_end =
+                    (surf_end + surface->pitch - 1) / surface->pitch;
+                if (row_end > surface->height) {
+                    row_end = surface->height;
+                }
+                row_count = row_end - row_start;
+            }
+
+            if (surface->download_pending) {
+                unsigned int existing_end =
+                    surface->download_row_start + surface->download_row_count;
+                unsigned int new_end = row_start + row_count;
+                surface->download_row_start =
+                    MIN(surface->download_row_start, row_start);
+                surface->download_row_count =
+                    MAX(existing_end, new_end) - surface->download_row_start;
+            } else {
+                surface->download_row_start = row_start;
+                surface->download_row_count = row_count;
+                surface->download_pending = true;
+            }
             wait_for_downloads = true;
         }
 

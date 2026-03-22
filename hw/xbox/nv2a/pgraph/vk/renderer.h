@@ -273,6 +273,11 @@ typedef struct SurfaceBinding {
     bool download_pending;
     bool upload_pending;
 
+    unsigned int download_row_start;
+    unsigned int download_row_count; // 0 = full surface
+    uint32_t draw_generation;
+    uint32_t download_generation;
+
     BasicSurfaceFormatInfo fmt;
     SurfaceFormatInfo host_fmt;
 
@@ -305,17 +310,6 @@ typedef struct DeferredSurfaceDownload {
     BasicSurfaceFormatInfo fmt;
     bool use_compute_to_swizzle;
 } DeferredSurfaceDownload;
-
-typedef struct DownloadCallbackData {
-    DeferredSurfaceDownload downloads[MAX_DEFERRED_DOWNLOADS];
-    int num_downloads;
-    struct {
-        hwaddr vram_addr;
-        size_t dirty_size;
-    } dirty_regions[MAX_DEFERRED_DOWNLOADS];
-    MemoryRegion *vram;
-    QemuEvent *downloads_complete;
-} DownloadCallbackData;
 
 typedef struct ShaderModuleInfo {
     int refcnt;
