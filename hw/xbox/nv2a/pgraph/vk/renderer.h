@@ -643,7 +643,7 @@ typedef struct TextureKey {
     uint32_t max_anisotropy;
 } TextureKey;
 
-#define IMAGE_POOL_MAX_SIZE 32
+#define IMAGE_POOL_MAX_SIZE 128
 
 typedef struct TextureImageConfig {
     VkFormat format;
@@ -660,6 +660,23 @@ typedef struct PooledImage {
     VkImage image;
     VmaAllocation allocation;
 } PooledImage;
+
+#define SURFACE_IMAGE_POOL_MAX_SIZE 64
+
+typedef struct SurfaceImageConfig {
+    VkFormat format;
+    uint32_t width, height;
+    VkImageUsageFlags usage;
+} SurfaceImageConfig;
+
+typedef struct PooledSurfaceImage {
+    QTAILQ_ENTRY(PooledSurfaceImage) entry;
+    SurfaceImageConfig config;
+    VkImage image;
+    VmaAllocation allocation;
+    VkImage image_scratch;
+    VmaAllocation allocation_scratch;
+} PooledSurfaceImage;
 
 typedef struct TextureBinding {
     LruNode node;
@@ -1165,6 +1182,8 @@ typedef struct PGRAPHVkState {
     bool texture_bindings_changed;
     QTAILQ_HEAD(, PooledImage) image_pool;
     int image_pool_count;
+    QTAILQ_HEAD(, PooledSurfaceImage) surface_image_pool;
+    int surface_image_pool_count;
     uint32_t last_texture_state_gen;
     uint32_t texture_vram_gen;
     uint32_t last_texture_vram_gen;
@@ -1397,6 +1416,8 @@ VkDeviceSize pgraph_vk_update_vertex_inline_buffer(PGRAPHState *pg, void **data,
 void pgraph_vk_init_surfaces(PGRAPHState *pg);
 void pgraph_vk_finalize_surfaces(PGRAPHState *pg);
 void pgraph_vk_surface_flush(NV2AState *d);
+void pgraph_vk_surface_image_pool_init(PGRAPHVkState *r);
+void pgraph_vk_surface_image_pool_drain(PGRAPHVkState *r);
 void pgraph_vk_process_pending_downloads(NV2AState *d);
 void pgraph_vk_surface_download_if_dirty(NV2AState *d, SurfaceBinding *surface);
 SurfaceBinding *pgraph_vk_surface_get_within(NV2AState *d, hwaddr addr);

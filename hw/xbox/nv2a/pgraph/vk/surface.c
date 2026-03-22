@@ -1490,6 +1490,83 @@ static void set_surface_label(PGRAPHState *pg, SurfaceBinding const *surface)
     }
 }
 
+void pgraph_vk_surface_image_pool_init(PGRAPHVkState *r)
+{
+    QTAILQ_INIT(&r->surface_image_pool);
+    r->surface_image_pool_count = 0;
+}
+
+static bool surface_image_pool_config_match(const SurfaceImageConfig *a,
+                                            const SurfaceImageConfig *b)
+{
+    return a->format == b->format &&
+           a->width == b->width &&
+           a->height == b->height &&
+           a->usage == b->usage;
+}
+
+static bool surface_image_pool_acquire(PGRAPHVkState *r,
+                                       const SurfaceImageConfig *config,
+                                       VkImage *out_image,
+                                       VmaAllocation *out_alloc,
+                                       VkImage *out_scratch,
+                                       VmaAllocation *out_scratch_alloc)
+{
+    PooledSurfaceImage *entry;
+    QTAILQ_FOREACH(entry, &r->surface_image_pool, entry) {
+        if (surface_image_pool_config_match(&entry->config, config)) {
+            *out_image = entry->image;
+            *out_alloc = entry->allocation;
+            *out_scratch = entry->image_scratch;
+            *out_scratch_alloc = entry->allocation_scratch;
+            QTAILQ_REMOVE(&r->surface_image_pool, entry, entry);
+            g_free(entry);
+            r->surface_image_pool_count--;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void surface_image_pool_release(PGRAPHVkState *r,
+                                       const SurfaceImageConfig *config,
+                                       VkImage image, VmaAllocation alloc,
+                                       VkImage scratch, VmaAllocation scratch_alloc)
+{
+    if (r->surface_image_pool_count >= SURFACE_IMAGE_POOL_MAX_SIZE) {
+        PooledSurfaceImage *oldest = QTAILQ_FIRST(&r->surface_image_pool);
+        assert(oldest != NULL);
+        QTAILQ_REMOVE(&r->surface_image_pool, oldest, entry);
+        vmaDestroyImage(r->allocator, oldest->image, oldest->allocation);
+        vmaDestroyImage(r->allocator, oldest->image_scratch,
+                        oldest->allocation_scratch);
+        g_free(oldest);
+        r->surface_image_pool_count--;
+    }
+
+    PooledSurfaceImage *pe = g_malloc(sizeof(PooledSurfaceImage));
+    pe->config = *config;
+    pe->image = image;
+    pe->allocation = alloc;
+    pe->image_scratch = scratch;
+    pe->allocation_scratch = scratch_alloc;
+    QTAILQ_INSERT_TAIL(&r->surface_image_pool, pe, entry);
+    r->surface_image_pool_count++;
+}
+
+void pgraph_vk_surface_image_pool_drain(PGRAPHVkState *r)
+{
+    PooledSurfaceImage *entry, *next;
+    QTAILQ_FOREACH_SAFE(entry, &r->surface_image_pool, entry, next) {
+        QTAILQ_REMOVE(&r->surface_image_pool, entry, entry);
+        vmaDestroyImage(r->allocator, entry->image, entry->allocation);
+        vmaDestroyImage(r->allocator, entry->image_scratch,
+                        entry->allocation_scratch);
+        g_free(entry);
+    }
+    r->surface_image_pool_count = 0;
+}
+
 static void create_surface_image(PGRAPHState *pg, SurfaceBinding *surface)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
@@ -1505,36 +1582,65 @@ static void create_surface_image(PGRAPHState *pg, SurfaceBinding *surface)
         "Creating new surface image width=%d height=%d @ %08" HWADDR_PRIx,
         width, height, surface->vram_addr);
 
-    VkImageCreateInfo image_create_info = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .imageType = VK_IMAGE_TYPE_2D,
-        .extent.width = width,
-        .extent.height = height,
-        .extent.depth = 1,
-        .mipLevels = 1,
-        .arrayLayers = 1,
+    VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT |
+                              VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                              VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                              surface->host_fmt.usage;
+
+    SurfaceImageConfig pool_cfg = {
         .format = surface->host_fmt.vk_format,
-        .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .usage = VK_IMAGE_USAGE_SAMPLED_BIT |
-                 VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                 VK_IMAGE_USAGE_TRANSFER_SRC_BIT | surface->host_fmt.usage,
-        .samples = VK_SAMPLE_COUNT_1_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .width = width,
+        .height = height,
+        .usage = usage,
     };
 
-    VmaAllocationCreateInfo alloc_create_info = {
-        .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
-    };
+    if (surface_image_pool_acquire(r, &pool_cfg,
+                                   &surface->image, &surface->allocation,
+                                   &surface->image_scratch,
+                                   &surface->allocation_scratch)) {
+        surface->image_scratch_current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    } else {
+        VkImageCreateInfo image_create_info = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            .imageType = VK_IMAGE_TYPE_2D,
+            .extent.width = width,
+            .extent.height = height,
+            .extent.depth = 1,
+            .mipLevels = 1,
+            .arrayLayers = 1,
+            .format = surface->host_fmt.vk_format,
+            .tiling = VK_IMAGE_TILING_OPTIMAL,
+            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .usage = usage,
+            .samples = VK_SAMPLE_COUNT_1_BIT,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        };
 
-    VK_CHECK(vmaCreateImage(r->allocator, &image_create_info,
-                            &alloc_create_info, &surface->image,
-                            &surface->allocation, NULL));
+        VmaAllocationCreateInfo alloc_create_info = {
+            .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+        };
 
-    VK_CHECK(vmaCreateImage(r->allocator, &image_create_info,
-                            &alloc_create_info, &surface->image_scratch,
-                            &surface->allocation_scratch, NULL));
-    surface->image_scratch_current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+        VkResult res = vmaCreateImage(r->allocator, &image_create_info,
+                                      &alloc_create_info, &surface->image,
+                                      &surface->allocation, NULL);
+        if (res != VK_SUCCESS) {
+            pgraph_vk_surface_image_pool_drain(r);
+            VK_CHECK(vmaCreateImage(r->allocator, &image_create_info,
+                                    &alloc_create_info, &surface->image,
+                                    &surface->allocation, NULL));
+        }
+
+        res = vmaCreateImage(r->allocator, &image_create_info,
+                             &alloc_create_info, &surface->image_scratch,
+                             &surface->allocation_scratch, NULL);
+        if (res != VK_SUCCESS) {
+            pgraph_vk_surface_image_pool_drain(r);
+            VK_CHECK(vmaCreateImage(r->allocator, &image_create_info,
+                                    &alloc_create_info, &surface->image_scratch,
+                                    &surface->allocation_scratch, NULL));
+        }
+        surface->image_scratch_current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    }
 
     VkImageViewCreateInfo image_view_create_info = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -1593,12 +1699,28 @@ static void destroy_surface_image(PGRAPHVkState *r, SurfaceBinding *surface)
     vkDestroyImageView(r->device, surface->image_view, NULL);
     surface->image_view = VK_NULL_HANDLE;
 
-    vmaDestroyImage(r->allocator, surface->image, surface->allocation);
+    unsigned int w = surface->width ? surface->width : 1;
+    unsigned int h = surface->height ? surface->height : 1;
+    unsigned int sf = g_nv2a->pgraph.surface_scale_factor;
+    if (sf > 1) {
+        w *= sf;
+        h *= sf;
+    }
+    SurfaceImageConfig pool_cfg = {
+        .format = surface->host_fmt.vk_format,
+        .width = w,
+        .height = h,
+        .usage = VK_IMAGE_USAGE_SAMPLED_BIT |
+                 VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                 VK_IMAGE_USAGE_TRANSFER_SRC_BIT | surface->host_fmt.usage,
+    };
+    surface_image_pool_release(r, &pool_cfg,
+                               surface->image, surface->allocation,
+                               surface->image_scratch,
+                               surface->allocation_scratch);
+
     surface->image = VK_NULL_HANDLE;
     surface->allocation = VK_NULL_HANDLE;
-
-    vmaDestroyImage(r->allocator, surface->image_scratch,
-                    surface->allocation_scratch);
     surface->image_scratch = VK_NULL_HANDLE;
     surface->allocation_scratch = VK_NULL_HANDLE;
 }
@@ -2784,6 +2906,7 @@ void pgraph_vk_surface_flush(NV2AState *d)
     }
 
     prune_invalid_surfaces(r, 0);
+    pgraph_vk_surface_image_pool_drain(r);
 
     pgraph_vk_reload_surface_scale_factor(pg);
 }

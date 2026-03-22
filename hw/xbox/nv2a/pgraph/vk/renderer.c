@@ -197,6 +197,7 @@ static void pgraph_vk_init(NV2AState *d, Error **errp)
     }
     VK_LOG_ERROR("init: surfaces");
     pgraph_vk_init_surfaces(pg);
+    pgraph_vk_surface_image_pool_init(pg->vk_renderer_state);
     VK_LOG_ERROR("init: shaders");
     pgraph_vk_init_shaders(pg);
     VK_LOG_ERROR("init: pipelines");
@@ -265,6 +266,7 @@ static void pgraph_vk_finalize(NV2AState *d)
     pgraph_vk_finalize_pipelines(pg);
     pgraph_vk_finalize_shaders(pg);
     pgraph_vk_finalize_surfaces(pg);
+    pgraph_vk_surface_image_pool_drain(pg->vk_renderer_state);
     pgraph_vk_finalize_buffers(d);
     pgraph_vk_finalize_command_buffers(pg);
     pgraph_vk_finalize_instance(pg);
