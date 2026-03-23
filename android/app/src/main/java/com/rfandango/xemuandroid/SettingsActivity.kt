@@ -195,6 +195,7 @@ class SettingsActivity : AppCompatActivity() {
     setupResolutionScale()
     setupFilteringPicker()
     setupAspectRatioPicker()
+    setupEnvVars()
 
     refreshDriverStatus()
   }
@@ -270,6 +271,16 @@ class SettingsActivity : AppCompatActivity() {
         }
         .setNegativeButton(android.R.string.cancel, null)
         .show()
+    }
+  }
+
+  private fun setupEnvVars() {
+    val editText = findViewById<android.widget.EditText>(R.id.edit_env_vars)
+    val btnSave = findViewById<MaterialButton>(R.id.btn_save_env_vars)
+    editText.setText(prefs.getString("env_vars", "") ?: "")
+    btnSave.setOnClickListener {
+      prefs.edit().putString("env_vars", editText.text.toString()).apply()
+      Toast.makeText(this, "Saved. Restart app to apply.", Toast.LENGTH_SHORT).show()
     }
   }
 

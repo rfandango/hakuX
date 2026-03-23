@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 #include <fcntl.h>
@@ -652,6 +653,22 @@ static SetupFiles SyncSetupFiles() {
   EnsureDirExists(base);
   out.eeprom = base + "/eeprom.bin";
   out.inline_aio_flag_path = base + "/inline_aio_required.flag";
+
+  std::string envVars = GetPrefString(env, activity, "env_vars");
+  if (!envVars.empty()) {
+    std::istringstream stream(envVars);
+    std::string line;
+    while (std::getline(stream, line)) {
+      if (line.empty()) continue;
+      auto eq = line.find('=');
+      if (eq == std::string::npos || eq == 0) continue;
+      std::string key = line.substr(0, eq);
+      std::string val = line.substr(eq + 1);
+      setenv(key.c_str(), val.c_str(), 1);
+      __android_log_print(ANDROID_LOG_INFO, kLogTag,
+                          "env: %s=%s", key.c_str(), val.c_str());
+    }
+  }
 
   const std::string mcpxPath = GetPrefString(env, activity, "mcpxPath");
   const std::string flashPath = GetPrefString(env, activity, "flashPath");

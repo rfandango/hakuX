@@ -167,4 +167,9 @@
 
   <string name="settings_validation_layers">Vulkan validation layers</string>
   <string name="settings_validation_layers_desc">Enable Vulkan validation for graphics debugging. Significant performance impact. Requires app restart.</string>
+
+  <string name="settings_env_vars_title">Environment Variables</string>
+  <string name="settings_env_vars_desc">Set custom environment variables applied at startup. One per line: KEY=VALUE. Requires app restart.</string>
+  <string name="settings_env_vars_hint">e.g. MESA_VK_WSI_DEBUG=sw</string>
+  <string name="settings_env_vars_save">Save</string>
 </resources>

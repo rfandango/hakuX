@@ -163,6 +163,66 @@
         </LinearLayout>
       </com.google.android.material.card.MaterialCardView>
 
+      <!-- Environment Variables -->
+      <com.google.android.material.card.MaterialCardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        app:cardBackgroundColor="@color/xemu_surface"
+        app:cardCornerRadius="28dp"
+        app:cardElevation="8dp"
+        app:strokeColor="@color/xemu_outline_variant"
+        app:strokeWidth="1dp">
+
+        <LinearLayout
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"
+          android:orientation="vertical"
+          android:padding="24dp">
+
+          <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_env_vars_title"
+            android:textAppearance="@style/TextAppearance.Material3.TitleLarge" />
+
+          <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/settings_env_vars_desc"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            android:textColor="@color/xemu_text_muted" />
+
+          <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:hint="@string/settings_env_vars_hint"
+            app:boxStrokeColor="@color/xemu_outline_variant">
+
+            <com.google.android.material.textfield.TextInputEditText
+              android:id="@+id/edit_env_vars"
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:fontFamily="monospace"
+              android:gravity="top|start"
+              android:inputType="textMultiLine"
+              android:minLines="3"
+              android:textColor="@color/xemu_text_muted"
+              android:textSize="13sp" />
+          </com.google.android.material.textfield.TextInputLayout>
+
+          <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_save_env_vars"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/settings_env_vars_save" />
+        </LinearLayout>
+      </com.google.android.material.card.MaterialCardView>
+
       <!-- Hard Disk Section -->
       <com.google.android.material.card.MaterialCardView
         android:layout_width="match_parent"
