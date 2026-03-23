@@ -923,7 +923,12 @@ void pgraph_init(NV2AState *d)
 
     for (int i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
         VertexAttribute *attribute = &pg->vertex_attributes[i];
-        attribute->inline_buffer = (float*)g_malloc(NV2A_MAX_BATCH_LENGTH
+#ifdef __ANDROID__
+        size_t inline_batch_cap = 32768;
+#else
+        size_t inline_batch_cap = NV2A_MAX_BATCH_LENGTH;
+#endif
+        attribute->inline_buffer = (float*)g_malloc(inline_batch_cap
                                               * sizeof(float) * 4);
         attribute->inline_buffer_populated = false;
     }

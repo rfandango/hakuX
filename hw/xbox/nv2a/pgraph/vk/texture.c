@@ -1885,7 +1885,8 @@ static void image_pool_release(PGRAPHVkState *r,
                                const TextureImageConfig *config,
                                VkImage image, VmaAllocation allocation)
 {
-    if (r->image_pool_count >= IMAGE_POOL_MAX_SIZE) {
+    int pool_max = r->image_pool_max ? r->image_pool_max : IMAGE_POOL_MAX_SIZE;
+    if (r->image_pool_count >= pool_max) {
         PooledImage *oldest = QTAILQ_FIRST(&r->image_pool);
         assert(oldest != NULL);
         QTAILQ_REMOVE(&r->image_pool, oldest, entry);
@@ -1993,8 +1994,10 @@ static bool texture_cache_entry_compare(Lru *lru, LruNode *node,
 
 static void texture_cache_init(PGRAPHVkState *r)
 {
-    const size_t texture_cache_size = 1024;
-    lru_init(&r->texture_cache, 2048);
+    const size_t texture_cache_size =
+        r->texture_cache_target ? r->texture_cache_target : 1024;
+    size_t texture_hash_buckets = texture_cache_size * 2;
+    lru_init(&r->texture_cache, texture_hash_buckets);
     QTAILQ_INIT(&r->texture_active_list);
     image_pool_init(r);
     r->texture_cache_entries = g_malloc_n(texture_cache_size, sizeof(TextureBinding));

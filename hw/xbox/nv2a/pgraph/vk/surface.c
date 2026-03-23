@@ -1533,7 +1533,9 @@ static void surface_image_pool_release(PGRAPHVkState *r,
                                        VkImage image, VmaAllocation alloc,
                                        VkImage scratch, VmaAllocation scratch_alloc)
 {
-    if (r->surface_image_pool_count >= SURFACE_IMAGE_POOL_MAX_SIZE) {
+    int pool_max = r->surface_image_pool_max ? r->surface_image_pool_max
+                                              : SURFACE_IMAGE_POOL_MAX_SIZE;
+    if (r->surface_image_pool_count >= pool_max) {
         PooledSurfaceImage *oldest = QTAILQ_FIRST(&r->surface_image_pool);
         assert(oldest != NULL);
         QTAILQ_REMOVE(&r->surface_image_pool, oldest, entry);

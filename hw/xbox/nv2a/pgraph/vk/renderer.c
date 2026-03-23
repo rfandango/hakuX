@@ -1007,7 +1007,6 @@ void pgraph_vk_force_register(void)
 
 void pgraph_vk_check_memory_budget(PGRAPHState *pg)
 {
-#if 0 // FIXME
     PGRAPHVkState *r = pg->vk_renderer_state;
 
     VkPhysicalDeviceMemoryProperties const *props;
@@ -1016,29 +1015,24 @@ void pgraph_vk_check_memory_budget(PGRAPHState *pg)
     g_autofree VmaBudget *budgets = g_malloc_n(props->memoryHeapCount, sizeof(VmaBudget));
     vmaGetHeapBudgets(r->allocator, budgets);
 
+#ifdef __ANDROID__
+    const float budget_threshold = 0.6;
+#else
     const float budget_threshold = 0.8;
+#endif
     bool near_budget = false;
 
-    for (int i = 0; i < props->memoryHeapCount; i++) {
+    for (uint32_t i = 0; i < props->memoryHeapCount; i++) {
         VmaBudget *b = &budgets[i];
+        if (b->budget == 0) {
+            continue;
+        }
         float use_to_budget_ratio =
             (double)b->statistics.allocationBytes / (double)b->budget;
-        NV2A_VK_DPRINTF("Heap %d: used %lu/%lu MiB (%.2f%%)", i,
-                        b->statistics.allocationBytes / (1024 * 1024),
-                        b->budget / (1024 * 1024), use_to_budget_ratio * 100);
         near_budget |= use_to_budget_ratio > budget_threshold;
     }
 
-    // If any heaps are near budget, free up some resources
     if (near_budget) {
         pgraph_vk_trim_texture_cache(pg);
     }
-#endif
-
-#if 0
-    char *s;
-    vmaBuildStatsString(r->allocator, &s, VK_TRUE);
-    puts(s);
-    vmaFreeStatsString(r->allocator, s);
-#endif
 }

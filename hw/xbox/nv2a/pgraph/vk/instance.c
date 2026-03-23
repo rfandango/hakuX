@@ -1049,6 +1049,9 @@ static bool init_allocator(PGRAPHState *pg, Error **errp)
         .flags = (r->memory_budget_extension_enabled ?
                       VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT :
                       0),
+#ifdef __ANDROID__
+        .preferredLargeHeapBlockSize = 64 * 1024 * 1024,
+#endif
         .vulkanApiVersion = device_api_version,
         .instance = r->instance,
         .physicalDevice = r->physical_device,

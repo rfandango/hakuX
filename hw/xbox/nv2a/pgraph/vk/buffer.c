@@ -34,6 +34,9 @@ typedef struct MemoryBudget {
     size_t perframe_uni_cap;
     size_t perframe_stg_cap;
     size_t shader_module_cache_entries;
+    size_t texture_cache_entries;
+    int image_pool_max;
+    int surface_image_pool_max;
 } MemoryBudget;
 
 static MemoryBudget compute_memory_budget(PGRAPHVkState *r)
@@ -82,6 +85,9 @@ static MemoryBudget compute_memory_budget(PGRAPHVkState *r)
         b.perframe_uni_cap = SIZE_MAX;
         b.perframe_stg_cap = SIZE_MAX;
         b.shader_module_cache_entries = 50 * 1024;
+        b.texture_cache_entries = 1024;
+        b.image_pool_max = 128;
+        b.surface_image_pool_max = 64;
     } else {
         size_t budget = b.renderer_budget;
         b.vertex_inline_cap = MAX(8 * mib, budget / 5);
@@ -99,6 +105,20 @@ static MemoryBudget compute_memory_budget(PGRAPHVkState *r)
         }
         if (b.shader_module_cache_entries > 50 * 1024) {
             b.shader_module_cache_entries = 50 * 1024;
+        }
+
+        if (budget_mib <= 768) {
+            b.texture_cache_entries = 256;
+            b.image_pool_max = 16;
+            b.surface_image_pool_max = 8;
+        } else if (budget_mib <= 1536) {
+            b.texture_cache_entries = 512;
+            b.image_pool_max = 32;
+            b.surface_image_pool_max = 16;
+        } else {
+            b.texture_cache_entries = 1024;
+            b.image_pool_max = 64;
+            b.surface_image_pool_max = 32;
         }
     }
 
@@ -163,11 +183,14 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
 
     MemoryBudget mb = compute_memory_budget(r);
     r->shader_module_cache_target = mb.shader_module_cache_entries;
+    r->texture_cache_target = mb.texture_cache_entries;
+    r->image_pool_max = mb.image_pool_max;
+    r->surface_image_pool_max = mb.surface_image_pool_max;
 
     VK_LOG_ERROR("memory_budget: total_heap=%zuMB budget=%s%zuMB "
                  "vtx_inline_cap=%zuMB index_cap=%zuMB staging_cap=%zuMB "
                  "pf_vtx=%zuMB pf_idx=%zuMB pf_uni=%zuMB pf_stg=%zuMB "
-                 "shader_cache=%zu",
+                 "shader_cache=%zu tex_cache=%zu img_pool=%d surf_pool=%d",
                  mb.total_heap >> 20,
                  mb.renderer_budget == SIZE_MAX ? "uncapped/" : "",
                  mb.renderer_budget == SIZE_MAX ? 0 : mb.renderer_budget >> 20,
@@ -178,7 +201,10 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
                  mb.perframe_idx_cap == SIZE_MAX ? 0 : mb.perframe_idx_cap >> 20,
                  mb.perframe_uni_cap == SIZE_MAX ? 0 : mb.perframe_uni_cap >> 20,
                  mb.perframe_stg_cap == SIZE_MAX ? 0 : mb.perframe_stg_cap >> 20,
-                 mb.shader_module_cache_entries);
+                 mb.shader_module_cache_entries,
+                 mb.texture_cache_entries,
+                 mb.image_pool_max,
+                 mb.surface_image_pool_max);
 
     size_t staging_size = vram_size * 2;
     if (staging_size < (32 * mib)) {
