@@ -44,6 +44,7 @@ typedef struct {
     uint32_t device_id;
     uint32_t driver_version;
     uint8_t  pipeline_cache_uuid[VK_UUID_SIZE];
+    uint32_t dynamic_rendering;
 } GpuDriverIdentity;
 
 static void remove_directory_recursive(const char *path)
@@ -76,11 +77,13 @@ static void check_driver_identity_and_wipe_caches(PGRAPHVkState *r)
     char *id_path = g_strdup_printf("%sgpu_driver_id.bin", base);
 
     GpuDriverIdentity current;
+    memset(&current, 0, sizeof(current));
     current.vendor_id = r->device_props.vendorID;
     current.device_id = r->device_props.deviceID;
     current.driver_version = r->device_props.driverVersion;
     memcpy(current.pipeline_cache_uuid, r->device_props.pipelineCacheUUID,
            VK_UUID_SIZE);
+    current.dynamic_rendering = r->dynamic_rendering_supported ? 1 : 0;
 
     bool match = false;
     gchar *data = NULL;

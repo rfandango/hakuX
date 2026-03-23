@@ -507,6 +507,14 @@ static void add_optional_device_extension_names(
     r->push_descriptors_supported = add_extension_if_available(
         available_extensions, enabled_extension_names,
         VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+
+    if (r->device_props.apiVersion >= VK_API_VERSION_1_3) {
+        r->dynamic_rendering_supported = true;
+    } else {
+        r->dynamic_rendering_supported = add_extension_if_available(
+            available_extensions, enabled_extension_names,
+            VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
+    }
 }
 
 static bool check_device_support_required_extensions(VkPhysicalDevice device)
@@ -818,8 +826,33 @@ static bool create_logical_device(PGRAPHState *pg, Error **errp)
         vk13_features.sType =
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
         vk13_features.shaderDemoteToHelperInvocation = VK_TRUE;
+        vk13_features.dynamicRendering = VK_TRUE;
         vk13_features.pNext = next_struct;
         next_struct = &vk13_features;
+    }
+
+    VkPhysicalDeviceDynamicRenderingFeatures dyn_render_features;
+    if (r->dynamic_rendering_supported &&
+        r->device_props.apiVersion < VK_API_VERSION_1_3) {
+        VkPhysicalDeviceDynamicRenderingFeatures dyn_query = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
+        };
+        VkPhysicalDeviceFeatures2 features2 = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+            .pNext = &dyn_query,
+        };
+        vkGetPhysicalDeviceFeatures2(r->physical_device, &features2);
+
+        if (dyn_query.dynamicRendering) {
+            memset(&dyn_render_features, 0, sizeof(dyn_render_features));
+            dyn_render_features.sType =
+                VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
+            dyn_render_features.dynamicRendering = VK_TRUE;
+            dyn_render_features.pNext = next_struct;
+            next_struct = &dyn_render_features;
+        } else {
+            r->dynamic_rendering_supported = false;
+        }
     }
 
 #if OPT_DYNAMIC_BLEND
@@ -930,6 +963,9 @@ static bool create_logical_device(PGRAPHState *pg, Error **errp)
         };
         next_struct = &custom_border_features;
     }
+
+    fprintf(stderr, "Dynamic rendering: %s\n",
+            r->dynamic_rendering_supported ? "enabled" : "disabled");
 
     VkDeviceCreateInfo device_create_info = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,

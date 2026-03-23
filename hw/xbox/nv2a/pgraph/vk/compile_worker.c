@@ -109,6 +109,7 @@ static void process_pipeline_job(PGRAPHVkState *r, CompileJob *job)
         .pDynamicStates = p->dynamic_states,
     };
 
+    VkPipelineRenderingCreateInfo dyn_rendering_info;
     VkGraphicsPipelineCreateInfo pipeline_create_info = {
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .stageCount = p->num_shader_stages,
@@ -122,10 +123,24 @@ static void process_pipeline_job(PGRAPHVkState *r, CompileJob *job)
         .pColorBlendState = &color_blending,
         .pDynamicState = &dynamic_state,
         .layout = p->layout,
-        .renderPass = p->render_pass,
-        .subpass = 0,
         .basePipelineHandle = VK_NULL_HANDLE,
     };
+
+    if (p->dynamic_rendering) {
+        dyn_rendering_info = (VkPipelineRenderingCreateInfo){
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+            .colorAttachmentCount =
+                p->color_format != VK_FORMAT_UNDEFINED ? 1 : 0,
+            .pColorAttachmentFormats = &p->color_format,
+            .depthAttachmentFormat = p->depth_stencil_format,
+            .stencilAttachmentFormat = p->depth_stencil_format,
+        };
+        pipeline_create_info.pNext = &dyn_rendering_info;
+        pipeline_create_info.renderPass = VK_NULL_HANDLE;
+    } else {
+        pipeline_create_info.renderPass = p->render_pass;
+        pipeline_create_info.subpass = 0;
+    }
 
     VkPipeline pipeline;
     VkResult result = vkCreateGraphicsPipelines(
