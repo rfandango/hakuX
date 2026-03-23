@@ -23,6 +23,88 @@
 #include <android/log.h>
 #endif
 
+typedef struct MemoryBudget {
+    size_t total_heap;
+    size_t renderer_budget;
+    size_t vertex_inline_cap;
+    size_t index_cap;
+    size_t staging_cap;
+    size_t perframe_vtx_cap;
+    size_t perframe_idx_cap;
+    size_t perframe_uni_cap;
+    size_t perframe_stg_cap;
+    size_t shader_module_cache_entries;
+} MemoryBudget;
+
+static MemoryBudget compute_memory_budget(PGRAPHVkState *r)
+{
+    const size_t mib = 1024 * 1024;
+    const size_t gib = 1024 * mib;
+
+    VkPhysicalDeviceMemoryProperties const *props;
+    vmaGetMemoryProperties(r->allocator, &props);
+
+    size_t total_heap = 0;
+    for (uint32_t i = 0; i < props->memoryHeapCount; i++) {
+        if (props->memoryHeaps[i].size > total_heap) {
+            total_heap = props->memoryHeaps[i].size;
+        }
+    }
+
+    MemoryBudget b = { .total_heap = total_heap };
+
+#ifdef __ANDROID__
+    if (total_heap <= 4 * gib) {
+        b.renderer_budget = 512 * mib;
+    } else if (total_heap <= 6 * gib) {
+        b.renderer_budget = 768 * mib;
+    } else if (total_heap <= 8 * gib) {
+        b.renderer_budget = 1024 * mib;
+    } else if (total_heap <= 12 * gib) {
+        b.renderer_budget = 1536 * mib;
+    } else if (total_heap <= 16 * gib) {
+        b.renderer_budget = 2048 * mib;
+    } else if (total_heap <= 22 * gib) {
+        b.renderer_budget = 3072 * mib;
+    } else {
+        b.renderer_budget = SIZE_MAX;
+    }
+#else
+    b.renderer_budget = SIZE_MAX;
+#endif
+
+    if (b.renderer_budget == SIZE_MAX) {
+        b.vertex_inline_cap = SIZE_MAX;
+        b.index_cap = SIZE_MAX;
+        b.staging_cap = SIZE_MAX;
+        b.perframe_vtx_cap = SIZE_MAX;
+        b.perframe_idx_cap = SIZE_MAX;
+        b.perframe_uni_cap = SIZE_MAX;
+        b.perframe_stg_cap = SIZE_MAX;
+        b.shader_module_cache_entries = 50 * 1024;
+    } else {
+        size_t budget = b.renderer_budget;
+        b.vertex_inline_cap = MAX(8 * mib, budget / 5);
+        b.index_cap         = MAX(4 * mib, budget / 20);
+        b.staging_cap       = MAX(8 * mib, budget * 12 / 100);
+        b.perframe_vtx_cap  = MAX(8 * mib, budget * 8 / 100);
+        b.perframe_idx_cap  = MAX(2 * mib, budget / 50);
+        b.perframe_uni_cap  = MAX(4 * mib, budget / 25);
+        b.perframe_stg_cap  = MAX(8 * mib, budget * 8 / 100);
+
+        size_t budget_mib = budget / mib;
+        b.shader_module_cache_entries = budget_mib * 4;
+        if (b.shader_module_cache_entries < 2048) {
+            b.shader_module_cache_entries = 2048;
+        }
+        if (b.shader_module_cache_entries > 50 * 1024) {
+            b.shader_module_cache_entries = 50 * 1024;
+        }
+    }
+
+    return b;
+}
+
 static const char *const buffer_names[BUFFER_COUNT] = {
     "BUFFER_STAGING_DST",
     "BUFFER_STAGING_SRC",
@@ -76,14 +158,34 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
     PGRAPHState *pg = &d->pgraph;
     PGRAPHVkState *r = pg->vk_renderer_state;
 
-    // FIXME: Profile buffer sizes
-
     const size_t mib = 1024 * 1024;
     size_t vram_size = memory_region_size(d->vram);
+
+    MemoryBudget mb = compute_memory_budget(r);
+    r->shader_module_cache_target = mb.shader_module_cache_entries;
+
+    VK_LOG_ERROR("memory_budget: total_heap=%zuMB budget=%s%zuMB "
+                 "vtx_inline_cap=%zuMB index_cap=%zuMB staging_cap=%zuMB "
+                 "pf_vtx=%zuMB pf_idx=%zuMB pf_uni=%zuMB pf_stg=%zuMB "
+                 "shader_cache=%zu",
+                 mb.total_heap >> 20,
+                 mb.renderer_budget == SIZE_MAX ? "uncapped/" : "",
+                 mb.renderer_budget == SIZE_MAX ? 0 : mb.renderer_budget >> 20,
+                 mb.vertex_inline_cap == SIZE_MAX ? 0 : mb.vertex_inline_cap >> 20,
+                 mb.index_cap == SIZE_MAX ? 0 : mb.index_cap >> 20,
+                 mb.staging_cap == SIZE_MAX ? 0 : mb.staging_cap >> 20,
+                 mb.perframe_vtx_cap == SIZE_MAX ? 0 : mb.perframe_vtx_cap >> 20,
+                 mb.perframe_idx_cap == SIZE_MAX ? 0 : mb.perframe_idx_cap >> 20,
+                 mb.perframe_uni_cap == SIZE_MAX ? 0 : mb.perframe_uni_cap >> 20,
+                 mb.perframe_stg_cap == SIZE_MAX ? 0 : mb.perframe_stg_cap >> 20,
+                 mb.shader_module_cache_entries);
+
     size_t staging_size = vram_size * 2;
     if (staging_size < (32 * mib)) {
         staging_size = 32 * mib;
     }
+    staging_size = MIN(staging_size, mb.staging_cap);
+
     size_t compute_size = vram_size * 2;
     if (compute_size < (64 * mib)) {
         compute_size = 64 * mib;
@@ -97,6 +199,14 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
         compute_size = 256 * mib;
     }
 #endif
+
+    size_t index_size = sizeof(pg->inline_elements) * 100;
+    index_size = MIN(index_size, mb.index_cap);
+
+    size_t vertex_inline_size = NV2A_VERTEXSHADER_ATTRIBUTES *
+                                NV2A_MAX_BATCH_LENGTH *
+                                4 * sizeof(float) * 10;
+    vertex_inline_size = MIN(vertex_inline_size, mb.vertex_inline_cap);
 
     VK_LOG("buffer_init: vram=%zu staging=%zu compute=%zu",
            vram_size, staging_size, compute_size);
@@ -119,7 +229,7 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
     r->storage_buffers[BUFFER_STAGING_SRC] = (StorageBuffer){
         .alloc_info = host_alloc_create_info,
         .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        .buffer_size = r->storage_buffers[BUFFER_STAGING_DST].buffer_size,
+        .buffer_size = staging_size,
     };
 
     r->storage_buffers[BUFFER_COMPUTE_DST] = (StorageBuffer){
@@ -134,7 +244,7 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
         .alloc_info = device_alloc_create_info,
         .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-        .buffer_size = r->storage_buffers[BUFFER_COMPUTE_DST].buffer_size,
+        .buffer_size = compute_size,
     };
 
     r->storage_buffers[BUFFER_INDEX] = (StorageBuffer){
@@ -142,16 +252,15 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
         .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                  VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
-        .buffer_size = sizeof(pg->inline_elements) * 100,
+        .buffer_size = index_size,
     };
 
     r->storage_buffers[BUFFER_INDEX_STAGING] = (StorageBuffer){
         .alloc_info = host_alloc_create_info,
         .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        .buffer_size = r->storage_buffers[BUFFER_INDEX].buffer_size,
+        .buffer_size = index_size,
     };
 
-    // FIXME: Don't assume that we can render with host mapped buffer
     r->storage_buffers[BUFFER_VERTEX_RAM] = (StorageBuffer){
         .alloc_info = host_alloc_create_info,
         .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
@@ -172,14 +281,13 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
         .alloc_info = device_alloc_create_info,
         .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        .buffer_size = NV2A_VERTEXSHADER_ATTRIBUTES * NV2A_MAX_BATCH_LENGTH *
-                       4 * sizeof(float) * 10,
+        .buffer_size = vertex_inline_size,
     };
 
     r->storage_buffers[BUFFER_VERTEX_INLINE_STAGING] = (StorageBuffer){
         .alloc_info = host_alloc_create_info,
         .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        .buffer_size = r->storage_buffers[BUFFER_VERTEX_INLINE].buffer_size,
+        .buffer_size = vertex_inline_size,
     };
 
     extern int xemu_get_submit_frames(void);
@@ -200,7 +308,7 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
     r->storage_buffers[BUFFER_UNIFORM_STAGING] = (StorageBuffer){
         .alloc_info = host_alloc_create_info,
         .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        .buffer_size = r->storage_buffers[BUFFER_UNIFORM].buffer_size,
+        .buffer_size = uniform_size,
     };
 
     for (int i = 0; i < BUFFER_COUNT; i++) {
@@ -255,6 +363,11 @@ bool pgraph_vk_init_buffers(NV2AState *d, Error **errp)
         uni_max = 16 * mib;
         stg_max = 32 * mib;
     }
+
+    idx_max = MIN(idx_max, mb.perframe_idx_cap);
+    vtx_max = MIN(vtx_max, mb.perframe_vtx_cap);
+    uni_max = MIN(uni_max, mb.perframe_uni_cap);
+    stg_max = MIN(stg_max, mb.perframe_stg_cap);
 
     for (int i = 0; i < NUM_SUBMIT_FRAMES; i++) {
         FrameStagingState *fs = &r->frame_staging[i];

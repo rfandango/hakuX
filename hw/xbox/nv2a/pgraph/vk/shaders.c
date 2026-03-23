@@ -1187,9 +1187,17 @@ static void shader_cache_init(PGRAPHState *pg)
     r->shader_cache.pre_node_evict = shader_cache_pre_evict;
 #endif
 
-    /* FIXME: Make this configurable */
-    const size_t shader_module_cache_size = 50 * 1024;
-    lru_init(&r->shader_module_cache, 1 << 16);
+    const size_t shader_module_cache_size =
+        r->shader_module_cache_target ? r->shader_module_cache_target
+                                      : 50 * 1024;
+    size_t shader_module_hash_buckets = shader_module_cache_size * 2;
+    if (shader_module_hash_buckets < 4096) {
+        shader_module_hash_buckets = 4096;
+    }
+    if (shader_module_hash_buckets > (1 << 16)) {
+        shader_module_hash_buckets = 1 << 16;
+    }
+    lru_init(&r->shader_module_cache, shader_module_hash_buckets);
     r->shader_module_cache_entries =
         g_malloc_n(shader_module_cache_size, sizeof(ShaderModuleCacheEntry));
     assert(r->shader_module_cache_entries != NULL);

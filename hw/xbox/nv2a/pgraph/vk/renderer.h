@@ -1220,6 +1220,7 @@ typedef struct PGRAPHVkState {
 
     Lru shader_module_cache;
     ShaderModuleCacheEntry *shader_module_cache_entries;
+    size_t shader_module_cache_target;
 
     // FIXME: Merge these into a structure
     uint64_t uniform_buffer_hashes[2];
