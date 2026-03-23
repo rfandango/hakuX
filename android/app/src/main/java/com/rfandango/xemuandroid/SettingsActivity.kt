@@ -275,16 +275,16 @@ class SettingsActivity : AppCompatActivity() {
 
   private fun setupSubmitFramesPicker() {
     val btn = findViewById<MaterialButton>(R.id.btn_submit_frames)
-    val labels = arrayOf("Single (1)", "Double (2)", "Triple (3)")
-    val values = intArrayOf(1, 2, 3)
+    val labels = arrayOf("Single (1)", "Double (2)")
+    val values = intArrayOf(1, 2)
     var current = try { nativeGetSubmitFrames() } catch (_: Throwable) {
-      prefs.getInt("submit_frames", 3)
+      prefs.getInt("submit_frames", 2)
     }
     val idx = values.indexOf(current).coerceAtLeast(0)
     btn.text = labels[idx]
     btn.setOnClickListener {
       val cur = try { nativeGetSubmitFrames() } catch (_: Throwable) {
-        prefs.getInt("submit_frames", 3)
+        prefs.getInt("submit_frames", 2)
       }
       val sel = values.indexOf(cur).coerceAtLeast(0)
       MaterialAlertDialogBuilder(this)

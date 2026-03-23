@@ -32,7 +32,7 @@ static bool g_xemu_draw_merge = false;
 static bool g_xemu_bindless_textures = false;
 static bool g_xemu_async_compile = false;
 static bool g_xemu_frame_skip = false;
-static int g_xemu_submit_frames = 3;
+static int g_xemu_submit_frames = 2;
 
 struct OptBisectStats g_opt_stats;
 

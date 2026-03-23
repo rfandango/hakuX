@@ -796,7 +796,7 @@ static SetupFiles SyncSetupFiles() {
   __android_log_print(ANDROID_LOG_INFO, "xemu-android",
                       "frame skip: %s", frame_skip ? "ON" : "OFF");
 
-  int submit_frames = GetPrefInt(env, activity, "submit_frames", 3);
+  int submit_frames = GetPrefInt(env, activity, "submit_frames", 2);
   xemu_set_submit_frames(submit_frames);
   __android_log_print(ANDROID_LOG_INFO, "xemu-android",
                       "submit frames: %d", submit_frames);
