@@ -465,17 +465,11 @@ static void finalize_clear_shaders(PGRAPHState *pg)
 
 static void init_render_passes(PGRAPHVkState *r)
 {
-    if (r->dynamic_rendering_supported) {
-        return;
-    }
     r->render_passes = g_array_new(false, false, sizeof(RenderPass));
 }
 
 static void finalize_render_passes(PGRAPHVkState *r)
 {
-    if (r->dynamic_rendering_supported) {
-        return;
-    }
     for (int i = 0; i < r->render_passes->len; i++) {
         RenderPass *p = &g_array_index(r->render_passes, RenderPass, i);
         vkDestroyRenderPass(r->device, p->render_pass, NULL);
@@ -530,12 +524,10 @@ void pgraph_vk_finalize_pipelines(PGRAPHState *pg)
             r->frame_submitted[i] = false;
         }
 #if OPT_DEFERRED_FENCES && OPT_N_BUFFERED_SUBMIT
-        if (!r->dynamic_rendering_supported) {
-            for (int j = 0; j < r->deferred_framebuffer_count[i]; j++) {
-                vkDestroyFramebuffer(r->device, r->deferred_framebuffers[i][j], NULL);
-            }
-            r->deferred_framebuffer_count[i] = 0;
+        for (int j = 0; j < r->deferred_framebuffer_count[i]; j++) {
+            vkDestroyFramebuffer(r->device, r->deferred_framebuffers[i][j], NULL);
         }
+        r->deferred_framebuffer_count[i] = 0;
 #endif
         vkDestroyFence(r->device, r->frame_fences[i], NULL);
         vkDestroySemaphore(r->device, r->frame_semaphores[i], NULL);
@@ -676,10 +668,6 @@ static void create_frame_buffer(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
 
-    if (r->dynamic_rendering_supported) {
-        return;
-    }
-
     NV2A_VK_DPRINTF("Creating framebuffer");
 
     assert(r->color_binding || r->zeta_binding);
@@ -745,13 +733,8 @@ static void create_frame_buffer(PGRAPHState *pg)
 
 static void destroy_framebuffers(PGRAPHState *pg)
 {
-    PGRAPHVkState *r = pg->vk_renderer_state;
-
-    if (r->dynamic_rendering_supported) {
-        return;
-    }
-
     NV2A_VK_DPRINTF("Destroying framebuffer");
+    PGRAPHVkState *r = pg->vk_renderer_state;
 
     for (int i = 0; i < r->framebuffer_index; i++) {
         vkDestroyFramebuffer(r->device, r->framebuffers[i], NULL);
@@ -921,7 +904,6 @@ static void create_clear_pipeline(PGRAPHState *pg)
     VK_CHECK(vkCreatePipelineLayout(r->device, &pipeline_layout_info, NULL,
                                     &layout));
 
-    VkPipelineRenderingCreateInfo dyn_rendering_info;
     VkGraphicsPipelineCreateInfo pipeline_info = {
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .stageCount = num_active_shader_stages,
@@ -935,24 +917,10 @@ static void create_clear_pipeline(PGRAPHState *pg)
         .pColorBlendState = &color_blending,
         .pDynamicState = &dynamic_state,
         .layout = layout,
+        .renderPass = get_render_pass(r, &key.render_pass_state),
+        .subpass = 0,
         .basePipelineHandle = VK_NULL_HANDLE,
     };
-
-    if (r->dynamic_rendering_supported) {
-        dyn_rendering_info = (VkPipelineRenderingCreateInfo){
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-            .colorAttachmentCount =
-                key.render_pass_state.color_format != VK_FORMAT_UNDEFINED ? 1 : 0,
-            .pColorAttachmentFormats = &key.render_pass_state.color_format,
-            .depthAttachmentFormat = key.render_pass_state.zeta_format,
-            .stencilAttachmentFormat = key.render_pass_state.zeta_format,
-        };
-        pipeline_info.pNext = &dyn_rendering_info;
-        pipeline_info.renderPass = VK_NULL_HANDLE;
-    } else {
-        pipeline_info.renderPass = get_render_pass(r, &key.render_pass_state);
-        pipeline_info.subpass = 0;
-    }
 
     VkPipeline pipeline;
     VK_CHECK(vkCreateGraphicsPipelines(r->device, r->vk_pipeline_cache, 1,
@@ -1602,9 +1570,7 @@ static void create_pipeline(PGRAPHState *pg)
     VK_CHECK(vkCreatePipelineLayout(r->device, &pipeline_layout_info, NULL,
                                     &layout));
 
-    VkRenderPass render_pass = r->dynamic_rendering_supported
-                                   ? VK_NULL_HANDLE
-                                   : get_render_pass(r, &key.render_pass_state);
+    VkRenderPass render_pass = get_render_pass(r, &key.render_pass_state);
 
 #if OPT_ASYNC_COMPILE
     if (xemu_get_async_compile()) {
@@ -1639,9 +1605,6 @@ static void create_pipeline(PGRAPHState *pg)
         p->has_dynamic_line_width = snode->has_dynamic_line_width;
         p->layout = layout;
         p->render_pass = render_pass;
-        p->dynamic_rendering = r->dynamic_rendering_supported;
-        p->color_format = key.render_pass_state.color_format;
-        p->depth_stencil_format = key.render_pass_state.zeta_format;
 
         snode->draw_time = pg->draw_time;
         snode->pending = true;
@@ -1656,7 +1619,6 @@ static void create_pipeline(PGRAPHState *pg)
     }
 #endif
 
-    VkPipelineRenderingCreateInfo dyn_rendering_info;
     VkGraphicsPipelineCreateInfo pipeline_create_info = {
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .stageCount = num_active_shader_stages,
@@ -1670,25 +1632,10 @@ static void create_pipeline(PGRAPHState *pg)
         .pColorBlendState = &color_blending,
         .pDynamicState = &dynamic_state,
         .layout = layout,
+        .renderPass = render_pass,
+        .subpass = 0,
         .basePipelineHandle = VK_NULL_HANDLE,
     };
-
-    if (r->dynamic_rendering_supported) {
-        dyn_rendering_info = (VkPipelineRenderingCreateInfo){
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-            .colorAttachmentCount =
-                key.render_pass_state.color_format != VK_FORMAT_UNDEFINED ? 1 : 0,
-            .pColorAttachmentFormats = &key.render_pass_state.color_format,
-            .depthAttachmentFormat = key.render_pass_state.zeta_format,
-            .stencilAttachmentFormat = key.render_pass_state.zeta_format,
-        };
-        pipeline_create_info.pNext = &dyn_rendering_info;
-        pipeline_create_info.renderPass = VK_NULL_HANDLE;
-    } else {
-        pipeline_create_info.renderPass = render_pass;
-        pipeline_create_info.subpass = 0;
-    }
-
     VkPipeline pipeline;
     VK_CHECK(vkCreateGraphicsPipelines(r->device, r->vk_pipeline_cache, 1,
                                        &pipeline_create_info, NULL, &pipeline));
@@ -2009,67 +1956,30 @@ static void begin_render_pass(PGRAPHState *pg)
                  vp_height = pg->surface_binding_dim.height;
     pgraph_apply_scaling_factor(pg, &vp_width, &vp_height);
 
-    VkAttachmentLoadOp color_load_op = VK_ATTACHMENT_LOAD_OP_LOAD;
-    VkAttachmentLoadOp zeta_load_op = VK_ATTACHMENT_LOAD_OP_LOAD;
-#if OPT_LOAD_OPS
-    color_load_op = get_optimal_color_load_op(r);
-    zeta_load_op = get_optimal_zeta_load_op(r);
-#endif
-
-    if (r->dynamic_rendering_supported) {
-        VkRenderingAttachmentInfo color_attachment = {
-            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .imageView = r->color_binding ? r->color_binding->image_view
-                                          : VK_NULL_HANDLE,
-            .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            .loadOp = color_load_op,
-            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-        };
-        VkRenderingAttachmentInfo depth_attachment = {
-            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .imageView = r->zeta_binding ? r->zeta_binding->image_view
-                                         : VK_NULL_HANDLE,
-            .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            .loadOp = zeta_load_op,
-            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-        };
-        VkRenderingInfo rendering_info = {
-            .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-            .renderArea = { .extent = { vp_width, vp_height } },
-            .layerCount = 1,
-            .colorAttachmentCount = r->color_binding ? 1 : 0,
-            .pColorAttachments = r->color_binding ? &color_attachment : NULL,
-            .pDepthAttachment = r->zeta_binding ? &depth_attachment : NULL,
-            .pStencilAttachment = r->zeta_binding ? &depth_attachment : NULL,
-        };
-        vkCmdBeginRendering(r->command_buffer, &rendering_info);
-    } else {
-        assert(r->current_framebuffer != VK_NULL_HANDLE);
+    assert(r->current_framebuffer != VK_NULL_HANDLE);
 
 #if OPT_LOAD_OPS
-        RenderPassState begin_state;
-        init_render_pass_state(pg, &begin_state);
-        begin_state.color_load_op = color_load_op;
-        begin_state.zeta_load_op = zeta_load_op;
-        begin_state.stencil_load_op = zeta_load_op;
-        r->begin_render_pass = get_render_pass(r, &begin_state);
+    RenderPassState begin_state;
+    init_render_pass_state(pg, &begin_state);
+    begin_state.color_load_op = get_optimal_color_load_op(r);
+    begin_state.zeta_load_op = get_optimal_zeta_load_op(r);
+    begin_state.stencil_load_op = begin_state.zeta_load_op;
+    r->begin_render_pass = get_render_pass(r, &begin_state);
 #else
-        r->begin_render_pass = r->render_pass;
+    r->begin_render_pass = r->render_pass;
 #endif
 
-        VkRenderPassBeginInfo render_pass_begin_info = {
-            .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-            .renderPass = r->begin_render_pass,
-            .framebuffer = r->current_framebuffer,
-            .renderArea.extent.width = vp_width,
-            .renderArea.extent.height = vp_height,
-            .clearValueCount = 0,
-            .pClearValues = NULL,
-        };
-        vkCmdBeginRenderPass(r->command_buffer, &render_pass_begin_info,
-                             VK_SUBPASS_CONTENTS_INLINE);
-    }
-
+    VkRenderPassBeginInfo render_pass_begin_info = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+        .renderPass = r->begin_render_pass,
+        .framebuffer = r->current_framebuffer,
+        .renderArea.extent.width = vp_width,
+        .renderArea.extent.height = vp_height,
+        .clearValueCount = 0,
+        .pClearValues = NULL,
+    };
+    vkCmdBeginRenderPass(r->command_buffer, &render_pass_begin_info,
+                         VK_SUBPASS_CONTENTS_INLINE);
     r->in_render_pass = true;
 
     if (r->gpu_ts_supported &&
@@ -2094,11 +2004,7 @@ static void end_render_pass(PGRAPHVkState *r)
                                 r->gpu_ts_pool, slot);
             r->gpu_ts_rp_index++;
         }
-        if (r->dynamic_rendering_supported) {
-            vkCmdEndRendering(r->command_buffer);
-        } else {
-            vkCmdEndRenderPass(r->command_buffer);
-        }
+        vkCmdEndRenderPass(r->command_buffer);
         r->in_render_pass = false;
     }
 }
@@ -2167,13 +2073,11 @@ void pgraph_vk_flush_all_frames(PGRAPHState *pg)
                                      VK_TRUE, UINT64_MAX));
             gpu_ts_readback(r, i);
             r->frame_submitted[i] = false;
-            if (!r->dynamic_rendering_supported) {
-                for (int j = 0; j < r->deferred_framebuffer_count[i]; j++) {
-                    vkDestroyFramebuffer(r->device,
-                                         r->deferred_framebuffers[i][j], NULL);
-                }
-                r->deferred_framebuffer_count[i] = 0;
+            for (int j = 0; j < r->deferred_framebuffer_count[i]; j++) {
+                vkDestroyFramebuffer(r->device,
+                                     r->deferred_framebuffers[i][j], NULL);
             }
+            r->deferred_framebuffer_count[i] = 0;
         }
         if (i != r->current_frame) {
             r->frame_staging[i].index_staging.buffer_offset = 0;
@@ -2411,15 +2315,13 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
         if (OPT_ALWAYS_DEFERRED_FENCES ||
             finish_reason == VK_FINISH_REASON_FLIP_STALL ||
             finish_reason == VK_FINISH_REASON_PRESENTING) {
-            if (!r->dynamic_rendering_supported) {
-                memcpy(r->deferred_framebuffers[r->current_frame],
-                       r->framebuffers,
-                       r->framebuffer_index * sizeof(VkFramebuffer));
-                r->deferred_framebuffer_count[r->current_frame] = r->framebuffer_index;
-                r->framebuffer_index = 0;
-                r->fb_cache_count = 0;
-                r->current_framebuffer = VK_NULL_HANDLE;
-            }
+            memcpy(r->deferred_framebuffers[r->current_frame],
+                   r->framebuffers,
+                   r->framebuffer_index * sizeof(VkFramebuffer));
+            r->deferred_framebuffer_count[r->current_frame] = r->framebuffer_index;
+            r->framebuffer_index = 0;
+            r->fb_cache_count = 0;
+            r->current_framebuffer = VK_NULL_HANDLE;
 
             int next_frame = (r->current_frame + 1) % r->num_active_frames;
 
@@ -2429,14 +2331,12 @@ void pgraph_vk_finish(PGRAPHState *pg, FinishReason finish_reason)
                                          VK_TRUE, UINT64_MAX));
                 gpu_ts_readback(r, next_frame);
                 qatomic_set(&r->frame_submitted[next_frame], false);
-                if (!r->dynamic_rendering_supported) {
-                    for (int i = 0; i < r->deferred_framebuffer_count[next_frame]; i++) {
-                        vkDestroyFramebuffer(r->device,
-                                             r->deferred_framebuffers[next_frame][i],
-                                             NULL);
-                    }
-                    r->deferred_framebuffer_count[next_frame] = 0;
+                for (int i = 0; i < r->deferred_framebuffer_count[next_frame]; i++) {
+                    vkDestroyFramebuffer(r->device,
+                                         r->deferred_framebuffers[next_frame][i],
+                                         NULL);
                 }
+                r->deferred_framebuffer_count[next_frame] = 0;
 #if OPT_ALWAYS_DEFERRED_FENCES
                 r->frame_staging[next_frame].index_staging.buffer_offset = 0;
                 r->frame_staging[next_frame].vertex_inline_staging.buffer_offset = 0;
@@ -2645,7 +2545,7 @@ static void begin_pre_draw(PGRAPHState *pg)
         else if (r->pipeline_binding_changed) { OPT_STAT_INC(sfp_miss_pipe_dirty); sfp_ok = false; }
         else if (!r->in_command_buffer)  { OPT_STAT_INC(sfp_miss_no_cmdbuf); sfp_ok = false; }
         else if (!r->in_render_pass)     { OPT_STAT_INC(sfp_miss_no_rp); sfp_ok = false; }
-        else if (!r->dynamic_rendering_supported && r->framebuffer_index <= 0) { OPT_STAT_INC(sfp_miss_no_fb); sfp_ok = false; }
+        else if (r->framebuffer_index <= 0) { OPT_STAT_INC(sfp_miss_no_fb); sfp_ok = false; }
         else if (r->framebuffer_dirty)   { OPT_STAT_INC(sfp_miss_fb_dirty); sfp_ok = false; }
         else if (r->shader_bindings_changed) { OPT_STAT_INC(sfp_miss_shader_changed); sfp_ok = false; }
         else if (r->pipeline_state_dirty) { OPT_STAT_INC(sfp_miss_pipe_dirty); sfp_ok = false; }
@@ -2857,7 +2757,7 @@ static void begin_pre_draw(PGRAPHState *pg)
         r->pipeline_binding->pipeline != VK_NULL_HANDLE &&
         !r->pipeline_binding_changed &&
         r->in_command_buffer && r->in_render_pass &&
-        (r->dynamic_rendering_supported || r->framebuffer_index > 0) &&
+        r->framebuffer_index > 0 &&
         !r->framebuffer_dirty &&
         !r->shader_bindings_changed &&
         !r->pipeline_state_dirty &&
@@ -2921,7 +2821,7 @@ static void begin_pre_draw(PGRAPHState *pg)
         r->pipeline_binding &&
         r->pipeline_binding->pipeline != VK_NULL_HANDLE &&
         r->in_command_buffer && r->in_render_pass &&
-        (r->dynamic_rendering_supported || r->framebuffer_index > 0) &&
+        r->framebuffer_index > 0 &&
         !r->framebuffer_dirty &&
         !r->shader_bindings_changed &&
         !r->pipeline_state_dirty &&

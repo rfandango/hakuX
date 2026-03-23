@@ -402,10 +402,6 @@ typedef struct PipelineCreateParams {
 
     VkPipelineLayout layout;
     VkRenderPass render_pass;
-
-    bool dynamic_rendering;
-    VkFormat color_format;
-    VkFormat depth_stencil_format;
 } PipelineCreateParams;
 
 typedef enum {
@@ -977,7 +973,6 @@ typedef struct PGRAPHVkState {
     uint32_t tex_push_offset;
     int max_vertex_push_attrs;
 #endif
-    bool dynamic_rendering_supported;
     bool push_descriptors_supported;
     VkDescriptorSetLayout push_tex_set_layout;
     VkDescriptorSetLayout push_ubo_set_layout;

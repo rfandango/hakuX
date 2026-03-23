@@ -450,10 +450,6 @@ static void create_render_pass(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
 
-    if (r->dynamic_rendering_supported) {
-        return;
-    }
-
     VkAttachmentDescription attachment;
 
     VkAttachmentReference color_reference;
@@ -503,9 +499,6 @@ static void create_render_pass(PGRAPHState *pg)
 static void destroy_render_pass(PGRAPHState *pg)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
-    if (r->dynamic_rendering_supported) {
-        return;
-    }
     vkDestroyRenderPass(r->device, r->display.render_pass, NULL);
     r->display.render_pass = VK_NULL_HANDLE;
 }
@@ -611,8 +604,6 @@ static void create_display_pipeline(PGRAPHState *pg)
     VK_CHECK(vkCreatePipelineLayout(r->device, &pipeline_layout_info, NULL,
                                     &r->display.pipeline_layout));
 
-    VkFormat display_color_format = VK_FORMAT_R8G8B8A8_UNORM;
-    VkPipelineRenderingCreateInfo dyn_rendering_info;
     VkGraphicsPipelineCreateInfo pipeline_info = {
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .stageCount = ARRAY_SIZE(shader_stages),
@@ -626,22 +617,10 @@ static void create_display_pipeline(PGRAPHState *pg)
         .pColorBlendState = &color_blending,
         .pDynamicState = &dynamic_state,
         .layout = r->display.pipeline_layout,
+        .renderPass = r->display.render_pass,
+        .subpass = 0,
         .basePipelineHandle = VK_NULL_HANDLE,
     };
-
-    if (r->dynamic_rendering_supported) {
-        dyn_rendering_info = (VkPipelineRenderingCreateInfo){
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-            .colorAttachmentCount = 1,
-            .pColorAttachmentFormats = &display_color_format,
-        };
-        pipeline_info.pNext = &dyn_rendering_info;
-        pipeline_info.renderPass = VK_NULL_HANDLE;
-    } else {
-        pipeline_info.renderPass = r->display.render_pass;
-        pipeline_info.subpass = 0;
-    }
-
     VK_CHECK(vkCreateGraphicsPipelines(r->device, r->vk_pipeline_cache, 1,
                                        &pipeline_info, NULL,
                                        &r->display.pipeline));
@@ -665,10 +644,6 @@ static void create_frame_buffer(PGRAPHState *pg, DisplayImage *img)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
 
-    if (r->dynamic_rendering_supported) {
-        return;
-    }
-
     VkFramebufferCreateInfo create_info = {
         .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
         .renderPass = r->display.render_pass,
@@ -685,9 +660,6 @@ static void create_frame_buffer(PGRAPHState *pg, DisplayImage *img)
 static void destroy_frame_buffer(PGRAPHState *pg, DisplayImage *img)
 {
     PGRAPHVkState *r = pg->vk_renderer_state;
-    if (r->dynamic_rendering_supported) {
-        return;
-    }
     vkDestroyFramebuffer(r->device, img->framebuffer, NULL);
     img->framebuffer = VK_NULL_HANDLE;
 }
@@ -1556,33 +1528,15 @@ static void render_display(PGRAPHState *pg, SurfaceBinding *surface)
         pg, cmd, img->image, VK_FORMAT_R8G8B8A8_UNORM,
         VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
-    if (r->dynamic_rendering_supported) {
-        VkRenderingAttachmentInfo color_attachment = {
-            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .imageView = img->image_view,
-            .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-        };
-        VkRenderingInfo rendering_info = {
-            .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-            .renderArea = { .extent = { disp->width, disp->height } },
-            .layerCount = 1,
-            .colorAttachmentCount = 1,
-            .pColorAttachments = &color_attachment,
-        };
-        vkCmdBeginRendering(cmd, &rendering_info);
-    } else {
-        VkRenderPassBeginInfo render_pass_begin_info = {
-            .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-            .renderPass = disp->render_pass,
-            .framebuffer = img->framebuffer,
-            .renderArea.extent.width = disp->width,
-            .renderArea.extent.height = disp->height,
-        };
-        vkCmdBeginRenderPass(cmd, &render_pass_begin_info,
-                             VK_SUBPASS_CONTENTS_INLINE);
-    }
+    VkRenderPassBeginInfo render_pass_begin_info = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+        .renderPass = disp->render_pass,
+        .framebuffer = img->framebuffer,
+        .renderArea.extent.width = disp->width,
+        .renderArea.extent.height = disp->height,
+    };
+    vkCmdBeginRenderPass(cmd, &render_pass_begin_info,
+                         VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                       disp->pipeline);
 
@@ -1611,11 +1565,7 @@ static void render_display(PGRAPHState *pg, SurfaceBinding *surface)
 
     vkCmdDraw(cmd, 3, 1, 0, 0);
 
-    if (r->dynamic_rendering_supported) {
-        vkCmdEndRendering(cmd);
-    } else {
-        vkCmdEndRenderPass(cmd);
-    }
+    vkCmdEndRenderPass(cmd);
 
     pgraph_vk_transition_image_layout(pg, cmd, surface->image,
                                       surface->host_fmt.vk_format,
