@@ -1,11 +1,11 @@
 <resources>
-  <color name="xemu_black">#080A08</color>
-  <color name="xemu_surface">#0F120F</color>
-  <color name="xemu_surface_variant">#141914</color>
-  <color name="xemu_text">#E8F5E9</color>
-  <color name="xemu_text_muted">#A3B7A3</color>
-  <color name="xemu_green">#41B14D</color>
-  <color name="xemu_green_dark">#1E7A2E</color>
-  <color name="xemu_outline">#263126</color>
-  <color name="xemu_outline_variant">#1A211A</color>
+  <color name="xemu_black">#FFFFFF</color>
+  <color name="xemu_surface">#FFFFFF</color>
+  <color name="xemu_surface_variant">#F5F5F5</color>
+  <color name="xemu_text">#1C1B1F</color>
+  <color name="xemu_text_muted">#5F6368</color>
+  <color name="xemu_green">#2E7D32</color>
+  <color name="xemu_green_dark">#1B5E20</color>
+  <color name="xemu_outline">#DADCE0</color>
+  <color name="xemu_outline_variant">#E0E0E0</color>
 </resources>

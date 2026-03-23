@@ -1,12 +1,12 @@
 <resources>
-  <style name="Theme.Xemu" parent="Theme.Material3.DayNight.NoActionBar">
+  <style name="Theme.Xemu" parent="Theme.Material3.Light.NoActionBar">
     <item name="colorPrimary">@color/xemu_green</item>
-    <item name="colorOnPrimary">@color/xemu_black</item>
-    <item name="colorPrimaryContainer">@color/xemu_green_dark</item>
-    <item name="colorOnPrimaryContainer">@color/xemu_text</item>
+    <item name="colorOnPrimary">#FFFFFF</item>
+    <item name="colorPrimaryContainer">@color/xemu_green</item>
+    <item name="colorOnPrimaryContainer">#FFFFFF</item>
 
     <item name="colorSecondary">@color/xemu_green</item>
-    <item name="colorOnSecondary">@color/xemu_black</item>
+    <item name="colorOnSecondary">#FFFFFF</item>
 
     <item name="android:colorBackground">@color/xemu_black</item>
     <item name="colorSurface">@color/xemu_surface</item>
@@ -16,5 +16,9 @@
 
     <item name="colorOutline">@color/xemu_outline</item>
     <item name="colorOutlineVariant">@color/xemu_outline_variant</item>
+
+    <item name="android:statusBarColor">#FFFFFF</item>
+    <item name="android:windowLightStatusBar">true</item>
+    <item name="android:navigationBarColor">#FFFFFF</item>
   </style>
 </resources>
