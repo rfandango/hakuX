@@ -87,23 +87,21 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
 
   private fun hideSystemUI() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-      // Android 11 (API 30) and above
       window.setDecorFitsSystemWindows(false)
       window.insetsController?.let { controller ->
         controller.hide(WindowInsets.Type.systemBars())
         controller.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
       }
     } else {
-      // Android 10 and below
       @Suppress("DEPRECATION")
       window.decorView.systemUiVisibility = (
         View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-        or View.SYSTEM_UI_FLAG_FULLSCREEN
-        or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-        or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-        or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-        or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-      )
+          or View.SYSTEM_UI_FLAG_FULLSCREEN
+          or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+          or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+          or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+          or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        )
     }
   }
 
@@ -195,7 +193,6 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
   }
 
   private fun setupOnScreenController() {
-    // Create on-screen controller
     onScreenController = OnScreenController(this).apply {
       layoutParams = FrameLayout.LayoutParams(
         FrameLayout.LayoutParams.MATCH_PARENT,
@@ -203,14 +200,10 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
       )
     }
 
-    // Create input bridge
     controllerBridge = ControllerInputBridge()
     onScreenController?.setControllerListener(controllerBridge!!)
 
-    // Add to layout
     mLayout?.addView(onScreenController)
-
-    // Check for existing controllers and show/hide accordingly
     updateControllerVisibility()
   }
 
@@ -224,6 +217,8 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
     mLayout?.postDelayed({
       registerVirtualController()
     }, 1000)
+
+    checkForPhysicalControllers()
 
     val showFps = prefs.getBoolean("show_fps", true)
     fpsTextView?.visibility = if (showFps) View.VISIBLE else View.GONE
@@ -243,20 +238,18 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
 
   private fun registerVirtualController() {
     try {
-      // Register the virtual on-screen controller as a joystick device
-      // Device ID: -2, Name: "On-Screen Controller"
       org.libsdl.app.SDLControllerManager.nativeAddJoystick(
-        -2, // device_id
-        "On-Screen Controller", // name
-        "Virtual touchscreen controller", // desc
-        0x045e, // vendor_id (Microsoft)
-        0x028e, // product_id (Xbox 360 Controller)
-        false, // is_accelerometer
-        0xFFFF, // button_mask (all buttons)
-        6, // naxes (left X/Y, right X/Y, left trigger, right trigger)
-        0x3F, // axis_mask (6 axes)
-        0, // nhats
-        0  // nballs
+        -2,
+        "On-Screen Controller",
+        "Virtual touchscreen controller",
+        0x045e,
+        0x028e,
+        false,
+        0xFFFF,
+        6,
+        0x3F,
+        0,
+        0
       )
       android.util.Log.d("MainActivity", "Virtual controller registered successfully")
     } catch (e: Exception) {
@@ -267,8 +260,6 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
   private fun setupControllerDetection() {
     inputManager = getSystemService(Context.INPUT_SERVICE) as InputManager
     inputManager?.registerInputDeviceListener(this, null)
-    
-    // Check for already connected controllers
     checkForPhysicalControllers()
   }
 
@@ -283,58 +274,67 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
 
   private fun isGameController(device: InputDevice?): Boolean {
     if (device == null) return false
-    
+
     val sources = device.sources
-    
-    // Check if device is a gamepad or joystick
-    return ((sources and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD) ||
-           ((sources and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK)
+    val hasGamepadSource =
+      ((sources and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD) ||
+        ((sources and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK)
+
+    if (!hasGamepadSource) return false
+
+    if (device.isVirtual) {
+      android.util.Log.d("MainActivity", "Ignoring virtual input device: ${device.name}")
+      return false
+    }
+
+    if (!device.isExternal) {
+      android.util.Log.d("MainActivity", "Ignoring non-external game input device: ${device.name}")
+      return false
+    }
+
+    android.util.Log.i(
+      "MainActivity",
+      "Detected external controller: name=${device.name}, vendor=${device.vendorId}, product=${device.productId}, sources=${device.sources}"
+    )
+    return true
   }
 
   private fun updateControllerVisibility() {
-    // Show on-screen controller only if no physical controller is connected
     val shouldShow = !hasPhysicalController
-    
+
     if (shouldShow != isControllerVisible) {
       isControllerVisible = shouldShow
       onScreenController?.visibility = if (shouldShow) View.VISIBLE else View.GONE
+    } else if (shouldShow) {
+      onScreenController?.visibility = View.VISIBLE
     }
   }
 
-  // InputDeviceListener callbacks
   override fun onInputDeviceAdded(deviceId: Int) {
-    val device = inputManager?.getInputDevice(deviceId)
-    if (isGameController(device)) {
-      hasPhysicalController = true
-      updateControllerVisibility()
-    }
+    checkForPhysicalControllers()
   }
 
   override fun onInputDeviceRemoved(deviceId: Int) {
-    // Recheck all devices to see if any controllers remain
     checkForPhysicalControllers()
   }
 
   override fun onInputDeviceChanged(deviceId: Int) {
-    // Recheck all devices in case configuration changed
     checkForPhysicalControllers()
   }
 
   override fun onDestroy() {
     fpsHandler.removeCallbacks(fpsRunnable)
 
-    // Unregister virtual controller
     try {
       org.libsdl.app.SDLControllerManager.nativeRemoveJoystick(-2)
     } catch (e: Exception) {
       android.util.Log.e("MainActivity", "Failed to unregister virtual controller: ${e.message}")
     }
-    
+
     inputManager?.unregisterInputDeviceListener(this)
     super.onDestroy()
   }
 
-  // Manual control methods (for settings/preferences)
   fun toggleOnScreenController() {
     isControllerVisible = !isControllerVisible
     onScreenController?.visibility = if (isControllerVisible) View.VISIBLE else View.GONE
