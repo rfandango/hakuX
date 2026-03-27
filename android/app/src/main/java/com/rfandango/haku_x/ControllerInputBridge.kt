@@ -23,8 +23,22 @@ class ControllerInputBridge : OnScreenController.ControllerListener {
 
   override fun onButtonPressed(button: OnScreenController.Button) {
     try {
-      val keyCode = getKeyCodeForButton(button)
-      SDLControllerManager.onNativePadDown(VIRTUAL_DEVICE_ID, keyCode)
+      when (button) {
+        OnScreenController.Button.LEFT_TRIGGER -> {
+          SDLControllerManager.onNativeJoy(VIRTUAL_DEVICE_ID, AXIS_LEFT_TRIGGER, 1.0f)
+          SDLControllerManager.onNativePadDown(VIRTUAL_DEVICE_ID, KeyEvent.KEYCODE_BUTTON_L2)
+        }
+
+        OnScreenController.Button.RIGHT_TRIGGER -> {
+          SDLControllerManager.onNativeJoy(VIRTUAL_DEVICE_ID, AXIS_RIGHT_TRIGGER, 1.0f)
+          SDLControllerManager.onNativePadDown(VIRTUAL_DEVICE_ID, KeyEvent.KEYCODE_BUTTON_R2)
+        }
+
+        else -> {
+          val keyCode = getKeyCodeForButton(button)
+          SDLControllerManager.onNativePadDown(VIRTUAL_DEVICE_ID, keyCode)
+        }
+      }
     } catch (e: Exception) {
       android.util.Log.e("ControllerBridge", "Error on button press: ${e.message}")
     }
@@ -32,8 +46,22 @@ class ControllerInputBridge : OnScreenController.ControllerListener {
 
   override fun onButtonReleased(button: OnScreenController.Button) {
     try {
-      val keyCode = getKeyCodeForButton(button)
-      SDLControllerManager.onNativePadUp(VIRTUAL_DEVICE_ID, keyCode)
+      when (button) {
+        OnScreenController.Button.LEFT_TRIGGER -> {
+          SDLControllerManager.onNativeJoy(VIRTUAL_DEVICE_ID, AXIS_LEFT_TRIGGER, 0.0f)
+          SDLControllerManager.onNativePadUp(VIRTUAL_DEVICE_ID, KeyEvent.KEYCODE_BUTTON_L2)
+        }
+
+        OnScreenController.Button.RIGHT_TRIGGER -> {
+          SDLControllerManager.onNativeJoy(VIRTUAL_DEVICE_ID, AXIS_RIGHT_TRIGGER, 0.0f)
+          SDLControllerManager.onNativePadUp(VIRTUAL_DEVICE_ID, KeyEvent.KEYCODE_BUTTON_R2)
+        }
+
+        else -> {
+          val keyCode = getKeyCodeForButton(button)
+          SDLControllerManager.onNativePadUp(VIRTUAL_DEVICE_ID, keyCode)
+        }
+      }
     } catch (e: Exception) {
       android.util.Log.e("ControllerBridge", "Error on button release: ${e.message}")
     }
@@ -46,6 +74,7 @@ class ControllerInputBridge : OnScreenController.ControllerListener {
           SDLControllerManager.onNativeJoy(VIRTUAL_DEVICE_ID, AXIS_LEFT_X, x)
           SDLControllerManager.onNativeJoy(VIRTUAL_DEVICE_ID, AXIS_LEFT_Y, y)
         }
+
         OnScreenController.Stick.RIGHT -> {
           SDLControllerManager.onNativeJoy(VIRTUAL_DEVICE_ID, AXIS_RIGHT_X, x)
           SDLControllerManager.onNativeJoy(VIRTUAL_DEVICE_ID, AXIS_RIGHT_Y, y)
@@ -77,6 +106,17 @@ class ControllerInputBridge : OnScreenController.ControllerListener {
       SDLControllerManager.onNativePadUp(VIRTUAL_DEVICE_ID, keyCode)
     } catch (e: Exception) {
       android.util.Log.e("ControllerBridge", "Error on stick release: ${e.message}")
+    }
+  }
+
+  fun forceResetTriggers() {
+    try {
+      SDLControllerManager.onNativeJoy(VIRTUAL_DEVICE_ID, AXIS_LEFT_TRIGGER, 0.0f)
+      SDLControllerManager.onNativeJoy(VIRTUAL_DEVICE_ID, AXIS_RIGHT_TRIGGER, 0.0f)
+      SDLControllerManager.onNativePadUp(VIRTUAL_DEVICE_ID, KeyEvent.KEYCODE_BUTTON_L2)
+      SDLControllerManager.onNativePadUp(VIRTUAL_DEVICE_ID, KeyEvent.KEYCODE_BUTTON_R2)
+    } catch (e: Exception) {
+      android.util.Log.e("ControllerBridge", "Error forcing trigger reset: ${e.message}")
     }
   }
 
