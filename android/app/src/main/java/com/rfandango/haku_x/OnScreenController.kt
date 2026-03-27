@@ -20,7 +20,7 @@ class OnScreenController @JvmOverloads constructor(
   private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
   private val buttons = mutableMapOf<Button, ButtonState>()
   private val sticks = mutableMapOf<Stick, StickState>()
-  
+
   private var controllerListener: ControllerListener? = null
 
   enum class Button {
@@ -39,7 +39,8 @@ class OnScreenController @JvmOverloads constructor(
   data class ButtonState(
     val center: PointF,
     val radius: Float,
-    var isPressed: Boolean = false
+    var isPressed: Boolean = false,
+    var activePointerId: Int = -1
   )
 
   data class StickState(
@@ -73,17 +74,18 @@ class OnScreenController @JvmOverloads constructor(
   }
 
   private fun initializeControls(width: Int, height: Int) {
+    buttons.clear()
+    sticks.clear()
+
     val w = width.toFloat()
     val h = height.toFloat()
-    
-    // Button sizes - made D-pad smaller
+
     val faceButtonRadius = w * 0.032f
     val dpadButtonRadius = w * 0.025f
     val shoulderButtonRadius = w * 0.034f
     val smallButtonRadius = w * 0.022f
     val stickRadius = w * 0.07f
 
-    // Face buttons (right side) - A, B, X, Y in diamond formation
     val faceButtonCenterX = w * 0.88f
     val faceButtonCenterY = h * 0.55f
     val faceButtonSpacing = w * 0.064f
@@ -105,7 +107,6 @@ class OnScreenController @JvmOverloads constructor(
       faceButtonRadius
     )
 
-    // D-Pad (bottom left corner) - smaller buttons
     val dpadCenterX = w * 0.12f
     val dpadCenterY = h * 0.83f
     val dpadSpacing = w * 0.045f
@@ -127,7 +128,6 @@ class OnScreenController @JvmOverloads constructor(
       dpadButtonRadius
     )
 
-    // Trigger buttons - smaller and aligned to top corners
     val shoulderEdgeMargin = shoulderButtonRadius + (w * 0.02f)
     buttons[Button.LEFT_TRIGGER] = ButtonState(
       PointF(shoulderEdgeMargin, shoulderEdgeMargin),
@@ -138,18 +138,13 @@ class OnScreenController @JvmOverloads constructor(
       shoulderButtonRadius
     )
 
-    // Analog sticks
-    sticks[Stick.LEFT] = StickState(
-      PointF(w * 0.18f, h * 0.45f),
-      stickRadius
-    )
-    sticks[Stick.RIGHT] = StickState(
-      PointF(w * 0.62f, h * 0.82f),
-      stickRadius
-    )
+    val leftStickCenter = PointF(w * 0.18f, h * 0.45f)
+    val rightStickCenter = PointF(w * 0.62f, h * 0.82f)
 
-    // Center buttons - moved near bottom, between D-pad and right stick
-    val centerButtonsBaseX = (dpadCenterX + sticks[Stick.RIGHT]!!.center.x) * 0.5f
+    sticks[Stick.LEFT] = StickState(leftStickCenter, stickRadius)
+    sticks[Stick.RIGHT] = StickState(rightStickCenter, stickRadius)
+
+    val centerButtonsBaseX = (dpadCenterX + rightStickCenter.x) * 0.5f
     val centerButtonsY = h * 0.9f
     val centerButtonSpacing = smallButtonRadius * 3.4f
     buttons[Button.BACK] = ButtonState(
@@ -161,7 +156,6 @@ class OnScreenController @JvmOverloads constructor(
       smallButtonRadius
     )
 
-    // Black and White buttons - black to the right of white
     val whiteBlackY = h * 0.8f
     val whiteX = w * 0.75f
     val whiteBlackSpacing = smallButtonRadius * 2.6f
@@ -174,36 +168,34 @@ class OnScreenController @JvmOverloads constructor(
       smallButtonRadius
     )
 
-    // Stick buttons
+    val stickButtonRadius = smallButtonRadius * 1.05f
+    val stickButtonOffsetX = stickRadius * 1.55f
+
     buttons[Button.LEFT_STICK_BUTTON] = ButtonState(
-      sticks[Stick.LEFT]!!.center,
-      stickRadius * 0.3f
+      PointF(leftStickCenter.x - stickButtonOffsetX, leftStickCenter.y),
+      stickButtonRadius
     )
     buttons[Button.RIGHT_STICK_BUTTON] = ButtonState(
-      sticks[Stick.RIGHT]!!.center,
-      stickRadius * 0.3f
+      PointF(rightStickCenter.x - stickButtonOffsetX, rightStickCenter.y),
+      stickButtonRadius
     )
   }
 
   override fun onDraw(canvas: Canvas) {
     super.onDraw(canvas)
 
-    // Draw analog sticks
-    sticks.forEach { (stick, state) ->
-      // Outer circle
+    sticks.forEach { (_, state) ->
       paint.style = Paint.Style.STROKE
       paint.strokeWidth = 4f
       paint.color = Color.argb(100, 255, 255, 255)
       canvas.drawCircle(state.center.x, state.center.y, state.radius, paint)
 
-      // Dead zone circle
       paint.color = Color.argb(50, 255, 255, 255)
       canvas.drawCircle(state.center.x, state.center.y, state.radius * state.deadZone, paint)
 
-      // Stick position
       val stickX = state.center.x + state.currentPos.x * state.radius
       val stickY = state.center.y + state.currentPos.y * state.radius
-      
+
       paint.style = Paint.Style.FILL
       paint.color = if (state.isPressed) {
         Color.argb(200, 100, 150, 255)
@@ -213,33 +205,30 @@ class OnScreenController @JvmOverloads constructor(
       canvas.drawCircle(stickX, stickY, state.radius * 0.4f, paint)
     }
 
-    // Draw buttons
     buttons.forEach { (button, state) ->
-      // Skip stick buttons as they're drawn with sticks
-      if (button == Button.LEFT_STICK_BUTTON || button == Button.RIGHT_STICK_BUTTON) {
-        return@forEach
-      }
-
       paint.style = Paint.Style.FILL
-      paint.color = when {
-        state.isPressed -> getButtonPressedColor(button)
-        else -> getButtonColor(button)
-      }
+      paint.color = if (state.isPressed) getButtonPressedColor(button) else getButtonColor(button)
       canvas.drawCircle(state.center.x, state.center.y, state.radius, paint)
 
-      // Button outline
       paint.style = Paint.Style.STROKE
       paint.strokeWidth = 3f
       paint.color = Color.argb(150, 255, 255, 255)
       canvas.drawCircle(state.center.x, state.center.y, state.radius, paint)
 
-      // Button labels
       paint.style = Paint.Style.FILL
-      paint.color = Color.WHITE
-      paint.textSize = state.radius * 0.8f
+      paint.color = if (button == Button.WHITE) Color.BLACK else Color.WHITE
+      paint.textSize = when (button) {
+        Button.LEFT_STICK_BUTTON, Button.RIGHT_STICK_BUTTON -> state.radius * 0.78f
+        Button.BLACK, Button.WHITE -> state.radius * 0.82f
+        else -> state.radius * 0.8f
+      }
       paint.textAlign = Paint.Align.CENTER
-      val label = getButtonLabel(button)
-      canvas.drawText(label, state.center.x, state.center.y + state.radius * 0.3f, paint)
+      canvas.drawText(
+        getButtonLabel(button),
+        state.center.x,
+        state.center.y + state.radius * 0.3f,
+        paint
+      )
     }
   }
 
@@ -269,6 +258,8 @@ class OnScreenController @JvmOverloads constructor(
 
   private fun getButtonLabel(button: Button): String {
     return when (button) {
+      Button.LEFT_STICK_BUTTON -> "LS"
+      Button.RIGHT_STICK_BUTTON -> "RS"
       Button.A -> "A"
       Button.B -> "B"
       Button.X -> "X"
@@ -283,20 +274,20 @@ class OnScreenController @JvmOverloads constructor(
       Button.BACK -> "◀"
       Button.BLACK -> "BK"
       Button.WHITE -> "WH"
-      else -> ""
     }
   }
 
   override fun onTouchEvent(event: MotionEvent): Boolean {
-    val pointerIndex = event.actionIndex
-    val pointerId = event.getPointerId(pointerIndex)
-    val x = event.getX(pointerIndex)
-    val y = event.getY(pointerIndex)
-
     when (event.actionMasked) {
       MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
-        handleTouchDown(x, y, pointerId)
+        val pointerIndex = event.actionIndex
+        handleTouchDown(
+          event.getX(pointerIndex),
+          event.getY(pointerIndex),
+          event.getPointerId(pointerIndex)
+        )
       }
+
       MotionEvent.ACTION_MOVE -> {
         for (i in 0 until event.pointerCount) {
           handleTouchMove(
@@ -306,8 +297,14 @@ class OnScreenController @JvmOverloads constructor(
           )
         }
       }
-      MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
-        handleTouchUp(pointerId)
+
+      MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
+        val pointerIndex = event.actionIndex
+        handleTouchUp(event.getPointerId(pointerIndex))
+      }
+
+      MotionEvent.ACTION_CANCEL -> {
+        releaseAllInputs()
       }
     }
 
@@ -316,18 +313,18 @@ class OnScreenController @JvmOverloads constructor(
   }
 
   private fun handleTouchDown(x: Float, y: Float, pointerId: Int) {
-    // Check sticks first
     sticks.forEach { (stick, state) ->
       if (state.activePointerId == -1 && isPointInCircle(x, y, state.center, state.radius)) {
         state.activePointerId = pointerId
+        state.isPressed = true
         updateStickPosition(stick, state, x, y)
         return
       }
     }
 
-    // Check buttons
     buttons.forEach { (button, state) ->
-      if (isPointInCircle(x, y, state.center, state.radius)) {
+      if (state.activePointerId == -1 && isPointInCircle(x, y, state.center, state.radius)) {
+        state.activePointerId = pointerId
         state.isPressed = true
         controllerListener?.onButtonPressed(button)
         return
@@ -344,7 +341,6 @@ class OnScreenController @JvmOverloads constructor(
   }
 
   private fun handleTouchUp(pointerId: Int) {
-    // Release sticks
     sticks.forEach { (stick, state) ->
       if (state.activePointerId == pointerId) {
         state.activePointerId = -1
@@ -352,18 +348,43 @@ class OnScreenController @JvmOverloads constructor(
         controllerListener?.onStickMoved(stick, 0f, 0f)
         if (state.isPressed) {
           state.isPressed = false
-          controllerListener?.onStickReleased(stick)
         }
       }
     }
 
-    // Release buttons
     buttons.forEach { (button, state) ->
-      if (state.isPressed) {
-        state.isPressed = false
-        controllerListener?.onButtonReleased(button)
+      if (state.activePointerId == pointerId) {
+        state.activePointerId = -1
+        if (state.isPressed) {
+          state.isPressed = false
+          controllerListener?.onButtonReleased(button)
+        }
       }
     }
+  }
+
+  private fun releaseAllInputs() {
+    sticks.forEach { (stick, state) ->
+      if (state.activePointerId != -1) {
+        controllerListener?.onStickMoved(stick, 0f, 0f)
+      }
+      state.activePointerId = -1
+      state.currentPos = PointF(0f, 0f)
+      state.isPressed = false
+    }
+
+    buttons.forEach { (button, state) ->
+      if (state.activePointerId != -1 && state.isPressed) {
+        controllerListener?.onButtonReleased(button)
+      }
+      state.activePointerId = -1
+      state.isPressed = false
+    }
+  }
+
+  fun resetAllInputs() {
+    releaseAllInputs()
+    invalidate()
   }
 
   private fun updateStickPosition(stick: Stick, state: StickState, x: Float, y: Float) {
@@ -372,16 +393,13 @@ class OnScreenController @JvmOverloads constructor(
     val distance = sqrt(dx.pow(2) + dy.pow(2))
 
     if (distance > state.radius) {
-      // Clamp to circle boundary
-      state.currentPos.x = (dx / distance)
-      state.currentPos.y = (dy / distance)
+      state.currentPos.x = dx / distance
+      state.currentPos.y = dy / distance
     } else {
-      // Normalize to -1..1 range
       state.currentPos.x = dx / state.radius
       state.currentPos.y = dy / state.radius
     }
 
-    // Apply dead zone
     val magnitude = sqrt(state.currentPos.x.pow(2) + state.currentPos.y.pow(2))
     if (magnitude < state.deadZone) {
       state.currentPos.x = 0f
