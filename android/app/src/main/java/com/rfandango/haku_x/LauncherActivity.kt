@@ -97,7 +97,10 @@ class LauncherActivity : Activity() {
       prefs.edit()
         .putString("dvdUri", romUri.toString())
         .remove("dvdPath")
-        .apply()
+        // MainActivity runs in the separate :xemu process and reads this
+        // value during native startup.  The asynchronous write can race
+        // that read, leaving the previous game's URI on disk.
+        .commit()
       startActivity(Intent(this, MainActivity::class.java))
       finish()
       return
