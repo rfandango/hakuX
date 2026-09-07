@@ -4,9 +4,15 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import java.io.File
 
 class LauncherActivity : Activity() {
+
+  private companion object {
+    const val TAG = "hakuX"
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
 
@@ -97,14 +103,60 @@ class LauncherActivity : Activity() {
       prefs.edit()
         .putString("dvdUri", romUri.toString())
         .remove("dvdPath")
-        .apply()
-      startActivity(Intent(this, MainActivity::class.java))
+        // MainActivity runs in the separate :xemu process and reads this
+        // value during native startup.  The asynchronous write can race
+        // that read, leaving the previous game's URI on disk.
+        .commit()
+      startMainActivity(romUri)
       finish()
       return
     }
 
     startActivity(Intent(this, GameLibraryActivity::class.java))
     finish()
+  }
+
+  /**
+   * Start the emulator for [romUri].
+   *
+   * Frontends such as ES-DE hand over a content:// URI carrying only a
+   * transient read grant, scoped to the lifetime of this activity.  The
+   * finish() that follows revokes it, normally long before the :xemu process
+   * has started far enough to open the file, leaving the emulator with no
+   * readable disc.  Forwarding the URI re-grants it to MainActivity, whose
+   * grant lasts for the emulation session.
+   *
+   * That forwarding is best effort.  A URI the caller cannot re-grant — one
+   * naming a tree this app holds no permission on, which on a case-insensitive
+   * volume includes a path differing only in case — makes startActivity raise
+   * SecurityException and would take the whole process down.  Fall back to a
+   * plain intent instead: the emulator may still open the file through a
+   * persisted grant covering it, and if it cannot, it reports a missing disc
+   * rather than disappearing.
+   */
+  private fun startMainActivity(romUri: Uri) {
+    val plain = {
+      Intent(this, MainActivity::class.java)
+        .putExtra(MainActivity.EXTRA_FROM_FRONTEND, true)
+    }
+
+    // A file:// URI must never be attached to an intent: that raises
+    // FileUriExposedException on API 24 and above.
+    if (romUri.scheme != "content") {
+      startActivity(plain())
+      return
+    }
+
+    val granting = plain().apply {
+      data = romUri
+      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    try {
+      startActivity(granting)
+    } catch (e: SecurityException) {
+      Log.w(TAG, "cannot forward read permission for $romUri, starting without it", e)
+      startActivity(plain())
+    }
   }
 
   private fun resolveRomUri(): Uri? {

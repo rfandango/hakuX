@@ -23,6 +23,15 @@ import android.view.KeyEvent
 import org.libsdl.app.SDLActivity
 
 class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
+
+  companion object {
+    /**
+     * Set when an external frontend, rather than the in-app library, chose the
+     * game.  Exiting then returns to that frontend instead of the library.
+     */
+    const val EXTRA_FROM_FRONTEND = "from_frontend"
+  }
+
   private var onScreenController: OnScreenController? = null
   private var controllerBridge: ControllerInputBridge? = null
   private var isControllerVisible = false
@@ -305,13 +314,21 @@ class MainActivity : SDLActivity(), InputManager.InputDeviceListener {
   private fun setupPauseMenu() {
     pauseMenuOverlay = PauseMenuOverlay(this).apply {
       onExitEmulation = {
-        // Launch the library activity FIRST so the intent is queued
-        // before we do any blocking work or kill the process.
-        val intent = Intent(this@MainActivity, GameLibraryActivity::class.java).apply {
-          flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        if (intent?.getBooleanExtra(EXTRA_FROM_FRONTEND, false) == true) {
+          // An external frontend started this game, so it, not the library, is
+          // where the player expects to end up.  Dropping the task rather than
+          // just finishing leaves nothing of ours behind to return to, so the
+          // frontend comes back to the foreground.
+          finishAndRemoveTask()
+        } else {
+          // Launch the library activity FIRST so the intent is queued
+          // before we do any blocking work or kill the process.
+          val intent = Intent(this@MainActivity, GameLibraryActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+          }
+          startActivity(intent)
+          finish()
         }
-        startActivity(intent)
-        finish()
         // nativeExitEmulation blocks until the display loop exits and
         // RCU callbacks are drained, so QEMU threads are quiescent
         // before we kill the process.

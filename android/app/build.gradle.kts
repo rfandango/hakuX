@@ -63,8 +63,7 @@ android {
 
   buildTypes {
     debug {
-      applicationIdSuffix = ".debug"
-      resValue("string", "app_name", "hakuX Debug")
+      resValue("string", "app_name", "HakuX")
       ndk {
         debugSymbolLevel = "NONE"
       }
@@ -77,7 +76,7 @@ android {
       }
     }
     release {
-      resValue("string", "app_name", "hakuX")
+      resValue("string", "app_name", "HakuX")
       externalNativeBuild {
         cmake {
           arguments += listOf(
