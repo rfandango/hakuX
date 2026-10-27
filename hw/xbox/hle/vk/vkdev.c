@@ -525,6 +525,20 @@ int hle_vk_init(void)
     VkFormatProperties fp;
     vkGetPhysicalDeviceFormatProperties(v->phys, VK_FORMAT_R16G16_SSCALED, &fp);
     c->sscaled = fp.bufferFeatures & VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT;
+    /* Samsung Xclipse (Xclipse 940, Samsung's driver SPAL 25.3.3, Vulkan
+     * 1.3.304): skinned meshes (MK Armageddon's fighters)
+     * came out as huge spiky triangles while the scenery and HUD were right,
+     * with the vertex strides and the state set dynamically (vids: the
+     * strides by vkCmdSetVertexInputEXT; without it, eds1: by
+     * vkCmdBindVertexBuffers2; eds1/eds2: the rest). All of it
+     * baked into the pipelines (as debug.hakux.caps=-vids,-eds1,-eds2) drew
+     * them right. */
+    if (v->props.vendorID == HLE_VENDOR_SAMSUNG ||
+        (v13 && (uint32_t)p12.driverID == HLE_DRIVER_ID_SAMSUNG)) {
+        c->vids = c->eds1 = c->eds2 = false;
+        hle_log("hakuX-hle-back", "caps: vids eds1 eds2 off (Samsung Xclipse: vertex input "
+                "and state in the pipelines)");
+    }
     caps_override(c);
     c->fbfetch = c->fbfetch && c->dyn_render;  /* local read is dynamic rendering's */
     c->cbc_any = c->cbc_any && c->cbc;

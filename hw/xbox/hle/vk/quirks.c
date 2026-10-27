@@ -61,6 +61,13 @@ static bool powervr_old(const HleDriver *d)
     return d->props.vendorID == 0x1010 && d->props.driverVersion < 0x00582558u;
 }
 
+/* Samsung's Xclipse (AMD RDNA), Samsung's driver */
+static bool samsung(const HleDriver *d)
+{
+    return d->props.vendorID == HLE_VENDOR_SAMSUNG ||
+           (uint32_t)d->drv.driverID == HLE_DRIVER_ID_SAMSUNG;
+}
+
 static bool mali_g615(const HleDriver *d)
 {
     return mali(d) && strstr(d->props.deviceName, "Mali-G615") != NULL;
@@ -104,6 +111,15 @@ static const HleQuirk k_quirks[] = {
      * Turnip's makes a sync file and returns (Mesa vk_android.c); the other
      * drivers are untested, so they keep the wait. */
     { HLE_QUIRK_PRESENT_CPU_WAIT, "present_cpu_wait", not_turnip },
+    /* Xclipse 940, SPAL 25.3.3: MK Shaolin Monks' fighters (bones by
+     * c[A0 + n]) as large flat planes while the scenery (constant indices)
+     * was right; the same block as a storage buffer drew them right
+     * (2026-10-27). */
+    { HLE_QUIRK_CONST_SSBO, "const_ssbo", samsung },
+    /* Xclipse 940, SPAL 25.3.3: MK Shaolin Monks' scenery (SHORT3 positions
+     * in vertex programs) as stretched polygons; fetched as R16G16B16_SSCALED
+     * it drew right (2026-10-27). */
+    { HLE_QUIRK_S32K_SCALED, "s32k_scaled", samsung },
 };
 
 static uint32_t g_defaults;

@@ -202,6 +202,15 @@ typedef struct HleFfPush {
 /* The block in a storage buffer (set by the back end before any shader is made) */
 extern bool g_hle_push_ssbo;
 
+/* The constants (set 1: VshConst, FfConst) in a read-only storage buffer, not
+ * a uniform one (vk/quirks.h HLE_QUIRK_CONST_SSBO: Xclipse; set by the back
+ * end before any shader is made); the block's qualifier */
+extern bool g_hle_const_ssbo;
+static inline const char *hle_const_glsl(void)
+{
+    return g_hle_const_ssbo ? "readonly buffer" : "uniform";
+}
+
 /* Mali (vk/quirks.h HLE_QUIRK_Z_EQ_W, set with g_hle_push_ssbo): a clip-space
  * z equal to w corrupts the depth buffer (PPSSPP's EQUAL_WZ_CORRUPTS_DEPTH,
  * ARMSX2): the vertex shaders end by moving such a vertex a hair inside. */

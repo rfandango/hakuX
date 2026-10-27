@@ -36,6 +36,7 @@ static void put(Buf *b, const char *fmt, ...)
 }
 
 bool g_hle_push_ssbo;                   /* ff.h */
+bool g_hle_const_ssbo;                  /* ff.h */
 bool g_hle_glsl_zw;                     /* ff.h */
 bool g_hle_glsl_zclamp;                 /* ff.h */
 bool g_hle_glsl_fixed;                  /* ff.h */
@@ -104,8 +105,8 @@ size_t hle_ff_vs_glsl(const HleFfVsKey *k, char *buf, size_t cap)
     bool normal = (k->fvf & HLE_FVF_NORMAL) != 0;
     put(&b, "#version 450\n%s", hle_push_glsl());
     if (ubo) {
-        put(&b, "layout(set = 1, binding = 0, std140) uniform FfConst { vec4 f[%u]; };\n",
-            HLE_FFU_COUNT);
+        put(&b, "layout(set = 1, binding = 0, std140) %s FfConst { vec4 f[%u]; };\n",
+            hle_const_glsl(), HLE_FFU_COUNT);
     }
     put(&b, "layout(location = 0) in vec4 iPos;\n");
     if (normal) {

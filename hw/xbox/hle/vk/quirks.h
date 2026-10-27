@@ -76,7 +76,26 @@ enum {
      * presents with nothing to wait for (vk/swapchain.c). On for every
      * driver but Turnip, whose present hands the compositor a fence. */
     HLE_QUIRK_PRESENT_CPU_WAIT = 1u << 11,
+    /* A uniform buffer indexed per vertex (the vertex programs' c[A0 + n],
+     * skinning's bone matrices) reads wrong values (Samsung's Xclipse): the
+     * constants (set 1, VshConst / FfConst) are a read-only storage buffer
+     * instead, same std140 layout and dynamic offsets (vk/draw.c,
+     * shader/ff.h g_hle_const_ssbo). Read when the back end starts: it
+     * changes the shaders. */
+    HLE_QUIRK_CONST_SSBO = 1u << 12,
+    /* Programs' S32K attributes are fetched as integers (R16..._SINT) and
+     * converted in the shader; with this quirk as SSCALED floats, the same
+     * values (Xclipse, whose missing R16G16B16_SINT fell back to the
+     * four-component form, w read from the next 2 bytes). Where a driver
+     * lacks an n-component SINT format but has the SSCALED one, that is used
+     * regardless (vk/draw.c vat_format). Read when the back end starts. */
+    HLE_QUIRK_S32K_SCALED = 1u << 13,
 };
+
+/* Samsung's Xclipse GPUs (AMD RDNA in Exynos SoCs): their PCI vendor ID, and
+ * VK_DRIVER_ID_SAMSUNG_PROPRIETARY (21) by number, for headers older than it */
+#define HLE_VENDOR_SAMSUNG    0x144Du
+#define HLE_DRIVER_ID_SAMSUNG 21u
 
 extern uint32_t g_hle_quirks;
 

@@ -203,9 +203,9 @@ static void head(Buf *bp, const HleVshKey *k)
     Buf b = *bp;
     const char *interp = k->flat ? "flat " : "";
     put(&b, "#version 450\n%s", hle_push_glsl());
-    put(&b, "layout(set = 1, binding = 0, std140) uniform VshConst { vec4 c[192]; "
+    put(&b, "layout(set = 1, binding = 0, std140) %s VshConst { vec4 c[192]; "
             "vec4 vcur[16]; };\n"
-            "invariant gl_Position;\n");
+            "invariant gl_Position;\n", hle_const_glsl());
     for (unsigned i = 0; i < 16; i++) {
         if (k->in_mask & (1u << i)) {
             put(&b, "layout(location = %u) in %s v%u_in;\n", i,
