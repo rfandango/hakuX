@@ -71,6 +71,19 @@ static bool mali_g57(const HleDriver *d)
     return mali(d) && strstr(d->props.deviceName, "Mali-G57") != NULL;
 }
 
+/* malisx2 reports Arm's vendor and driver IDs; "malisx2" in driverInfo tells
+ * it apart. Some Arm quirks are blob bugs and must not apply to it. */
+static bool malisx2(const HleDriver *d)
+{
+    return mali(d) && strstr(d->drv.driverInfo, "malisx2") != NULL;
+}
+
+/* Arm's own Mali driver. */
+static bool arm_blob(const HleDriver *d)
+{
+    return arm_proprietary(d) && !malisx2(d);
+}
+
 /* Seen on (driver, version, what showed it). */
 static const HleQuirk k_quirks[] = {
     /* Adreno 840 stock driver 0x8034a02c: Forza's menu text picks its glyph
@@ -93,8 +106,9 @@ static const HleQuirk k_quirks[] = {
      * its depth-only shadow pass, and the scene flickered (2026-10-23). */
     { HLE_QUIRK_BLEND_CONST_RESET, "blend_const_reset", mesa_turnip },
     /* ARMSX2 (GSDeviceVK.cpp): "Arm's Mali blob crashes in
-     * vkCmdPushDescriptorSetKHR even where it advertises the extension" */
-    { HLE_QUIRK_NO_PUSH_DESC, "no_push_desc", arm_proprietary },
+     * vkCmdPushDescriptorSetKHR even where it advertises the extension".
+     * malisx2 is not the blob: it serves push descriptors, so it keeps them. */
+    { HLE_QUIRK_NO_PUSH_DESC, "no_push_desc", arm_blob },
     /* ARMSX2 after PPSSPP: depth vs stencil load ops that differ corrupt on Mali */
     { HLE_QUIRK_DS_SAME_LOAD, "ds_same_load", mali },
     /* ARMSX2 (tfx.glsl GPU_PROFILE_MALI) after PPSSPP's EQUAL_WZ_CORRUPTS_DEPTH */
