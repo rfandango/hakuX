@@ -107,7 +107,7 @@
   <string name="settings_gpu_driver_system">System driver</string>
   <string name="settings_gpu_driver_custom">Custom driver</string>
   <string name="settings_gpu_driver_active_version">%1$s (%2$s)</string>
-  <string name="settings_gpu_driver_not_supported">System driver. Other drivers can only be loaded on phones with an Adreno GPU.</string>
+  <string name="settings_gpu_driver_not_supported">System driver. Other drivers can only be loaded on phones with an Adreno or Mali GPU.</string>
   <string name="gpu_driver_desc">The Vulkan driver hakuX draws the Xbox\'s graphics with. A Turnip driver (Mesa\'s driver for Adreno GPUs) can be more accurate and faster than the one that came with the phone. A change takes effect at the next game start.</string>
   <string name="gpu_driver_section">Drivers</string>
   <string name="gpu_driver_system_choice">System driver</string>

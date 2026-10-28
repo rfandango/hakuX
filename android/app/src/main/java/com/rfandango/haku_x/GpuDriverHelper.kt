@@ -37,7 +37,7 @@ object GpuDriverHelper {
   }
 
   fun supportsCustomDriverLoading(): Boolean {
-    return File("/dev/kgsl-3d0").exists()
+    return File("/dev/kgsl-3d0").exists() || File("/dev/mali0").exists()
   }
 
   /**
