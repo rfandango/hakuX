@@ -10,7 +10,21 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")/../.." && pwd)
 build=${1:-$here/build/native/core}
 ndk=${ANDROID_NDK:-/c/Users/USER/AppData/Local/Android/Sdk/ndk/29.0.14206865}
-strip="$ndk/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-strip.exe"
+# The NDK's strip, from the host's prebuilt directory: the Windows one this
+# script was written on, or the Linux one a Linux build machine has.
+strip=
+for h in linux-x86_64 windows-x86_64; do
+  for s in llvm-strip llvm-strip.exe; do
+    if [ -x "$ndk/toolchains/llvm/prebuilt/$h/bin/$s" ]; then
+      strip="$ndk/toolchains/llvm/prebuilt/$h/bin/$s"
+      break 2
+    fi
+  done
+done
+if [ -z "$strip" ]; then
+  echo "app-libs.sh: no llvm-strip under $ndk (set ANDROID_NDK)" >&2
+  exit 1
+fi
 out="$here/android/app/src/main/jniLibs/arm64-v8a"
 mkdir -p "$out"
 "$strip" -o "$out/libhakuxcore.so" "$build/libhakuxcore.so"
