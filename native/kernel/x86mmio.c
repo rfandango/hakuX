@@ -364,3 +364,11 @@ bool nc_x86mmio_hook(NcKernel *k, NcFrame *f, uint32_t eip)
     nc_frame_set_eip(f, eip + op.len);
     return true;
 }
+
+void nc_x86mmio_reset(void)
+{
+    memset(g_site, 0, sizeof(g_site));
+    memset(g_strikes, 0, sizeof(g_strikes));
+    memset(g_pending, 0, sizeof(g_pending));
+    g_npending = 0;
+}

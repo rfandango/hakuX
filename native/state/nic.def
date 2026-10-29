@@ -3,7 +3,7 @@
  * isn't kept: a loaded state's link negotiates again. */
 NC_SECTION(NIC)
 
-NC_REC(Nvnet, 2816)
+NC_REC(Nvnet, NC_ABI_SIZE(2816, 2824))
 NC_SKIP(Nvnet, vm)
 NC_SKIP(Nvnet, lock)
 NC_SKIP(Nvnet, kick)

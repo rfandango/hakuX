@@ -17,8 +17,16 @@ int hle_fe_init(void)
     if (g_ring_mem) {
         return 0;
     }
-    g_ring_mem = hle_memalign(64, HLE_RING_BYTES);
+    g_ring_mem = hle_big_alloc(HLE_RING_BYTES);
     return hle_ring_init(&g_ring, g_ring_mem, HLE_RING_BYTES);
+}
+
+void hle_fe_shutdown(void)
+{
+    hle_big_free(g_ring_mem, HLE_RING_BYTES);
+    g_ring_mem = NULL;
+    memset(&g_ring, 0, sizeof(g_ring));
+    g_value = 0;
 }
 
 HleRing *hle_fe_ring(void)

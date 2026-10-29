@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <poll.h>
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/eventfd.h>
@@ -34,6 +35,8 @@ static struct {
     NcNetConfig cfg;
     const NcNetBackend *be;
     bool running;
+    pthread_t thread;
+    bool started, quit;
     pthread_mutex_t lock;               /* both rings */
     pthread_cond_t rx_cond;
     Ring tx, rx;
@@ -291,7 +294,7 @@ size_t nc_net_recv(uint8_t *buf, size_t cap)
 void nc_net_wait_rx(uint64_t timeout_ns)
 {
     struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
+    clock_gettime(CLOCK_REALTIME, &ts);   /* rx_cond's default clock */
     ts.tv_sec += (time_t)(timeout_ns / 1000000000);
     ts.tv_nsec += (long)(timeout_ns % 1000000000);
     if (ts.tv_nsec >= 1000000000) {
@@ -313,7 +316,7 @@ static void *net_thread(void *arg)
     static Frame f;
     struct pollfd fds[MAX_FDS];
     time_t last_log = 0;
-    for (;;) {
+    while (!__atomic_load_n(&g_net.quit, __ATOMIC_ACQUIRE)) {
         fds[0] = (struct pollfd){ .fd = g_net.wake_fd, .events = POLLIN };
         int timeout = 1000;
         const int n = be->fill(fds + 1, MAX_FDS - 1, &timeout);
@@ -325,6 +328,9 @@ static void *net_thread(void *arg)
         if (fds[0].revents & POLLIN) {
             uint64_t v;
             (void)!read(g_net.wake_fd, &v, sizeof(v));
+        }
+        if (__atomic_load_n(&g_net.quit, __ATOMIC_ACQUIRE)) {
+            break;
         }
         for (;;) {                      /* the guest's frames, one at a time */
             pthread_mutex_lock(&g_net.lock);
@@ -356,6 +362,7 @@ static void *net_thread(void *arg)
 
 void nc_net_start(void)
 {
+    nc_net_stop();
     /* debug: NC_NET="option option ..." over the app's (via debug.hakux.env) */
     const char *env = getenv("NC_NET");
     if (env) {
@@ -373,19 +380,54 @@ void nc_net_start(void)
         nc_log("hakuX-native-net", "network off: the NIC has no link");
         return;
     }
+    g_net.be = be;
     g_net.wake_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     if (g_net.wake_fd < 0 || !ring_init(&g_net.tx, TX_SLOTS) || !ring_init(&g_net.rx, RX_SLOTS) || !be->init()) {
         nc_log("hakuX-native-net", "%s: couldn't start: the NIC has no link", be->name);
+        nc_net_stop();
         return;
     }
-    g_net.be = be;
     pcap_open();
-    pthread_t t;
-    if (pthread_create(&t, NULL, net_thread, NULL) != 0) {
+    __atomic_store_n(&g_net.quit, false, __ATOMIC_RELEASE);
+    if (pthread_create(&g_net.thread, NULL, net_thread, NULL) != 0) {
         nc_log("hakuX-native-net", "%s: no thread: the NIC has no link", be->name);
+        nc_net_stop();
         return;
     }
-    pthread_detach(t);
+    g_net.started = true;
     __atomic_store_n(&g_net.running, true, __ATOMIC_RELEASE);
     nc_log("hakuX-native-net", "%s: started", be->name);
+}
+
+void nc_net_stop(void)
+{
+    __atomic_store_n(&g_net.running, false, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_net.quit, true, __ATOMIC_RELEASE);
+    if (g_net.started) {
+        const uint64_t one = 1;
+        (void)!write(g_net.wake_fd, &one, sizeof(one));
+        pthread_join(g_net.thread, NULL);
+        g_net.started = false;
+    }
+    if (g_net.be && g_net.be->close) {
+        g_net.be->close();
+    }
+    g_net.be = NULL;
+    if (g_net.wake_fd >= 0) {
+        close(g_net.wake_fd);
+        g_net.wake_fd = -1;
+    }
+    pthread_mutex_lock(&g_net.lock);
+    if (g_net.pcap) {
+        fclose(g_net.pcap);
+        g_net.pcap = NULL;
+    }
+    free(g_net.tx.slot);
+    free(g_net.rx.slot);
+    g_net.tx = (Ring){0};
+    g_net.rx = (Ring){0};
+    memset(g_net.mac, 0, sizeof(g_net.mac));
+    g_net.sent = g_net.received = 0;
+    g_net.twin = 0;
+    pthread_mutex_unlock(&g_net.lock);
 }

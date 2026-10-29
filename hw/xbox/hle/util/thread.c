@@ -154,12 +154,13 @@ struct HleTimer {
 static pthread_mutex_t g_tm = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_tc;
 static HleTimer *g_timers;
-static pthread_once_t g_tonce = PTHREAD_ONCE_INIT;
+static bool g_tstarted, g_tquit;    /* under g_tm (hle_timers_stop) */
+static pthread_t g_tthread;
 
 static void *timer_thread(void *arg)
 {
     pthread_mutex_lock(&g_tm);
-    for (;;) {
+    while (!g_tquit) {
         int64_t now = hle_now_ms(), next = INT64_MAX;
         HleTimer *due = NULL;
         for (HleTimer *t = g_timers; t; t = t->next) {
@@ -185,26 +186,54 @@ static void *timer_thread(void *arg)
             pthread_cond_timedwait(&g_tc, &g_tm, &ts);
         }
     }
+    pthread_mutex_unlock(&g_tm);
     return arg;
 }
 
+/* g_tm held */
 static void timers_start(void)
 {
     monotonic_cond_init(&g_tc);
-    pthread_t t;
-    pthread_create(&t, NULL, timer_thread, NULL);
-    pthread_setname_np(t, "hle-timers");
-    pthread_detach(t);
+    g_tquit = false;
+    if (pthread_create(&g_tthread, NULL, timer_thread, NULL) == 0) {
+        pthread_setname_np(g_tthread, "hle-timers");
+        g_tstarted = true;
+    }
+}
+
+void hle_timers_stop(void)
+{
+    pthread_mutex_lock(&g_tm);
+    const bool started = g_tstarted;
+    g_tquit = true;
+    if (started) {
+        pthread_cond_broadcast(&g_tc);
+    }
+    pthread_mutex_unlock(&g_tm);
+    if (started) {
+        pthread_join(g_tthread, NULL);  /* after the callback it may be in */
+        pthread_cond_destroy(&g_tc);
+    }
+    pthread_mutex_lock(&g_tm);
+    while (g_timers) {
+        HleTimer *t = g_timers;
+        g_timers = t->next;
+        free(t);
+    }
+    g_tstarted = g_tquit = false;
+    pthread_mutex_unlock(&g_tm);
 }
 
 HleTimer *hle_timer_new(void (*cb)(void *), void *opaque)
 {
-    pthread_once(&g_tonce, timers_start);
     HleTimer *t = calloc(1, sizeof(*t));
     t->cb = cb;
     t->opaque = opaque;
     t->deadline_ms = -1;
     pthread_mutex_lock(&g_tm);
+    if (!g_tstarted) {
+        timers_start();
+    }
     t->next = g_timers;
     g_timers = t;
     pthread_mutex_unlock(&g_tm);

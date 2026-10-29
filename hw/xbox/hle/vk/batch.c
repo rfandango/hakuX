@@ -204,6 +204,7 @@ void hle_batch_init(void)
     if (mt < 0 || R.vkAllocateMemory(g_hvk.dev, &mai, NULL, &g_b.mem) != VK_SUCCESS) {
         R.vkDestroyBuffer(g_hvk.dev, g_b.buf, NULL);
         g_b.buf = VK_NULL_HANDLE;
+        g_b.mem = VK_NULL_HANDLE;
         hle_log("hakuX-hle-back", "strip batching off: no index memory");
         return;
     }
@@ -212,5 +213,20 @@ void hle_batch_init(void)
     g_b.on = g_b.map != NULL;
     hle_log("hakuX-hle-back", "strip batching %s (%u KiB of indices per frame slot)", g_b.on ? "on" : "off",
             SLOT_INDICES * 4 / 1024);
+}
+
+/* The recordings ended (no run held), the device idle: the index buffer
+ * gone (its memory unmapped as it is freed), and the real entry points
+ * with it: hle_batch_install takes the next device's table. */
+void hle_batch_shutdown(void)
+{
+    if (g_b.buf) {
+        R.vkDestroyBuffer(g_hvk.dev, g_b.buf, NULL);
+    }
+    if (g_b.mem) {
+        R.vkFreeMemory(g_hvk.dev, g_b.mem, NULL);
+    }
+    memset(&g_b, 0, sizeof(g_b));
+    memset(&R, 0, sizeof(R));
 }
 

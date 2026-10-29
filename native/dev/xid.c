@@ -26,6 +26,7 @@
 typedef struct Xid {
     NcUsbDev dev;
     unsigned player;
+    bool polled;    /* since the last bus reset (logged once per enumeration) */
 } Xid;
 
 static const uint8_t k_dev_desc[18] = {
@@ -269,9 +270,8 @@ static int xid_data(NcUsbDev *d, bool in, int ep, uint8_t *buf, int len)
         return NC_USB_STALL;
     }
     if (in) {
-        static bool polled[XID_PLAYERS];
-        if (!polled[x->player]) {
-            polled[x->player] = true;
+        if (!x->polled) {
+            x->polled = true;
             nc_log("hakuX-native-usb", "gamepad %u: polled", x->player);
         }
         uint8_t r[20];
@@ -295,6 +295,11 @@ static int xid_data(NcUsbDev *d, bool in, int ep, uint8_t *buf, int len)
     return len;
 }
 
+static void xid_reset(NcUsbDev *d)
+{
+    ((Xid *)d)->polled = false;
+}
+
 NcUsbDev *nc_xid_gamepad_new(unsigned player)
 {
     Xid *x = calloc(1, sizeof(Xid));
@@ -308,6 +313,7 @@ NcUsbDev *nc_xid_gamepad_new(unsigned player)
     x->dev.nstrings = 3;
     x->dev.control = xid_control;
     x->dev.data = xid_data;
+    x->dev.reset = xid_reset;
     x->dev.pending_addr = -1;
     script_load();
     return &x->dev;

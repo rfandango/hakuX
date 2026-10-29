@@ -37,5 +37,6 @@ extern bool g_hland_coherent;
 int hle_vk_guest_ram_init(void);
 int hle_vk_arena_init(uint32_t size);
 int hle_vk_land_init(uint32_t size);
+void hle_vk_guest_ram_shutdown(void);
 
 #endif

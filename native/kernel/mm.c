@@ -76,13 +76,14 @@ static uint32_t caller_of(NcKernel *k, NcFrame *f)
 
 /* Who holds the RAM, once, at the first allocation that finds none: the
  * contiguous blocks summed by caller and the regions with the most committed. */
+static bool g_holders_logged;
+
 static void log_holders(NcKernel *k, const char *why)
 {
-    static bool s_done;
-    if (s_done) {
+    if (g_holders_logged) {
         return;
     }
-    s_done = true;
+    g_holders_logged = true;
     enum { N = 64 };
     uint32_t ra[N], bytes[N], blocks[N];
     unsigned n = 0;
@@ -1052,4 +1053,16 @@ bool nc_mm_state_load(NcRd *r, unsigned v)
     g_nkept = st.nkept;
     g_gpu_instance_end = st.gpu_instance_end;
     return !r->fail;
+}
+
+void nc_mm_reset(void)
+{
+    memset(g_regions, 0, sizeof(g_regions));
+    g_nregions = 0;
+    memset(g_contig, 0, sizeof(g_contig));
+    g_ncontig = 0;
+    g_gpu_instance_end = 0;
+    memset(g_kept, 0, sizeof(g_kept));      /* a relaunch's come back from kept.bin, as in a new process */
+    g_nkept = 0;
+    g_holders_logged = false;
 }

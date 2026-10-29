@@ -33,17 +33,18 @@ void nc_mods_set_manifest(const char *path)
 /* ---- XBE patches ---- */
 
 /* An XBE's sections by its path on the disc (the last one asked for). */
+static char g_xbe_last[256];
+static HleXbeInfo g_xbe_info;
+static bool g_xbe_ok;
+
 static bool xbe_info(NcDisc *disc, const char *path, HleXbeInfo *x)
 {
-    static char last[256];
-    static HleXbeInfo info;
-    static bool ok;
-    if (!strcmp(last, path)) {
-        *x = info;
-        return ok;
+    if (!strcmp(g_xbe_last, path)) {
+        *x = g_xbe_info;
+        return g_xbe_ok;
     }
-    snprintf(last, sizeof(last), "%s", path);
-    ok = false;
+    snprintf(g_xbe_last, sizeof(g_xbe_last), "%s", path);
+    g_xbe_ok = false;
     NcDiscFile f;
     uint8_t probe[0x110];
     if (!nc_disc_find(disc, path, &f) || f.size < sizeof(probe) || !nc_disc_read(disc, &f, 0, probe, sizeof(probe))) {
@@ -55,11 +56,11 @@ static bool xbe_info(NcDisc *disc, const char *path, HleXbeInfo *x)
     }
     uint8_t *hdr = malloc(hdr_size);
     if (hdr && nc_disc_read(disc, &f, 0, hdr, hdr_size)) {
-        ok = hle_xbe_parse(hdr, hdr_size, &info) == HLE_XBE_OK;
+        g_xbe_ok = hle_xbe_parse(hdr, hdr_size, &g_xbe_info) == HLE_XBE_OK;
     }
     free(hdr);
-    *x = info;
-    return ok;
+    *x = g_xbe_info;
+    return g_xbe_ok;
 }
 
 /* VA -> the XBE file's offset: its headers, or a section's raw data. The
@@ -584,4 +585,32 @@ bool nc_mods_state_load(NcRd *r, unsigned v)
     }
     g_have_saved = !r->fail;
     return !r->fail;
+}
+
+static void free_patches(MemPatch **list, unsigned *count)
+{
+    for (unsigned i = 0; i < *count; i++) {
+        free((*list)[i].old);
+        free((*list)[i].neu);
+    }
+    free(*list);
+    *list = NULL;
+    *count = 0;
+}
+
+void nc_mods_reset(void)
+{
+    g_vm = NULL;
+    g_cpu = NULL;
+    memset(g_exec, 0, sizeof(g_exec));
+    g_nexec = 0;
+    g_vblank = 0;
+    memset(g_logged, 0, sizeof(g_logged));
+    free_patches(&g_mp, &g_nmp);
+    free_patches(&g_saved, &g_nsaved);
+    g_have_saved = false;
+    g_xbe_last[0] = 0;
+    g_xbe_ok = false;
+    memset(&g_xbe_info, 0, sizeof(g_xbe_info));
+    nc_cheats_reset();
 }

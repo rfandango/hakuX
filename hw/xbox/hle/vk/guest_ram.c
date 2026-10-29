@@ -3,7 +3,9 @@
  */
 #include "hw/xbox/hle/base.h"
 
+#ifdef __ANDROID__
 #include <android/hardware_buffer.h>
+#endif
 #include "hw/xbox/hle/hle.h"
 #include "hw/xbox/hle/mem/guestmem.h"
 #include "hw/xbox/hle/uma/uma.h"
@@ -16,6 +18,7 @@ bool g_hland_coherent;
 
 #define T (g_hvk.t)
 
+#ifdef __ANDROID__
 static bool import(AHardwareBuffer *ahb, bool bda)
 {
     VkAndroidHardwareBufferPropertiesANDROID props = {
@@ -37,6 +40,7 @@ static bool import(AHardwareBuffer *ahb, bool bda)
                  (bda ? VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT : 0),
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE };
     if (T.vkCreateBuffer(g_hvk.dev, &bci, NULL, &g_hram.buf) != VK_SUCCESS) {
+        g_hram.buf = VK_NULL_HANDLE;
         return false;
     }
     /* cached and coherent where the import allows it: the native core's RAM
@@ -63,6 +67,7 @@ static bool import(AHardwareBuffer *ahb, bool bda)
     if (mt < 0 || T.vkAllocateMemory(g_hvk.dev, &mai, NULL, &g_hram.mem) != VK_SUCCESS) {
         T.vkDestroyBuffer(g_hvk.dev, g_hram.buf, NULL);
         g_hram.buf = VK_NULL_HANDLE;
+        g_hram.mem = VK_NULL_HANDLE;
         return false;
     }
     T.vkBindBufferMemory(g_hvk.dev, g_hram.buf, g_hram.mem, 0);
@@ -76,16 +81,22 @@ static bool import(AHardwareBuffer *ahb, bool bda)
             g_hvk.mem.memoryTypes[mt].propertyFlags, props.memoryTypeBits, bda ? "yes" : "no");
     return true;
 }
+#endif
 
 int hle_vk_guest_ram_init(void)
 {
-    AHardwareBuffer *ahb = hle_uma_ahb();
     g_hram.size = hle_ram_size();
+#ifdef __ANDROID__
+    AHardwareBuffer *ahb = hle_uma_ahb();
     g_hram.zero_copy = ahb && ((g_hvk.caps.bda && import(ahb, true)) || import(ahb, false));
     if (!g_hram.zero_copy) {
         hle_log("hakuX-hle-back", "guest RAM not imported (%s): copy fallback",
                 ahb ? "import failed" : "RAM is not an AHB");
     }
+#else
+    g_hram.zero_copy = false;
+    hle_log("hakuX-hle-back", "Linux guest RAM: copy fallback (no external-memory import)");
+#endif
     return 0;
 }
 
@@ -98,6 +109,7 @@ int hle_vk_arena_init(uint32_t size)
                  VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE };
     if (T.vkCreateBuffer(g_hvk.dev, &bci, NULL, &g_harena.buf) != VK_SUCCESS) {
+        g_harena.buf = VK_NULL_HANDLE;
         return -1;
     }
     VkMemoryRequirements req;
@@ -113,6 +125,7 @@ int hle_vk_arena_init(uint32_t size)
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
         .allocationSize = req.size, .memoryTypeIndex = (uint32_t)mt };
     if (mt < 0 || T.vkAllocateMemory(g_hvk.dev, &mai, NULL, &g_harena.mem) != VK_SUCCESS) {
+        g_harena.mem = VK_NULL_HANDLE;  /* the buffer is the shutdown's */
         return -1;
     }
     T.vkBindBufferMemory(g_hvk.dev, g_harena.buf, g_harena.mem, 0);
@@ -166,5 +179,29 @@ int hle_vk_land_init(uint32_t size)
     hle_log("hakuX-hle-back", "readback landing: %u MiB host-cached (type %d, %scoherent)",
             size >> 20, mt, g_hland_coherent ? "" : "not ");
     return 0;
+}
+
+/* (the device idle) the buffer, then its memory, unmapped as it is freed */
+static void buf_free(VkBuffer buf, VkDeviceMemory mem)
+{
+    if (buf) {
+        T.vkDestroyBuffer(g_hvk.dev, buf, NULL);
+    }
+    if (mem) {
+        T.vkFreeMemory(g_hvk.dev, mem, NULL);
+    }
+}
+
+void hle_vk_guest_ram_shutdown(void)
+{
+    /* the imported RAM's memory holds a reference to the AHB, uma.c's: the
+     * free drops it, the guest RAM stays */
+    buf_free(g_hram.buf, g_hram.mem);
+    buf_free(g_harena.buf, g_harena.mem);
+    buf_free(g_hland.buf, g_hland.mem);
+    memset(&g_hram, 0, sizeof(g_hram));
+    memset(&g_harena, 0, sizeof(g_harena));
+    memset(&g_hland, 0, sizeof(g_hland));
+    g_hland_coherent = false;
 }
 

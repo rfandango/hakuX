@@ -31,6 +31,9 @@ struct NcKernel;
 void nc_mods_set_manifest(const char *path);
 /* After the disc opens: its overlay (files, patches) and the cheats. */
 void nc_mods_install(NcDisc *disc);
+/* The core stopped: the patches remembered, the cheats and the per-boot
+ * state dropped (the manifest, the front end's, stays). */
+void nc_mods_reset(void);
 /* Once the title's XBE is in memory and its CPU made: where the cheats
  * write (the XBE's executable sections drop translations they change). */
 void nc_mods_bind(NcVm *vm, struct NcCpu *cpu, const HleXbeInfo *xbe);

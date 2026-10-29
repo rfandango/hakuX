@@ -12,6 +12,11 @@
  * 0 = ok; negative = the title must use LLE. */
 int hle_back_start(void);
 bool hle_back_running(void);
+/* The core stops (M2; the push-buffer decoder has stopped): the renderer's
+ * threads joined, the device idle, every object on it destroyed and the
+ * renderer's state as before hle_back_start. The device stays
+ * (hle_vk_shutdown). */
+void hle_back_shutdown(void);
 void hle_back_kick(void);
 /* The guest blocks on the timeline: pending fence / kick boundaries are
  * submitted at once (vCPU thread). */

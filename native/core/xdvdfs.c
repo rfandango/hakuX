@@ -9,6 +9,7 @@
  *   u8 attributes, u8 name length, name
  */
 #include "native/core/xdvdfs.h"
+#include "native/core/chd.h"
 
 #include <ctype.h>
 #include <fcntl.h>
@@ -37,17 +38,32 @@ static bool pread_all(int fd, void *buf, size_t len, uint64_t off)
     return true;
 }
 
+/* The image's bytes, an ISO's or a CHD's. */
+static bool image_read(const NcDisc *d, void *buf, size_t len, uint64_t off)
+{
+    return d->chd ? nc_chd_read(d->chd, buf, len, off) : pread_all(d->fd, buf, len, off);
+}
+
+/* On failure the disc holds nothing, and fd is the caller's to close. */
 bool nc_disc_open(NcDisc *d, int fd)
 {
     memset(d, 0, sizeof(*d));
-    d->fd = fd;
+    d->fd = -1;
+    bool is_chd;
+    NcChd *chd = nc_chd_open(fd, &is_chd);
+    if (is_chd && !chd) {
+        return false;
+    }
+    const NcDisc probe = {.fd = fd, .chd = chd};
     for (size_t i = 0; i < sizeof(k_part_offsets) / sizeof(k_part_offsets[0]); i++) {
         uint8_t vd[NC_XDVDFS_SECTOR];
         uint64_t off = k_part_offsets[i];
-        if (!pread_all(fd, vd, sizeof(vd), off + 32ull * NC_XDVDFS_SECTOR)) {
+        if (!image_read(&probe, vd, sizeof(vd), off + 32ull * NC_XDVDFS_SECTOR)) {
             continue;
         }
         if (memcmp(vd, k_magic, 20) == 0 && memcmp(vd + 0x7EC, k_magic, 20) == 0) {
+            d->fd = fd;
+            d->chd = chd;
             d->part_off = off;
             d->root_sector = nc_rd32(vd + 20);
             d->root_size = nc_rd32(vd + 24);
@@ -57,15 +73,22 @@ bool nc_disc_open(NcDisc *d, int fd)
         }
     }
     nc_log("hakuX-native", "disc: no XDVDFS volume found");
+    nc_chd_close(chd);
     return false;
 }
 
+static void ov_free(NcDiscOverlay *o);
+
 void nc_disc_close(NcDisc *d)
 {
+    nc_chd_close(d->chd);
+    d->chd = NULL;
     if (d->fd >= 0) {
         close(d->fd);
     }
     d->fd = -1;
+    ov_free(d->ov);
+    d->ov = NULL;
 }
 
 static bool name_eq(const uint8_t *a, size_t alen, const char *b, size_t blen)
@@ -127,8 +150,7 @@ static bool disc_find(const NcDisc *d, const char *path, NcDiscFile *out)
         if (!dir) {
             return false;
         }
-        bool ok = pread_all(d->fd, dir, cur.size,
-                            d->part_off + (uint64_t)cur.sector * NC_XDVDFS_SECTOR) &&
+        bool ok = image_read(d, dir, cur.size, d->part_off + (uint64_t)cur.sector * NC_XDVDFS_SECTOR) &&
                   dir_search(dir, cur.size, 0, p, (size_t)(end - p), &cur, 0);
         free(dir);
         if (!ok) {
@@ -190,6 +212,25 @@ static void norm_case(const char *in, char *out, size_t cap, bool lower)
 static void norm_path(const char *in, char *out, size_t cap)
 {
     norm_case(in, out, cap, true);
+}
+
+static void ov_free(NcDiscOverlay *o)
+{
+    if (!o) {
+        return;
+    }
+    for (unsigned i = 0; i < o->n; i++) {
+        if (o->e[i].fd >= 0) {
+            close(o->e[i].fd);
+        }
+        free(o->e[i].host);
+    }
+    for (unsigned i = 0; i < o->np; i++) {
+        free(o->p[i].bytes);
+    }
+    free(o->e);
+    free(o->p);
+    free(o);
 }
 
 static NcDiscOverlay *ov_of(NcDisc *d)
@@ -402,7 +443,7 @@ bool nc_disc_find_orig(const NcDisc *d, const char *path, NcDiscFile *out)
 bool nc_disc_read_orig(const NcDisc *d, const NcDiscFile *f, uint64_t off, void *buf, size_t len)
 {
     return f->sector < NC_DISC_OVERLAY && off + len <= f->size &&
-           pread_all(d->fd, buf, len, d->part_off + (uint64_t)f->sector * NC_XDVDFS_SECTOR + off);
+           image_read(d, buf, len, d->part_off + (uint64_t)f->sector * NC_XDVDFS_SECTOR + off);
 }
 
 bool nc_disc_read(const NcDisc *d, const NcDiscFile *f, uint64_t off, void *buf, size_t len)
@@ -412,7 +453,7 @@ bool nc_disc_read(const NcDisc *d, const NcDiscFile *f, uint64_t off, void *buf,
     }
     const bool ok = f->sector >= NC_DISC_OVERLAY
                         ? ov_read(d, f, off, buf, len)
-                        : pread_all(d->fd, buf, len, d->part_off + (uint64_t)f->sector * NC_XDVDFS_SECTOR + off);
+                        : image_read(d, buf, len, d->part_off + (uint64_t)f->sector * NC_XDVDFS_SECTOR + off);
     if (ok && d->ov) {
         for (unsigned i = 0; i < d->ov->np; i++) {
             const OvPatch *p = &d->ov->p[i];

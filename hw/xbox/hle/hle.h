@@ -33,6 +33,10 @@ extern HleRuntime g_hle;
 extern char g_hle_unavailable[256];
 
 void hle_init(void);
+/* The core stops (M2; the guest's CPU has left): the HLE GPU's threads
+ * joined, the renderer torn down (the device stays: hle_vk_shutdown) and
+ * its state as before hle_init. */
+void hle_shutdown(void);
 const char *hle_posture_name(HlePosture p);
 void hle_log(const char *tag, const char *fmt, ...) G_GNUC_PRINTF(2, 3);
 

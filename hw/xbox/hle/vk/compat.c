@@ -63,6 +63,7 @@ static struct {
     GHashTable *fbs;                /* FbKey -> VkFramebuffer */
     GHashTable *att;                /* VkImageView -> framebuffers using it */
     uint64_t npass, nfb;
+    bool said;                      /* the rendering not emulated logged */
 } g_c;
 
 /* the caches' keys: zeroed, then filled, so their bytes say all */
@@ -195,9 +196,8 @@ static void VKAPI_CALL c_begin_rendering(VkCommandBuffer cb, const VkRenderingIn
     memset(&k, 0, sizeof(k));
     memset(&f, 0, sizeof(f));
     if (ri->flags || ri->viewMask || ri->colorAttachmentCount > MAX_COLORS) {
-        static bool said;
-        if (!said) {
-            said = true;
+        if (!g_c.said) {
+            g_c.said = true;
             hle_log("hakuX-hle-back", "compat: rendering flags %x, view mask %x, %u colours "
                     "not emulated", ri->flags, ri->viewMask, ri->colorAttachmentCount);
         }
@@ -562,4 +562,36 @@ void hle_compat_install(struct VolkDeviceTable *t)
         t->vkCmdPipelineBarrier2 = c_barrier2;
         t->vkQueueSubmit2 = c_submit2;
     }
+}
+
+static void fb_destroy(gpointer key, gpointer value, gpointer opaque)
+{
+    R.vkDestroyFramebuffer(g_hvk.dev, (VkFramebuffer)value, NULL);
+}
+
+static void pass_destroy(gpointer key, gpointer value, gpointer opaque)
+{
+    R.vkDestroyRenderPass(g_hvk.dev, (VkRenderPass)value, NULL);
+}
+
+void hle_compat_shutdown(void)
+{
+    if (!g_c.init) {
+        return;
+    }
+    /* a view still known is its owner's: its framebuffers go here, but its
+     * destroy after this would find no tables (the owners' shutdowns first) */
+    const guint live = g_hash_table_size(g_c.views);
+    if (live) {
+        hle_log("hakuX-hle-back", "compat: %u image views not destroyed before the stop", live);
+    }
+    g_hash_table_foreach(g_c.fbs, fb_destroy, NULL);
+    g_hash_table_foreach(g_c.passes, pass_destroy, NULL);
+    g_hash_table_destroy(g_c.fbs);      /* frees the keys */
+    g_hash_table_destroy(g_c.passes);
+    g_hash_table_destroy(g_c.att);
+    g_hash_table_destroy(g_c.views);
+    hle_mutex_destroy(&g_c.lock);
+    memset(&g_c, 0, sizeof(g_c));
+    memset(&R, 0, sizeof(R));           /* the next install loads the next device's */
 }

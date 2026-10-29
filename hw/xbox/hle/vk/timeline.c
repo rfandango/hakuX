@@ -23,6 +23,7 @@ static struct {
     HleThread thread;
     HleEvent ev;
     void (*on_complete)(uint64_t);
+    int quit;                   /* hle_tl_stop (atomic) */
     int64_t busy_since;                 /* the first submit after the GPU ran out of our work */
     uint32_t gap;                       /* a gap asked for (hle_tl_gap) */
     int64_t gap_hold_ns;                /* how long a gap leaves the GPU idle */
@@ -131,10 +132,12 @@ static void publish(uint64_t v)
 static void *watch_thread(void *opaque)
 {
     uint64_t done = 0;
-    for (;;) {
+    while (!__atomic_load_n(&g_tl.quit, __ATOMIC_ACQUIRE)) {
         hle_event_reset(&g_tl.ev);
         if (done >= hle_atomic_read(&g_tl.submitted)) {
-            hle_event_wait(&g_tl.ev);
+            if (!__atomic_load_n(&g_tl.quit, __ATOMIC_ACQUIRE)) {
+                hle_event_wait(&g_tl.ev);
+            }
             continue;
         }
         uint64_t want = done + 1;
@@ -185,9 +188,33 @@ int hle_tl_init(void (*on_complete)(uint64_t))
 #endif
     hle_mutex_init(&g_land.lock);
     hle_event_init(&g_tl.ev, false);
+    g_tl.quit = 0;
     hle_thread_create(&g_tl.thread, "hle.timeline", watch_thread, NULL,
-                       HLE_THREAD_DETACHED);
+                       HLE_THREAD_JOINABLE);
     return 0;
+}
+
+void hle_tl_stop(void)
+{
+    if (!g_tl.sem) {
+        return;
+    }
+    __atomic_store_n(&g_tl.quit, 1, __ATOMIC_RELEASE);
+    hle_event_set(&g_tl.ev);
+    hle_thread_join(&g_tl.thread);      /* within its 100 ms wait */
+}
+
+void hle_tl_destroy(void)
+{
+    if (!g_tl.sem) {
+        return;
+    }
+    hle_tl_stop();
+    T.vkDestroySemaphore(g_hvk.dev, g_tl.sem, NULL);
+    hle_event_destroy(&g_tl.ev);
+    hle_mutex_destroy(&g_land.lock);
+    memset(&g_tl, 0, sizeof(g_tl));
+    memset(&g_land, 0, sizeof(g_land));
 }
 
 VkSemaphore hle_tl_sem(void)

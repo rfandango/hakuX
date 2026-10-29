@@ -83,7 +83,7 @@ static struct {
     HleMutex mu;
     HleCond cv;
     HleThread th[WORKERS];
-    bool started;
+    bool started, quit;             /* quit: hle_pipe_stop */
     Job *queue[QUEUE_MAX];
     unsigned qhead, qn;
     Job **done;
@@ -159,14 +159,17 @@ static void lower_priority(void)
 #endif
 }
 
-/* For the process's life (the back end has no end) */
+/* Until hle_pipe_stop: what is still queued then is dropped (hle_pipe_reset) */
 static void *worker(void *opaque)
 {
     lower_priority();
     hle_mutex_lock(&g_pa.mu);
     for (;;) {
-        while (!g_pa.qn) {
+        while (!g_pa.qn && !g_pa.quit) {
             hle_cond_wait(&g_pa.cv, &g_pa.mu);
+        }
+        if (g_pa.quit) {
+            break;
         }
         Job *j = g_pa.queue[g_pa.qhead];
         g_pa.qhead = (g_pa.qhead + 1) % QUEUE_MAX;
@@ -181,6 +184,7 @@ static void *worker(void *opaque)
         g_pa.done[g_pa.ndone++] = j;
         hle_atomic_inc(&g_pa.ready);
     }
+    hle_mutex_unlock(&g_pa.mu);
     return NULL;
 }
 
@@ -188,8 +192,9 @@ bool hle_pipe_queue(uint64_t hash, const void *key, uint64_t vsh, const uint32_t
                     uint32_t nslots)
 {
     if (!g_pa.started) {
+        g_pa.quit = false;
         for (unsigned i = 0; i < WORKERS; i++) {
-            hle_thread_create(&g_pa.th[i], "hle.pipe", worker, NULL, HLE_THREAD_DETACHED);
+            hle_thread_create(&g_pa.th[i], "hle.pipe", worker, NULL, HLE_THREAD_JOINABLE);
         }
         g_pa.started = true;
     }
@@ -558,3 +563,56 @@ void hle_pipe_progress(uint32_t *done, uint32_t *total)
     *done = *total ? hle_atomic_read(&g_pa.pb_done) : 0;
 }
 
+void hle_pipe_stop(void)
+{
+    if (!g_pa.started) {
+        return;
+    }
+    hle_mutex_lock(&g_pa.mu);
+    g_pa.quit = true;
+    hle_cond_broadcast(&g_pa.cv);
+    hle_mutex_unlock(&g_pa.mu);
+    for (unsigned i = 0; i < WORKERS; i++) {
+        hle_thread_join(&g_pa.th[i]);   /* after the build each may be in */
+    }
+    g_pa.started = false;
+}
+
+static void job_free(Job *j)
+{
+    g_free(j->key);
+    g_free(j->tok);
+    g_free(j);
+}
+
+void hle_pipe_reset(void)
+{
+    /* the records not written yet, then everything the title's run made */
+    hle_pipe_flush(true);
+    for (unsigned i = 0; i < g_pa.qn; i++) {
+        job_free(g_pa.queue[(g_pa.qhead + i) % QUEUE_MAX]);
+    }
+    for (unsigned i = 0; i < g_pa.ndone; i++) {
+        if (g_pa.done[i]->pipe) {
+            g_hvk.t.vkDestroyPipeline(g_hvk.dev, g_pa.done[i]->pipe, NULL);   /* built, never taken */
+        }
+        job_free(g_pa.done[i]);
+    }
+    g_free(g_pa.done);
+    for (unsigned i = 0; i < g_pa.nprogs; i++) {
+        g_free(g_pa.progs[i].tok);
+    }
+    g_free(g_pa.progs);
+    for (unsigned i = 0; i < g_pa.nlist; i++) {
+        g_free(g_pa.list[i].key);       /* their pipelines are draw.c's (prebuild_add) */
+    }
+    g_free(g_pa.list);
+    g_free(g_pa.pending.p);
+    g_free(g_pa.path);
+    hle_cond_destroy(&g_pa.cv);
+    hle_mutex_destroy(&g_pa.mu);
+    const bool async = g_pa.opt_async, prebuild = g_pa.opt_prebuild;
+    memset(&g_pa, 0, sizeof(g_pa));
+    g_pa.opt_async = async;             /* the front end's settings */
+    g_pa.opt_prebuild = prebuild;
+}

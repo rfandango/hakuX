@@ -16,6 +16,7 @@ void hle_batch_install(struct VolkDeviceTable *t);
 /* The index buffer, once the device is up; off (HAKUX_HLE_BATCH=0 or
  * debug.hakux.batch=0) records every draw as it comes. */
 void hle_batch_init(void);
+void hle_batch_shutdown(void);
 
 /* A command buffer starts for frame slot `slot`, whose previous recording
  * has completed: its share of the index buffer is free again. */

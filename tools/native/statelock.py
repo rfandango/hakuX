@@ -97,7 +97,7 @@ class Section:
 NUM = r"\s*(\d+)\s*"
 RX = {
     "SECTION": re.compile(r"^\s*NC_SECTION\(\s*(\w+)\s*\)"),
-    "REC": re.compile(r"^\s*NC_REC\(\s*(\w+)\s*," + NUM + r"\)"),
+    "REC": re.compile(r"^\s*NC_REC\(\s*(\w+)\s*,\s*(?:NC_ABI_SIZE\(\s*(\d+)\s*,\s*(\d+)\s*\)|(\d+))\s*\)"),
     "F": re.compile(r"^\s*NC_F\(\s*(\w+)\s*,\s*([\w.\[\]]+)\s*,\s*(\w+)\s*," + NUM + "," + NUM + "," + NUM + r"\)"),
     "R": re.compile(r"^\s*NC_R\(\s*(\w+)\s*,\s*([\w.\[\]]+)\s*,\s*(\w+)\s*," + NUM + "," + NUM + "," + NUM + r"\)"),
     "SKIP": re.compile(r"^\s*NC_SKIP\(\s*(\w+)\s*,\s*([\w.\[\]]+)\s*\)"),
@@ -123,7 +123,7 @@ def parse(path):
         elif sec is None:
             raise SystemExit(f"{path}:{no}: NC_SECTION first")
         elif kind == "REC":
-            cur = (g[0], int(g[1]), [])
+            cur = (g[0], int(g[1] or g[3]), [])
             sec.records.append(cur)
         elif kind in ("F", "R"):
             if not cur or cur[0] != g[0]:
@@ -291,6 +291,7 @@ def sizes(build):
     (def.h emits nc_probe_size_<Type> = sizeof(Type)), read from its assembly."""
     cc = json.load(open(os.path.join(build, "compile_commands.json"), encoding="utf-8"))
     found = {}
+    host_abi = None
     for entry in cc:
         src = entry["file"].replace("\\", "/")
         try:
@@ -308,8 +309,11 @@ def sizes(build):
         if asm.returncode:
             print(asm.stderr[-2000:], file=sys.stderr)
             raise SystemExit(f"probe of {src} failed")
-        for m in re.finditer(r"^nc_probe_size_(\w+):\s*\n\s*\.(?:xword|quad|word)\s+(\d+)", asm.stdout, re.M):
+        for m in re.finditer(r"^nc_probe_size_(\w+):[^\n]*\n\s*\.(?:xword|quad|word)\s+(\d+)", asm.stdout, re.M):
             found[m.group(1)] = int(m.group(2))
+        abi = re.search(r"^nc_probe_host_abi:[^\n]*\n\s*\.(?:xword|quad|word)\s+([12])", asm.stdout, re.M)
+        if abi:
+            host_abi = int(abi.group(1))
     changed = 0
     for fn in sorted(os.listdir(STATE)):
         if not fn.endswith(".def"):
@@ -327,6 +331,16 @@ def sizes(build):
                 changed += 1
             return f"NC_REC({t}, {found[t]})"
         new = re.sub(r"NC_REC\(\s*(\w+)\s*,\s*(\d+)\s*\)", fix, text)
+        def fix_abi(m):
+            nonlocal changed
+            name, android_size, linux_size = m.groups()
+            if name not in found or host_abi is None:
+                raise SystemExit(f"{fn}: no host ABI size probe for {name}")
+            sizes = [int(android_size), int(linux_size)]
+            changed += sizes[host_abi - 1] != found[name]
+            sizes[host_abi - 1] = found[name]
+            return f"NC_REC({name}, NC_ABI_SIZE({sizes[0]}, {sizes[1]}))"
+        new = re.sub(r"NC_REC\(\s*(\w+)\s*,\s*NC_ABI_SIZE\(\s*(\d+)\s*,\s*(\d+)\s*\)\s*\)", fix_abi, new)
         if new != text:
             with open(path, "w", encoding="utf-8", newline="\n") as fp:
                 fp.write(new)

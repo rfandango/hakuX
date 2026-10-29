@@ -28,7 +28,8 @@ copyrighted Xbox software.
 
 ## Building
 
-See [android/README.md](android/README.md).
+See [android/README.md](android/README.md). The RetroArch core for AArch64 Linux,
+with how to build and test it, is in [native/libretro/README.md](native/libretro/README.md).
 
 ## License
 

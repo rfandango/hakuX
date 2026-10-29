@@ -27,6 +27,25 @@
 
 #include <stddef.h>
 
+/* Skipped host synchronization objects have different Bionic/glibc sizes.
+ * Both sizes remain checked; serialized field types and hashes are unchanged. */
+#ifndef NC_ABI_SIZE
+#ifdef __ANDROID__
+#define NC_ABI_SIZE(android_size, linux_size) (android_size)
+#else
+#define NC_ABI_SIZE(android_size, linux_size) (linux_size)
+#endif
+#endif
+
+#if defined(NC_STATE_PROBE) && !defined(NC_STATE_PROBE_ABI)
+#define NC_STATE_PROBE_ABI
+#ifdef __ANDROID__
+const unsigned long nc_probe_host_abi = 1;
+#else
+const unsigned long nc_probe_host_abi = 2;
+#endif
+#endif
+
 #define NC_DEF_CAT2(a, b) a##b
 #define NC_DEF_CAT(a, b)  NC_DEF_CAT2(a, b)
 #define NC_SECTION(name)

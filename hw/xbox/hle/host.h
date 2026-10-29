@@ -120,6 +120,9 @@ void hle_host_gpu_lost(const char *why);
 
 /* Where the HLE keeps its files (shader caches, dumps); ends with '/'. */
 const char *hle_host_base_path(void);
+/* The posture the front end asks for ("replace"), when HAKUX_HLE_MODE
+ * doesn't name one; NULL: off. */
+const char *hle_host_hle_mode(void);
 /* The render scale, 1-4 times the title's resolution. */
 int hle_host_render_scale(void);
 /* vkGetInstanceProcAddr of the Vulkan driver to use (a custom driver's or

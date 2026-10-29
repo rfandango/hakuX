@@ -527,6 +527,22 @@ bool nc_kernel_init(NcKernel *k, NcVm *vm)
     return true;
 }
 
+/* nc_kernel_host_stop's, outside NcKernel (the savestate's layout): one
+ * kernel a process. */
+static int g_host_stop;
+
+void nc_kernel_host_stop(NcKernel *k)
+{
+    __atomic_store_n(&g_host_stop, 1, __ATOMIC_RELEASE);
+    nc_pause_kick();            /* a paused CPU leaves its pause (nc_kernel_pause_point) */
+    nc_irq_post_work();         /* the JIT at its next block start; an idle wait woken */
+}
+
+bool nc_kernel_host_stopping(NcKernel *k)
+{
+    return __atomic_load_n(&g_host_stop, __ATOMIC_ACQUIRE) != 0;
+}
+
 void nc_kernel_request_stop(NcKernel *k, NcFrame *f, const char *fmt, ...)
 {
     (void)f;
@@ -844,6 +860,8 @@ static pthread_mutex_t g_clock_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_clock_cv;
 static uint64_t g_clock_due; /* host monotonic ns; 0: nothing due */
 static NcCpu *g_clock_cpu;
+static bool g_clock_started, g_clock_quit;     /* under g_clock_mu (nc_kernel_clock_stop) */
+static pthread_t g_clock_thread;
 
 /* The Xbox's clock interrupts every millisecond, KeTickCount and the system
  * time advancing with it. Here every kernel entry refreshes them, and this
@@ -864,7 +882,7 @@ static void *clock_thread(void *arg)
     const bool tick = !e || atoi(e) != 0;
     pthread_mutex_lock(&g_clock_mu);
     uint32_t seen = nc_ke_time_refreshes();
-    for (;;) {
+    while (!g_clock_quit) {
         const uint64_t now = nc_ke_now_ns();
         if (tick) {
             nc_ke_publish_time(now);    /* the kernel entries' time (nc_ke_tick_time) */
@@ -911,7 +929,28 @@ static void *clock_thread(void *arg)
             nc_cpu_request_interrupt(g_clock_cpu);
         }
     }
+    pthread_mutex_unlock(&g_clock_mu);
     return NULL;
+}
+
+void nc_kernel_clock_stop(void)
+{
+    pthread_mutex_lock(&g_clock_mu);
+    const bool started = g_clock_started;
+    g_clock_quit = true;
+    if (started) {
+        pthread_cond_signal(&g_clock_cv);
+    }
+    pthread_mutex_unlock(&g_clock_mu);
+    if (started) {
+        pthread_join(g_clock_thread, NULL);
+        pthread_cond_destroy(&g_clock_cv);
+    }
+    pthread_mutex_lock(&g_clock_mu);
+    g_clock_started = g_clock_quit = false;
+    g_clock_due = 0;
+    g_clock_cpu = NULL;
+    pthread_mutex_unlock(&g_clock_mu);
 }
 
 void nc_kernel_clock_arm(NcKernel *k)
@@ -929,22 +968,20 @@ void nc_kernel_clock_arm(NcKernel *k)
         const char *e = getenv("NC_CLOCK");
         enabled = !e || atoi(e) != 0;
     }
-    static bool started;
-    if (!k->cpu || !enabled || (!due && started)) {
+    if (!k->cpu || !enabled || (!due && __atomic_load_n(&g_clock_started, __ATOMIC_ACQUIRE))) {
         return;
     }
     pthread_mutex_lock(&g_clock_mu);
-    if (!started) {         /* the first call starts it, due or not (its tick) */
+    if (!g_clock_started) {     /* the first call starts it, due or not (its tick) */
         pthread_condattr_t attr;
         pthread_condattr_init(&attr);
         pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
         pthread_cond_init(&g_clock_cv, &attr);
         pthread_condattr_destroy(&attr);
         g_clock_cpu = k->cpu;
-        pthread_t t;
-        pthread_create(&t, NULL, clock_thread, NULL);
-        pthread_detach(t);
-        started = true;
+        g_clock_quit = false;
+        __atomic_store_n(&g_clock_started, pthread_create(&g_clock_thread, NULL, clock_thread, NULL) == 0,
+                         __ATOMIC_RELEASE);
     }
     if (due && (!g_clock_due || due < g_clock_due)) {
         g_clock_due = due;
@@ -1505,7 +1542,7 @@ void nc_kernel_pause_point(NcKernel *k, NcFrame *f, bool idle)
      * yet; idle: every thread switched out). */
     for (;;) {
         nc_pause_wait();
-        if (!nc_paused()) {
+        if (!nc_paused() || nc_kernel_host_stopping(k)) {
             break;
         }
         if (nc_pause_cpu_work()) {
@@ -1525,6 +1562,9 @@ bool nc_kernel_sysop(void *opaque, NcFrame *f, enum NcSysOp op, unsigned size)
 {
     g_nc_in_sysop = 1;
     nc_kernel_pause_point(opaque, f, false);
+    if (nc_kernel_host_stopping(opaque) && !((NcKernel *)opaque)->stop) {
+        nc_kernel_request_stop(opaque, f, "the front end stopped the console");
+    }
     nc_ke_time_enter();
     if (g_slow_sysops < 0) {
         const char *e = getenv("NC_IRQ_SCHED");
@@ -1688,4 +1728,34 @@ static bool sysop(void *opaque, NcFrame *f, enum NcSysOp op, unsigned size)
         nc_frame_set_eip(f, k->stop_va);
     }
     return true;
+}
+
+void nc_kernel_destroy(NcKernel *k)
+{
+    for (unsigned i = 0; i < NC_MAX_THREADS; i++) {
+        free(k->threads[i].apcs);
+    }
+    memset(k, 0, sizeof(*k));
+    nc_io_reset();
+    nc_ke_reset();
+    nc_ex_reset();
+    nc_mm_reset();
+    nc_page_reset();
+    nc_timer_reset();
+    nc_intr_reset();
+    nc_x86mmio_reset();
+    nc_kstate_reset();
+    nc_ob_reset();
+    memset(g_recent, 0, sizeof(g_recent));
+    g_nrecent = 0;
+    g_trace_left = -1;
+    memset(g_kcount, 0, sizeof(g_kcount));
+    g_kcalls = g_sysops = 0;
+    memset(g_sysop_kind, 0, sizeof(g_sysop_kind));
+    memset(&g_nc_sched, 0, sizeof(g_nc_sched));
+    memset(&g_scope_thread, 0, sizeof(g_scope_thread));
+    g_nc_in_sysop = 0;
+    g_pause_c0 = 0;
+    g_clock_ticks = 0;
+    __atomic_store_n(&g_host_stop, 0, __ATOMIC_RELEASE);
 }

@@ -115,6 +115,11 @@ typedef struct Nvnet {
 } Nvnet;
 
 static Nvnet g_nv;
+/* Outside the saved device state: joined before the guest memory is freed. */
+static struct {
+    pthread_t thread;
+    bool initialized, started, quit;
+} g_nv_thr;
 static int g_trace;                     /* NC_TRACE_NVNET: register writes, frames (first 400) */
 
 #define TRACE(...)                                     \
@@ -569,7 +574,7 @@ static void *nvnet_thread(void *arg)
 {
     Nvnet *s = arg;
     nc_pause_register("nvnet");
-    for (;;) {
+    while (!__atomic_load_n(&g_nv_thr.quit, __ATOMIC_ACQUIRE)) {
         if (nc_paused()) {
             nc_pause_wait();
         }
@@ -622,6 +627,7 @@ void nc_dev_nvnet_init(struct NcVm *vm)
     g_trace = getenv("NC_TRACE_NVNET") ? 400 : 0;
     pthread_mutex_init(&s->lock, NULL);
     pthread_cond_init(&s->kick, NULL);
+    g_nv_thr.initialized = true;
     nvnet_reset(s);
     static NcMmioDev dev = {
         .name = "nvnet",
@@ -632,10 +638,28 @@ void nc_dev_nvnet_init(struct NcVm *vm)
         .opaque = &g_nv,
     };
     nc_mmio_register(&dev);
-    if (nc_net_mode() != NC_NET_OFF) {
-        pthread_t t;
-        pthread_create(&t, NULL, nvnet_thread, s);
-        pthread_detach(t);
+    __atomic_store_n(&g_nv_thr.quit, false, __ATOMIC_RELEASE);
+    if (nc_net_link()) {
+        g_nv_thr.started = pthread_create(&g_nv_thr.thread, NULL, nvnet_thread, s) == 0;
+    }
+}
+
+void nc_dev_nvnet_stop(void)
+{
+    if (g_nv_thr.started) {
+        __atomic_store_n(&g_nv_thr.quit, true, __ATOMIC_RELEASE);
+        pthread_join(g_nv_thr.thread, NULL);   /* at most its 20 ms RX wait */
+        g_nv_thr.started = false;
+    }
+}
+
+void nc_dev_nvnet_free(void)
+{
+    if (g_nv_thr.initialized) {
+        pthread_mutex_destroy(&g_nv.lock);
+        pthread_cond_destroy(&g_nv.kick);
+        memset(&g_nv, 0, sizeof(g_nv));
+        g_nv_thr.initialized = false;
     }
 }
 

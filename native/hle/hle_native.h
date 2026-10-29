@@ -14,8 +14,9 @@
 extern "C" {
 #endif
 
-/* Before the guest runs: the HLE layer's init (posture from HAKUX_HLE_MODE;
- * off unless set) and, if active, its title start (push-buffer mode). */
+/* Before the guest runs: the HLE layer's init (posture from HAKUX_HLE_MODE,
+ * else nc_hle_set_mode's; off unless set) and, if active, its title start
+ * (push-buffer mode). */
 void nc_hle_boot(NcKernel *k, NcVm *vm, NcCpu *cpu, const NcCpuContext *boot);
 
 /* Why the title can't run on this device (the HLE GPU did not start), or
@@ -38,6 +39,11 @@ bool nc_hle_pb_active(void);
 void nc_hle_set_vk_loader(void *gipa);
 /* Before boot: the HLE GPU's render scale (1-4x the title's resolution). */
 void nc_hle_set_render_scale(int scale);
+/* Before boot, for a front end that leaves the environment alone: where the
+ * HLE keeps its caches (over HAKUX_NATIVE_BASE), and its posture ("replace";
+ * HAKUX_HLE_MODE, when set, still decides). */
+void nc_hle_set_base_path(const char *path);
+void nc_hle_set_mode(const char *mode);
 /* Before boot: the app's "Asynchronous shader compilation" and "Build cached
  * shaders before starting" settings (hw/xbox/hle/vk/pipeasync.h). */
 void nc_hle_set_pipeline_options(bool async, bool prebuild);
@@ -50,6 +56,19 @@ void nc_hle_pipeline_progress(uint32_t *done, uint32_t *total);
  * dropped when nothing is translated yet. */
 extern HleCpu nc_hle_regs;
 void nc_hle_host_init(NcKernel *k, NcVm *vm, NcCpu *cpu);
+/* On the vCPU thread, as it leaves the title (the core stopping): the PC
+ * samplers (the stall monitor's) stop signalling it, a thread soon gone. */
+void nc_hle_cpu_leave(void);
+/* The core stopping (its CPU has left, nc_core_halt): the HLE GPU's threads
+ * stopped and the renderer torn down, before guest RAM goes. */
+void nc_hle_native_stop(void);
+/* The core stopped (the renderer before it): the native side's state as in a
+ * new process (the pc sampler's SIGPROF handler gone, no fatal error, the
+ * HLE off), the front end's settings kept. */
+void nc_hle_native_reset(void);
+void nc_hle_host_reset(void);
+void nc_hle_dirty_init(NcVm *vm);
+void nc_hle_dirty_reset(void);
 void nc_hle_host_flush(void);
 void nc_hle_host_flush_discard(void);
 

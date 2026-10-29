@@ -137,6 +137,11 @@ void hle_kelvin_method(uint32_t m, uint32_t v)
     g_kv.w[i >> 5] |= 1u << (i & 31);
 }
 
+void hle_kelvin_reset(void)
+{
+    memset(&g_kv, 0, sizeof(g_kv));     /* g_state_read stays: it is the methods' */
+}
+
 uint32_t hle_kelvin_state_gen(void)
 {
     return g_kv.sgen;

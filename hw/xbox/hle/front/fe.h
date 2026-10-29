@@ -7,6 +7,10 @@
 #include "hw/xbox/hle/front/ring.h"
 
 int hle_fe_init(void);
+/* The core stops (M2: hle_back_shutdown, the render thread joined): the ring
+ * freed, the submission values from 0 again as the timeline's (hle_tl_destroy);
+ * the next hle_fe_init makes it again. */
+void hle_fe_shutdown(void);
 HleRing *hle_fe_ring(void);
 /* Zeroed payload; waits for ring space (kicking the back end). */
 void *hle_fe_begin(uint16_t op, uint32_t len);

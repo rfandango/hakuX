@@ -2,7 +2,8 @@
  * hakuX native core — XDVDFS (Xbox game disc filesystem) reader.
  *
  * Reads files from an Xbox disc image: an extracted XISO or a full disc dump
- * (the game partition at one of the XGD1/2/3 offsets).
+ * (the game partition at one of the XGD1/2/3 offsets), either as an ISO or
+ * as a CHD (chd.c).
  */
 #ifndef NATIVE_CORE_XDVDFS_H
 #define NATIVE_CORE_XDVDFS_H
@@ -21,9 +22,11 @@ extern "C" {
 #define NC_DISC_OVERLAY 0xF0000000u
 
 typedef struct NcDiscOverlay NcDiscOverlay;
+struct NcChd;
 
 typedef struct NcDisc {
     int fd;
+    struct NcChd *chd;     /* a CHD image's reader, NULL for an ISO */
     uint64_t part_off;     /* byte offset of the game partition in the image */
     uint32_t root_sector;
     uint32_t root_size;
@@ -36,6 +39,8 @@ typedef struct NcDiscFile {
     uint8_t attr;          /* 0x10: directory */
 } NcDiscFile;
 
+/* The image in fd, an ISO or a CHD. On failure d holds nothing and fd stays
+ * the caller's; else nc_disc_close closes it. */
 bool nc_disc_open(NcDisc *d, int fd);
 void nc_disc_close(NcDisc *d);
 

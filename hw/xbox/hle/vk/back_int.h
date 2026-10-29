@@ -11,6 +11,10 @@
 
 /* timeline.c */
 int hle_tl_init(void (*on_complete)(uint64_t completed));
+/* The core stopping (hle_back_shutdown): the watcher stopped and joined;
+ * then, the device idle, the semaphore destroyed and the timeline back at 0. */
+void hle_tl_stop(void);
+void hle_tl_destroy(void);
 VkSemaphore hle_tl_sem(void);
 void hle_tl_signaled(uint64_t value);
 /* Before each submit: the GPU left idle a moment when the app asked
@@ -135,6 +139,13 @@ static inline bool hle_surf_out_bgra(VkFormat f)
 
 /* draw.c (P3) */
 int hle_draw_init(void);
+/* The core stops (hle_back_shutdown: the threads joined, the device idle):
+ * each module's Vulkan objects destroyed and its state as before its init,
+ * so that a later init on another device starts over. */
+void hle_draw_shutdown(void);
+void hle_surf_shutdown(void);
+void hle_gamma_shutdown(void);
+void hle_zread_shutdown(void);
 /* Before the render thread starts (hle_back_start): the title's recorded
  * pipelines built (the "Build cached shaders before starting" setting). */
 void hle_draw_prebuild(void);

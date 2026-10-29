@@ -18,6 +18,12 @@
  * model hands its push buffer to the HLE from now on). */
 void hle_pb_start(void);
 void hle_pb_stop(void);
+/* The core stops (M2): after hle_pb_stop (hle_title_stop) and the threads
+ * that read its counts (the hitch monitor, the diagnostics' timer: hle_pb_diag),
+ * push-buffer mode as before its first start, pbdraw's, kelvin's and pbres's
+ * state with it (hle_pbd_reset, hle_kelvin_reset, hle_res_reset); the display
+ * mode forgotten. Not while it runs (logged). */
+void hle_pb_reset(void);
 bool hle_pb_active(void);
 /* The host: the guest wrote channel 0's DMA_PUT (any thread). */
 void hle_pb_kick(void);

@@ -39,6 +39,7 @@ static struct {
     HleThread thread;
     HleEvent kick;
     int sleeping;                       /* the render thread is about to wait on kick (atomic) */
+    int quit;                           /* back_stop (atomic) */
     HleFrame fr[HLE_FRAMES];
     unsigned cur;
     bool recording;
@@ -2566,12 +2567,12 @@ static bool ring_wait_brief(HleRing *r, uint32_t seen)
 
 /* What finished GPU work frees: destroyed surfaces, retired textures and
  * visibility slots (only when the timeline moved). */
+static uint64_t g_reaped = UINT64_MAX;
 static void reap(void)
 {
-    static uint64_t reaped = UINT64_MAX;
     uint64_t done = hle_tl_completed();
-    if (done != reaped) {
-        reaped = done;
+    if (done != g_reaped) {
+        g_reaped = done;
         hle_surf_reap(done);
         hle_draw_tex_reap(done);
         vis_reap(done);
@@ -2582,7 +2583,7 @@ static void *render_thread(void *opaque)
 {
     HleRing *r = hle_fe_ring();
     hle_hitch_thread(HLE_HT_RENDER);
-    for (;;) {
+    while (!__atomic_load_n(&g_back.quit, __ATOMIC_ACQUIRE)) {
         hle_event_reset(&g_back.kick);
         const HleCmdHdr *h;
         int64_t t0 = hle_prof_begin();
@@ -2629,7 +2630,7 @@ static void *render_thread(void *opaque)
          * is seen here, one after it sets the event) */
         __atomic_store_n(&g_back.sleeping, 1, __ATOMIC_SEQ_CST);
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
-        if (hle_ring_peek(r)) {
+        if (hle_ring_peek(r) || __atomic_load_n(&g_back.quit, __ATOMIC_ACQUIRE)) {
             __atomic_store_n(&g_back.sleeping, 0, __ATOMIC_RELAXED);
             continue;
         }
@@ -2685,8 +2686,9 @@ int hle_back_start(void)
     }
     hle_event_init(&g_back.kick, false);
     hle_barrier_set_waiter(hle_tl_completed, hle_tl_wait);
+    g_back.quit = 0;
     hle_thread_create(&g_back.thread, "hle.render", render_thread, NULL,
-                       HLE_THREAD_DETACHED);
+                       HLE_THREAD_JOINABLE);
     g_back.running = true;
     hle_batch_init();
     hle_disp_setup();
@@ -2698,6 +2700,97 @@ int hle_back_start(void)
 bool hle_back_running(void)
 {
     return g_back.running;
+}
+
+static void back_stop(void)
+{
+    if (!g_back.running) {
+        return;
+    }
+    /* the ring drained first (its producer stopped: hle_pb_stop), what
+     * waits submitted, then the thread out of its wait */
+    HleRing *r = hle_fe_ring();
+    for (int i = 0; i < 2000 && (hle_ring_used(r) || !__atomic_load_n(&g_back.sleeping, __ATOMIC_ACQUIRE)); i++) {
+        hle_back_kick();
+        g_usleep(1000);
+    }
+    __atomic_store_n(&g_back.quit, 1, __ATOMIC_RELEASE);
+    hle_event_set(&g_back.kick);
+    hle_thread_join(&g_back.thread);
+}
+
+/* back.c's own objects (the device idle) and state as before the start. */
+static void back_free(void)
+{
+    VkDevice d = g_hvk.dev;
+    for (unsigned i = 0; i < HLE_FRAMES; i++) {
+        T.vkDestroyCommandPool(d, g_back.fr[i].pool, NULL);     /* its buffer with it */
+    }
+    if (g_back.running) {
+        hle_event_destroy(&g_back.kick);
+    }
+    memset(&g_back, 0, sizeof(g_back));
+    T.vkDestroyQueryPool(d, g_vis.pool, NULL);
+    memset(&g_vis, 0, sizeof(g_vis));
+    g_vis.in_pass = -1;
+    T.vkDestroyQueryPool(d, g_gput.pool, NULL);
+    memset(&g_gput, 0, sizeof(g_gput));
+    T.vkDestroyQueryPool(d, g_pt.pool, NULL);
+    memset(&g_pt, 0, sizeof(g_pt));
+    memset(g_pe, 0, sizeof(g_pe));
+    memset(&g_pend, 0, sizeof(g_pend));
+    T.vkDestroyBuffer(d, g_rtd.buf, NULL);
+    T.vkFreeMemory(d, g_rtd.mem, NULL);
+    for (unsigned i = 0; i < g_rtd.nsn; i++) {
+        T.vkDestroyBuffer(d, g_rtd.sn[i].buf, NULL);
+        T.vkFreeMemory(d, g_rtd.sn[i].mem, NULL);
+    }
+    memset(&g_rtd, 0, sizeof(g_rtd));
+    T.vkDestroyBuffer(d, g_pix.buf, NULL);
+    T.vkFreeMemory(d, g_pix.mem, NULL);
+    g_free(g_pix.rec);
+    memset(&g_pix, 0, sizeof(g_pix));
+    for (unsigned i = 0; i < g_mc.np; i++) {
+        T.vkDestroyPipeline(d, g_mc.p[i].p, NULL);
+    }
+    T.vkDestroyShaderModule(d, g_mc.vs, NULL);
+    T.vkDestroyShaderModule(d, g_mc.fs, NULL);
+    T.vkDestroyPipelineLayout(d, g_mc.pl, NULL);
+    memset(&g_mc, 0, sizeof(g_mc));
+    T.vkDestroyImage(d, g_ovl_img.img, NULL);
+    T.vkFreeMemory(d, g_ovl_img.mem, NULL);
+    memset(&g_ovl_img, 0, sizeof(g_ovl_img));
+    memset(&g_ovl, 0, sizeof(g_ovl));
+    memset(g_gamma.rgb, 0, sizeof(g_gamma.rgb));
+    g_gamma.identity = true;
+    g_reaped = UINT64_MAX;
+}
+
+void hle_back_shutdown(void)
+{
+    back_stop();
+    hle_pipe_stop();
+    if (g_hvk.dev && !hle_vk_lost()) {
+        hle_vk_queue_lock();
+        T.vkDeviceWaitIdle(g_hvk.dev);
+        hle_vk_queue_unlock();
+    }
+    hle_tl_stop();
+    if (g_hvk.dev) {
+        /* the users before what they use: pipelines and sets, then the
+         * images and layouts, the cache, the memory last */
+        hle_pipe_reset();
+        hle_draw_shutdown();
+        hle_gamma_shutdown();
+        hle_zread_shutdown();
+        hle_surf_shutdown();
+        hle_disp_shutdown();
+        back_free();
+        hle_tl_destroy();
+        hle_pcache_destroy();
+        hle_vk_guest_ram_shutdown();
+    }
+    hle_fe_shutdown();
 }
 
 /* A commit (hle_fe_commit, its ring publish before): the event only for a

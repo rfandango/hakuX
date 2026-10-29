@@ -135,15 +135,19 @@ static void write_blob(void)
     g_free(buf);
 }
 
+/* A write asked for is made before a stop too: destroy's forced write counts
+ * it as done (g_pc.saved). */
 static void *save_thread(void *opaque)
 {
     for (;;) {
         hle_sem_wait(&g_pc.go);
+        if (hle_atomic_read(&g_pc.busy)) {
+            write_blob();
+            hle_atomic_set(&g_pc.busy, false);
+        }
         if (hle_atomic_read(&g_pc.stop)) {
             return NULL;
         }
-        write_blob();
-        hle_atomic_set(&g_pc.busy, false);
     }
 }
 
@@ -176,22 +180,26 @@ void hle_pcache_save(bool force)
     g_pc.last_save = now;
 }
 
+/* The render thread and the pipeline workers joined, the device idle: the
+ * worker stopped after the write it may be in, what was compiled since
+ * written here, and everything as before the init (the next may be another
+ * title's, on another device). */
 void hle_pcache_destroy(void)
 {
     if (g_pc.started) {
         hle_atomic_set(&g_pc.stop, true);
         hle_sem_post(&g_pc.go);
         hle_thread_join(&g_pc.th);
+        hle_sem_destroy(&g_pc.go);
         g_pc.started = false;
     }
     hle_pcache_save(true);
     if (g_pc.cache) {
         T.vkDestroyPipelineCache(g_hvk.dev, g_pc.cache, NULL);
-        g_pc.cache = VK_NULL_HANDLE;
     }
     g_free(g_pc.dir);
     g_free(g_pc.blob);
-    g_pc.dir = g_pc.blob = NULL;
+    memset(&g_pc, 0, sizeof(g_pc));     /* stop and busy too: the next save starts a worker */
 }
 
 typedef struct SpvHeader {

@@ -8,6 +8,7 @@
 
 #include <errno.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -19,14 +20,35 @@ static uint8_t *g_na;   /* per physical page: no guest access (nc_vm_noaccess), 
 #endif
 
 #define NC_GUARD (64u * 1024u)
+#define PTE_BYTES ((size_t)((1ull << 32) / NC_PAGE) * sizeof(uint32_t))
 
 static int memfd(const char *name)
 {
     return (int)syscall(__NR_memfd_create, name, MFD_CLOEXEC);
 }
 
+void *nc_big_alloc(size_t size)
+{
+    void *p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    return p == MAP_FAILED ? NULL : p;
+}
+
+void nc_big_free(void *p, size_t size)
+{
+    if (p) {
+        munmap(p, size);
+    }
+}
+
 bool nc_vm_init(NcVm *vm, uint32_t ram_size)
 {
+#ifndef __ANDROID__
+    const long host_page = sysconf(_SC_PAGESIZE);
+    if (host_page != NC_PAGE) {
+        nc_log("hakuX-native", "vm: Linux requires %u-byte host pages (got %ld)", NC_PAGE, host_page);
+        return false;
+    }
+#endif
     memset(vm, 0, sizeof(*vm));
     vm->ram_fd = -1;
 
@@ -55,7 +77,7 @@ bool nc_vm_init(NcVm *vm, uint32_t ram_size)
     }
     vm->ram_size = ram_size;
     vm->page_used = calloc(ram_size / NC_PAGE, 1);
-    vm->pte = calloc((1ull << 32) / NC_PAGE, sizeof(uint32_t));
+    vm->pte = nc_big_alloc(PTE_BYTES);
     vm->rmap = calloc(ram_size / NC_PAGE, sizeof(uint32_t));
     vm->wp = calloc(ram_size / NC_PAGE, 1);
     vm->pin = calloc(ram_size / NC_PAGE, 1);
@@ -86,6 +108,30 @@ bool nc_vm_init(NcVm *vm, uint32_t ram_size)
     nc_vm_claim_phys(vm, 0, 0x10000);
     nc_log("hakuX-native", "vm: guest base %p, RAM %u MiB", (void *)vm->base, ram_size >> 20);
     return true;
+}
+
+void nc_vm_destroy(NcVm *vm)
+{
+    if (vm->phys) {
+        munmap(vm->phys, vm->ram_size);
+    }
+    if (vm->reservation) {
+        munmap(vm->reservation, vm->reservation_len);  /* every guest mapping with it */
+    }
+    if (vm->ram_fd >= 0) {
+        close(vm->ram_fd);
+    }
+    free(vm->page_used);
+    nc_big_free(vm->pte, PTE_BYTES);
+    free(vm->rmap);
+    free(vm->wp);
+    free(vm->pin);
+    free(g_na);
+    g_na = NULL;
+    memset(vm, 0, sizeof(*vm));
+    vm->ram_fd = -1;
+    nc_vm_write_hook = NULL;
+    memset(&nc_vm_dma, 0, sizeof(nc_vm_dma));
 }
 
 bool nc_vm_map(NcVm *vm, uint32_t va, uint32_t pa, uint32_t len)

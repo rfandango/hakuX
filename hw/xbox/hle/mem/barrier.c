@@ -97,8 +97,19 @@ static bool stale_pages(uint32_t pa, uint32_t len, uint32_t *p0, uint32_t *p1)
     return lo <= hi;
 }
 
+static void tables_free(void)
+{
+    hle_pageuse_fini(&g_pu);
+    g_free(g_contended);
+    g_free(g_cspan);
+    g_free(g_wseq);
+    g_free(g_cseq);
+    g_contended = g_cspan = g_wseq = g_cseq = NULL;
+}
+
 void hle_barrier_init(uint64_t ram_size)
 {
+    tables_free();                          /* a boot's before, if not freed (hle_barrier_free) */
     g_ram = ram_size;
     hle_pageuse_init(&g_pu, ram_size);
     g_contended = g_new0(uint32_t, (ram_size >> 12) / 32 + 1);
@@ -303,6 +314,7 @@ static int g_rpt_lock;
 static uint32_t (*g_rpt_scout)(void);
 static bool (*g_rpt_held)(void);
 static HleSem g_rpt_sem;                /* posted at a write while the guest waits */
+static bool g_rpt_sem_made;
 static int g_rpt_waiting;               /* atomic */
 
 static void rpt_lock(void)
@@ -329,10 +341,9 @@ static int rpt_page(uint32_t pa)
 
 void hle_barrier_set_report_scout(uint32_t (*scout)(void), bool (*held)(void))
 {
-    static bool sem_made;
-    if (!sem_made) {
+    if (!g_rpt_sem_made) {
         hle_sem_init(&g_rpt_sem, 0);
-        sem_made = true;
+        g_rpt_sem_made = true;
     }
     rpt_lock();
     __atomic_store_n(&g_rpt_held, held, __ATOMIC_RELEASE);
@@ -641,4 +652,33 @@ unsigned hle_barrier_wait_pages(uint32_t *pages, unsigned max)
 HleBarrierStats hle_barrier_stats(void)
 {
     return g_st;
+}
+
+void hle_barrier_free(void)
+{
+    tables_free();
+    g_ram = 0;                              /* every entry point bails until the next init */
+    g_completed = NULL;                     /* the back end's (its timeline is gone) */
+    g_wait = NULL;
+    g_flush = NULL;
+    g_catch_up = NULL;
+    memset(&g_st, 0, sizeof(g_st));
+    memset(g_wpages, 0, sizeof(g_wpages));
+    g_nwpages = 0;
+    g_watch = false;
+    /* no protection changed here: the next boot maps guest RAM anew */
+    g_stale = 0;
+    g_stale_fill = NULL;
+    memset(g_na, 0, sizeof(g_na));
+    g_nna = 0;
+    g_stale_lock = 0;
+    memset(&g_rpt, 0, sizeof(g_rpt));
+    g_rpt_lock = 0;
+    g_rpt_scout = NULL;
+    g_rpt_held = NULL;
+    g_rpt_waiting = 0;
+    if (g_rpt_sem_made) {
+        hle_sem_destroy(&g_rpt_sem);
+        g_rpt_sem_made = false;
+    }
 }

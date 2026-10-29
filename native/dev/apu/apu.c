@@ -35,6 +35,8 @@ extern uint32_t g_vp_held_skips, g_vp_held_waits, g_vp_held_wait_max_us, g_vp_he
 static bool g_trap_park;
 
 MCPXAPUState *g_state; /* the one APU: the savestate section's */
+static bool g_apu_trace;                /* NC_TRACE_APU: its thread runs */
+static pthread_t g_apu_trace_thread;
 uint8_t *g_apu_ram;
 uint32_t g_apu_ram_size;
 ApuConfig g_apu_config = {
@@ -668,7 +670,7 @@ static void config_init(void)
 static void *apu_trace_thread(void *arg)
 {
     MCPXAPUState *d = arg;
-    for (;;) {
+    while (!apu_ld(&d->exiting)) {
         sleep(2);
         nc_log("hakuX-native-apu",
                "ien %08x ists %08x fectl %08x sectl %08x fenaddr %08x | 2d %04x/%04x 3d %04x/%04x mp %04x/%04x",
@@ -713,7 +715,7 @@ static void *apu_trace_thread(void *arg)
 
 void nc_dev_apu_init(NcVm *vm)
 {
-    MCPXAPUState *d = calloc(1, sizeof(*d));
+    MCPXAPUState *d = nc_big_alloc(sizeof(*d)); /* 1.6 MiB */
     g_state = d;
     g_apu_ram = vm->phys;
     g_apu_ram_size = (uint32_t)vm->ram_size;
@@ -738,10 +740,48 @@ void nc_dev_apu_init(NcVm *vm)
     mcpx_apu_reset(d);
 
     apu_thread_start(&d->apu_thread, "apu.frame", mcpx_apu_frame_thread, d, true);
-    if (getenv("NC_TRACE_APU")) {
-        pthread_t t;
-        apu_thread_start(&t, "apu.trace", apu_trace_thread, d, false);
+    g_apu_trace = getenv("NC_TRACE_APU") != NULL;
+    if (g_apu_trace) {
+        apu_thread_start(&g_apu_trace_thread, "apu.trace", apu_trace_thread, d, true);
     }
+}
+
+void nc_dev_apu_stop(void)
+{
+    MCPXAPUState *d = g_state;
+    if (!d) {
+        return;
+    }
+    pthread_mutex_lock(&d->lock);
+    apu_st(&d->exiting, true);
+    pthread_cond_broadcast(&d->cond);   /* a frame thread stopped until the guest acts */
+    pthread_mutex_unlock(&d->lock);
+    pthread_join(d->apu_thread, NULL);
+    if (g_apu_trace) {
+        pthread_join(g_apu_trace_thread, NULL);     /* within its 2 s */
+        g_apu_trace = false;
+    }
+    mcpx_apu_vp_finalize(d);            /* the voice workers */
+    apu_out_close();
+}
+
+void nc_dev_apu_free(void)
+{
+    MCPXAPUState *d = g_state;
+    if (!d) {
+        return;
+    }
+    dsp_destroy(d->gp.dsp);
+    dsp_destroy(d->ep.dsp);
+    pthread_mutex_destroy(&d->lock);
+    pthread_mutex_destroy(&d->irq_lock);
+    pthread_cond_destroy(&d->cond);
+    nc_big_free(d, sizeof(*d));
+    g_state = NULL;
+    g_apu_ram = NULL;
+    g_apu_ram_size = 0;
+    g_apu_fifo_min = INT_MAX;
+    g_apu_fifo_max = 0;
 }
 
 void nc_dev_apu_spin_wait(const uint32_t *word)

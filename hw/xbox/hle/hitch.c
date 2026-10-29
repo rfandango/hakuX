@@ -88,6 +88,7 @@ static struct {
     float swap_ms;                      /* the guest's recent frame time (average) */
     int64_t gpu_done_t;
     HleThread th;
+    int quit;                           /* hle_hitch_stop (atomic) */
     /* display path */
     FrameT fr[FR_RING];
     GuestWin gw_ring[GW_RING];
@@ -447,7 +448,7 @@ static void sample(Eip *e)
 static void *wd_thread(void *opaque)
 {
     bool sampling = false, paused = false;
-    for (;;) {
+    while (!__atomic_load_n(&g_h.quit, __ATOMIC_ACQUIRE)) {
         g_usleep(paused ? 100000 : sampling ? TICK_SMP_US : TICK_IDLE_US);  /* paused: a look now and then */
         hle_mutex_lock(&g_h.mx);
         paused = g_h.paused;
@@ -508,7 +509,8 @@ static bool start(void)
         return false;
     }
     init_once();
-    hle_thread_create(&g_h.th, "hle.hitch", wd_thread, NULL, HLE_THREAD_DETACHED);
+    g_h.quit = 0;
+    hle_thread_create(&g_h.th, "hle.hitch", wd_thread, NULL, HLE_THREAD_JOINABLE);
     __atomic_store_n(&g_hitch_on, true, __ATOMIC_RELEASE);
     hle_log(TAG, "monitor on: frames late by half a vblank or dropped (display), "
             "hang >= %.0f ms", g_h.hang_ms);
@@ -824,4 +826,25 @@ bool hle_hitch_overlay(char *buf, size_t n)
     }
     hle_mutex_unlock(&g_h.mx);
     return true;
+}
+
+void hle_hitch_stop(void)
+{
+    if (__atomic_load_n(&g_hitch_on, __ATOMIC_ACQUIRE)) {
+        __atomic_store_n(&g_h.quit, 1, __ATOMIC_RELEASE);
+        hle_thread_join(&g_h.th);       /* within its 100 ms tick */
+        __atomic_store_n(&g_hitch_on, false, __ATOMIC_RELEASE);
+    }
+    /* as at a new process, its mutex kept (init_once's) */
+    const bool init = g_h.init;
+    HleMutex mx = g_h.mx;
+    const float env = g_h.stutter_ms_env, hang = g_h.hang_ms;
+    const unsigned gtrace = g_h.gtrace_left;
+    memset(&g_h, 0, sizeof(g_h));
+    g_h.init = init;
+    g_h.mx = mx;
+    g_h.stutter_ms_env = env;
+    g_h.hang_ms = hang;
+    g_h.gtrace_left = gtrace;
+    memset(g_hitch_thr, 0, sizeof(g_hitch_thr));
 }

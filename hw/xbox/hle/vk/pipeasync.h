@@ -49,6 +49,12 @@ bool hle_pipe_queue(uint64_t hash, const void *key, uint64_t vsh, const uint32_t
 bool hle_pipe_take(uint64_t *hash, VkPipeline *p, HlePbResult *r);
 /* Builds queued or running. */
 uint32_t hle_pipe_inflight(void);
+/* The renderer stopping (M2): the workers stopped and joined (after the
+ * build each may be in); then, the device idle, the jobs and the record's
+ * state freed (pending records written, pipelines never taken destroyed),
+ * the front end's settings kept. */
+void hle_pipe_stop(void);
+void hle_pipe_reset(void);
 
 /* The title (back end start): its record read, kept compact, appended to. */
 void hle_pipe_title(uint32_t title_id, uint32_t timedate);

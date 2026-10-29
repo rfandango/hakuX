@@ -34,6 +34,8 @@ static uint32_t g_rec_gen;          /* render thread only */
 static bool g_rec_open;
 static uint64_t g_surf_bugs;
 static uint64_t g_view_gen;         /* HleVkSurf.view_gen */
+static uint64_t g_wgen;             /* HleVkSurf.wgen */
+static unsigned g_log_general, g_log_unscaled, g_log_full;     /* hle_surf_define's logs */
 /* Views replaced while recordings may still use them: destroyed once the
  * submission that closes the open recording completes. */
 static struct {
@@ -290,25 +292,22 @@ HleVkSurf *hle_surf_define(const HleSurfDesc *d)
                 hle_log("hakuX-hle-back", "surface %u: format 0x%x not renderable",
                         d->id, d->xfmt);
             }
-            static unsigned s_logged;
-            if (s->general && s_logged < 48) {
-                s_logged++;
+            if (s->general && g_log_general < 48) {
+                g_log_general++;
                 hle_log("hakuX-hle-back", "surface %u: %s %ux%u fmt 0x%x levels %u faces %u "
                         "(parent %u level %u face %u)", d->id, d->parent ? "view" : "texture",
                         d->w, d->h, d->xfmt, s->nlevels, s->nfaces, d->parent, d->level,
                         d->face);
             }
-            static unsigned s_unscaled;
-            if (s->scale != g_hle_rscale && s_unscaled < 16) {
-                s_unscaled++;
+            if (s->scale != g_hle_rscale && g_log_unscaled < 16) {
+                g_log_unscaled++;
                 hle_log("hakuX-hle-back", "surface %u: %ux%u fmt 0x%x at guest resolution",
                         d->id, d->w, d->h, d->xfmt);
             }
             return s;
         }
     }
-    static unsigned s_full;
-    if (s_full++ < 4) {
+    if (g_log_full++ < 4) {
         /* what holds the table: live surfaces by size / format / kind */
         struct { uint32_t w, h, f, k, n; } hist[24];
         unsigned nh = 0, parked = 0;
@@ -598,6 +597,29 @@ void hle_surf_destroy_all(void)
     }
 }
 
+/* The core stops (back_int.h): every surface, parked or live, its views,
+ * the retired views and the down / scratch images destroyed (destroy_all),
+ * then the table, its hints and misses, the counters and the logs' limits
+ * as before the first surface. A recording left open is never submitted
+ * (back.c frees its pool), so destroying what it used is no bug. The view
+ * and write generations start over with the surfaces: what keeps them
+ * (vk/draw.c's surface slots, back.c's zeq_wgen) is reset in the same stop. */
+void hle_surf_shutdown(void)
+{
+    g_rec_open = false;
+    hle_surf_destroy_all();
+    memset(g_surf, 0, sizeof(g_surf));
+    memset(g_vretire, 0, sizeof(g_vretire));
+    memset(g_surf_hint, 0, sizeof(g_surf_hint));
+    memset(g_surf_miss, 0, sizeof(g_surf_miss));
+    g_surf_gen = 1;
+    g_rec_gen = 0;
+    g_surf_bugs = 0;
+    g_view_gen = 0;
+    g_wgen = 0;
+    g_log_general = g_log_unscaled = g_log_full = 0;
+}
+
 static void barrier_range(VkCommandBuffer cb, VkImage img, VkImageAspectFlags aspect,
                           VkImageLayout from, VkImageLayout to, uint32_t level,
                           uint32_t nlevels, uint32_t layer, uint32_t nlayers)
@@ -673,8 +695,7 @@ static void general_use(VkCommandBuffer cb, HleVkSurf *s, VkImageLayout to)
 
 void hle_surf_written(HleVkSurf *s)
 {
-    static uint64_t s_gen;
-    s->wgen = ++s_gen;                          /* never repeats, across surfaces too */
+    s->wgen = ++g_wgen;                         /* never repeats, across surfaces too */
 }
 
 void hle_surf_transition(VkCommandBuffer cb, HleVkSurf *s, VkImageLayout to)

@@ -12,5 +12,9 @@
  * device goes through it (vkdev.c's, the presenter's), before strip batching
  * wraps it. Nothing changes when the caps are all on. */
 void hle_compat_install(struct VolkDeviceTable *t);
+/* The device goes (hle_vk_shutdown, idle, every view destroyed): the
+ * emulated render passes' and framebuffers' objects destroyed, the table
+ * loaded again by the next install. */
+void hle_compat_shutdown(void);
 
 #endif

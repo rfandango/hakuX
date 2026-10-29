@@ -32,6 +32,8 @@ above:
   The rest of native/dev/apu (apu_base.h, out.c, state.c, vp/mix_inline.h,
   vp/resample.*) is hakuX's own.
 - native/kernel/xboxkrnl.exe.def comes from nxdk: CC0-1.0.
+- native/libretro/libretro.h and libretro_vulkan.h are RetroArch's libretro
+  API headers: MIT (licenses/libretro.license.txt).
 - The window presenter's shaders (hw/xbox/hle/vk/swapchain.c): its FXAA is
   FXAA 3.11 Quality (Timothy Lottes) as PCSX2's fxaa.fx tunes it, GNU
   General Public License, version 3 or later; its SGSR is Qualcomm's

@@ -297,9 +297,19 @@ static void lan_poll(struct pollfd *fds, int n)
     }
 }
 
+static void lan_close(void)
+{
+    if (g_lan.fd >= 0) {
+        close(g_lan.fd);
+    }
+    memset(&g_lan, 0, sizeof(g_lan));
+    g_lan.fd = -1;
+}
+
 const NcNetBackend nc_net_lan = {
     .name = "lan",
     .init = lan_init,
+    .close = lan_close,
     .input = lan_input,
     .fill = lan_fill,
     .poll = lan_poll,

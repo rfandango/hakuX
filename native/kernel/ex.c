@@ -137,6 +137,14 @@ void nc_kernel_set_video(int64_t flags, int av_pack)
     g_av_pack = av_pack;
 }
 
+/* The front end's TV standard (nc_kernel_set_av_region); 0 follows the title. */
+static uint32_t g_av_region;
+
+void nc_kernel_set_av_region(uint32_t region)
+{
+    g_av_region = region;
+}
+
 /* The app's language (nc_kernel_set_language); 0 keeps the stored one. */
 static int g_language;
 
@@ -392,7 +400,7 @@ static uint8_t *eeprom(NcKernel *k)
         if (g_sec_plain) {
             memcpy(g_eeprom + 0x2C, g_sec + 0x2C, 4);
         }
-        nc_wr32(g_eeprom + 0x58, pal ? 0x00800300u : 0x00400100u);
+        nc_wr32(g_eeprom + 0x58, g_av_region ? g_av_region : pal ? NC_AV_REGION_PAL_I : NC_AV_REGION_NTSC_M);
         nc_wr32(g_eeprom + 0xBC, pal ? 2 : 1);
         /* So do the video settings: the app's (widescreen, 480p...). */
         if (g_video_flags >= 0) {
@@ -410,8 +418,9 @@ static uint8_t *eeprom(NcKernel *k)
         memset(g_eeprom + 0x88, 0, 8);
         eeprom_seal();
         g_eeprom_ready = true;
-        nc_log("hakuX-native", "ex: video flags %08x, AV pack %d, language %u, time zone bias %d min",
-               nc_rd32(g_eeprom + 0x94), g_av_pack, nc_rd32(g_eeprom + 0x90), (int32_t)nc_rd32(g_eeprom + 0x64));
+        nc_log("hakuX-native", "ex: video flags %08x, AV pack %d, AV region %08x, language %u, time zone bias %d min",
+               nc_rd32(g_eeprom + 0x94), g_av_pack, nc_rd32(g_eeprom + 0x58), nc_rd32(g_eeprom + 0x90),
+               (int32_t)nc_rd32(g_eeprom + 0x64));
         nc_log("hakuX-native", "ex: console serial %.12s, MAC %02x:%02x:%02x:%02x:%02x:%02x%s", g_eeprom + 0x34,
                g_eeprom[0x40], g_eeprom[0x41], g_eeprom[0x42], g_eeprom[0x43], g_eeprom[0x44], g_eeprom[0x45],
                g_sec_plain ? " (an image from before: its section in the clear)" : "");
@@ -1012,4 +1021,11 @@ void nc_ex_register(NcKernel *k)
     nc_kernel_impl(k, "KeSaveFloatingPointState", KeFloatingPointState);
     nc_kernel_impl(k, "KeRestoreFloatingPointState", KeFloatingPointState);
     nc_kernel_impl(k, "KeInitializeDpc", KeInitializeDpc);
+}
+
+void nc_ex_reset(void)
+{
+    memset(g_eeprom, 0, sizeof(g_eeprom));
+    g_eeprom_ready = false;     /* the next title reads it again, with the front end's settings */
+    g_av_saved = 0;
 }

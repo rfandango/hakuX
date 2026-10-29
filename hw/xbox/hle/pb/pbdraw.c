@@ -241,6 +241,12 @@ static int g_dlog_left;
 /* The decode thread's waits, for the log line (hle_pbd_phase) */
 static volatile int g_phase;            /* 0 none, 1 arena space, 2 ring space */
 
+/* The log lines' limits: the first few of each a boot (hle_pbd_reset) */
+static struct {
+    unsigned objs_full, surfaces, no_target, gamma, overlay, sprog;
+    int64_t scan_for;                   /* the idle period logged (hle_pbd_scanout) */
+} g_lg;
+
 static uint32_t arena(uint32_t len, uint8_t **ptr)
 {
     g_phase = 1;
@@ -301,18 +307,35 @@ static void ff_regs_init(void)
     }
 }
 
+/* hle_pbd_start's buffers (the caller clears g_pd after); the large ones
+ * mapped (hle_big_alloc) */
+#define IDX_BYTES ((size_t)MAX_INDICES * sizeof(uint32_t))
+#define IDX16_BYTES ((size_t)(MAX_INDICES * 3 / 2 + 8) * sizeof(uint16_t))
+#define IMM_BYTES ((size_t)MAX_IMM * ATTRS * 4 * sizeof(float))
+#define INL_BYTES ((size_t)MAX_INLINE * sizeof(uint32_t))
+
+static void pd_free(void)
+{
+    hle_big_free(g_pd.idx, IDX_BYTES);
+    hle_big_free(g_pd.idx16, IDX16_BYTES);
+    g_free(g_pd.tex);
+    hle_big_free(g_pd.imm, IMM_BYTES);
+    hle_big_free(g_pd.inl, INL_BYTES);
+}
+
 bool hle_pbd_start(void)
 {
+    pd_free();                              /* a start's before, if not freed (hle_pbd_reset) */
     memset(&g_pd, 0, sizeof(g_pd));
     ff_regs_init();
     vsh_forget();                           /* program memory starts empty */
     g_pd.next_id = 1;
-    g_pd.idx = g_new(uint32_t, MAX_INDICES);
-    g_pd.idx16 = g_new(uint16_t, MAX_INDICES * 3 / 2 + 8);
+    g_pd.idx = hle_big_alloc(IDX_BYTES);
+    g_pd.idx16 = hle_big_alloc(IDX16_BYTES);
     g_pd.cap = MAX_INDICES;
     g_pd.tex = g_new0(PbTex, TEX_SLOTS);
-    g_pd.imm = g_new(float, (size_t)MAX_IMM * ATTRS * 4);
-    g_pd.inl = g_new(uint32_t, MAX_INLINE);
+    g_pd.imm = hle_big_alloc(IMM_BYTES);
+    g_pd.inl = hle_big_alloc(INL_BYTES);
     for (unsigned a = 0; a < ATTRS; a++) {
         g_pd.cur[a][3] = 1.0f;
     }
@@ -604,8 +627,7 @@ static uint32_t object(uint32_t pa, uint32_t xfmt, uint32_t pitch, uint32_t w, u
     } else {
         o = evict_slot();
         if (!o) {
-            static unsigned s_full;
-            if (s_full++ < 8) {
+            if (g_lg.objs_full++ < 8) {
                 hle_log("hakuX-hle-pb", "surface %08x: all %u objects in use (first 8 logged)", pa, MAX_OBJS);
             }
             return 0;
@@ -634,8 +656,7 @@ static uint32_t object(uint32_t pa, uint32_t xfmt, uint32_t pitch, uint32_t w, u
         obj_edges_set(o);
         restored_pixels(o);
     }
-    static unsigned s_logged;
-    if (s_logged++ < 32) {
+    if (g_lg.surfaces++ < 32) {
         hle_log("hakuX-hle-pb", "surface %u: %08x format %02x %ux%u pitch %u", o->id, pa, xfmt, w, h,
                 pitch);
     }
@@ -1262,20 +1283,24 @@ static uint32_t object_at(uint32_t pa);
 
 /* A frame presented: the frame rate in the log every 5 s (perf A/B from
  * logcat: hakuX-hle-fps). */
+static struct {
+    int64_t t0;
+    unsigned n, n0;
+} g_fps;
+
 static void fps_log(void)
 {
-    static int64_t s_t0;
-    static unsigned s_n, s_n0;
     const int64_t now = g_get_monotonic_time();
-    s_n++;
-    if (!s_t0) {
-        s_t0 = now;
-        s_n0 = s_n;
-    } else if (now - s_t0 >= 5000000) {
+    g_fps.n++;
+    if (!g_fps.t0) {
+        g_fps.t0 = now;
+        g_fps.n0 = g_fps.n;
+    } else if (now - g_fps.t0 >= 5000000) {
         hle_log("hakuX-hle-fps", "%.1f fps (%u frames in %.2f s)",
-                (s_n - s_n0) * 1e6 / (double)(now - s_t0), s_n - s_n0, (now - s_t0) / 1e6);
-        s_t0 = now;
-        s_n0 = s_n;
+                (g_fps.n - g_fps.n0) * 1e6 / (double)(now - g_fps.t0), g_fps.n - g_fps.n0,
+                (now - g_fps.t0) / 1e6);
+        g_fps.t0 = now;
+        g_fps.n0 = g_fps.n;
     }
 }
 
@@ -1345,8 +1370,7 @@ void hle_pbd_display(uint32_t pa, bool flip)
     }
     uint32_t id = object_at(pa & 0x0FFFFFFFu);
     if (!id) {
-        static unsigned s_logged;
-        if (s_logged++ < 4) {
+        if (g_lg.no_target++ < 4) {
             hle_log("hakuX-hle-pb", "display start %08x: no render target there (not shown)", pa);
         }
         return;
@@ -1410,10 +1434,9 @@ bool hle_pbd_scan_due(void)
 void hle_pbd_scanout(void)
 {
     if (rtlog_on() && g_pd.on) {
-        static int64_t s_logged_for;        /* once an idle period */
         const PbObj *o = obj_of(g_pd.shown_id);
-        if (s_logged_for != g_pd.shown_ns) {
-            s_logged_for = g_pd.shown_ns;
+        if (g_lg.scan_for != g_pd.shown_ns) {   /* once an idle period */
+            g_lg.scan_for = g_pd.shown_ns;
             hle_log("hakuX-hle-pb", "scanout check: shown %u (%08x %ux%u) idle %lld ms, flips pending %u",
                     g_pd.shown_id, o ? o->d.pa : 0, o ? o->d.w : 0, o ? o->d.h : 0,
                     (long long)((hle_now_ns() - g_pd.shown_ns) / 1000000),
@@ -1463,8 +1486,7 @@ void hle_pbd_gamma(const uint8_t rgb[3][256])
     c->immediate = 1;
     memcpy(c->rgb, rgb, sizeof(c->rgb));
     hle_fe_commit();
-    static unsigned s_logged;
-    if (s_logged++ < 4) {
+    if (g_lg.gamma++ < 4) {
         hle_log("hakuX-hle-pb", "gamma ramp r=%u,%u,%u,%u g=%u,%u b=%u,%u", rgb[0][0], rgb[0][64],
                 rgb[0][128], rgb[0][255], rgb[1][128], rgb[1][255], rgb[2][128], rgb[2][255]);
     }
@@ -1540,8 +1562,7 @@ void hle_pbd_overlay(bool show)
         fps_log();
         g_pd.epoch++;
     }
-    static unsigned s_logged;
-    if (s_logged++ < 4 || g_dlog_left > 0) {
+    if (g_lg.overlay++ < 4 || g_dlog_left > 0) {
         hle_log("hakuX-hle-pb", "overlay %s: %ux%u -> %d,%d-%d,%d", on ? "on" : "off", w, h,
                 on ? dst[0] : 0, on ? dst[1] : 0, on ? dst[2] : 0, on ? dst[3] : 0);
     }
@@ -2980,14 +3001,16 @@ static void draw_inline(void)
  * pages made a write wait (the CPU rewrites them while the GPU reads) is
  * copied to the arena instead. Crimson Sea copied the same meshes about 2000
  * times a frame, a fifth of its decoder. HAKUX_HLE_VB_COPY=1 keeps the
- * copies (A/B), as in D3D mode. */
+ * copies (A/B), as in D3D mode. -1: not known yet (the back end's import of
+ * this boot decides). */
+static int g_vb_in_place = -1;
+
 static bool vb_in_place(void)
 {
-    static int on = -1;
-    if (on < 0) {
-        on = g_hram.zero_copy && !getenv("HAKUX_HLE_VB_COPY");
+    if (g_vb_in_place < 0) {
+        g_vb_in_place = g_hram.zero_copy && !getenv("HAKUX_HLE_VB_COPY");
     }
-    return on;
+    return g_vb_in_place;
 }
 
 /* The decode thread, between methods: a guest store waits for `value` (the
@@ -3006,6 +3029,16 @@ void hle_pbd_boundary(uint64_t value)
  * (hakuX-hle-pb vbrace): the CPU rewrote vertices between two draws. posoff
  * is the position's offset in a vertex (-1: none), hashed apart: a changed
  * position moves the draw's depth. */
+static struct {
+    struct {
+        uint32_t from, len;
+        uint64_t swap, draw, h, hp;
+        int64_t ns;
+        uint32_t get, put;
+    } t[256];
+    unsigned logged;
+} g_vbrace;
+
 static void vbrace(uint32_t from, uint32_t len, uint32_t stride, int posoff, const uint8_t *copy)
 {
     static int on = -1;
@@ -3016,13 +3049,7 @@ static void vbrace(uint32_t from, uint32_t len, uint32_t stride, int posoff, con
     if (!on) {
         return;
     }
-    static struct {
-        uint32_t from, len;
-        uint64_t swap, draw, h, hp;
-        int64_t ns;
-        uint32_t get, put;
-    } t[256];
-    static unsigned logged;
+    typeof(g_vbrace.t[0]) *t = g_vbrace.t;
     const int64_t now = hle_now_ns();
     uint32_t get, put;
     hle_pb_debug_pos(&get, &put);
@@ -3032,7 +3059,7 @@ static void vbrace(uint32_t from, uint32_t len, uint32_t stride, int posoff, con
     }
     unsigned i = (from ^ (from >> 12) ^ len * 31u) & 255u;
     if (t[i].from == from && t[i].len == len && t[i].swap == g_pd.swaps && t[i].h != h &&
-        (++logged <= 16 || (logged & 255) == 0)) {
+        (++g_vbrace.logged <= 16 || (g_vbrace.logged & 255) == 0)) {
         hle_log("hakuX-hle-pb", "vbrace: %08x+%u stride %u copied for draw %llu with other %s "
                 "than for draw %llu, %.3f ms before (swap %llu; GET/PUT then %08x/%08x, now %08x/%08x)",
                 from, len, stride,
@@ -3056,23 +3083,24 @@ static void vbrace(uint32_t from, uint32_t len, uint32_t stride, int posoff, con
  * decoder reaches the second. From then on each copy of them arms the
  * catch-up first (barrier.h hle_barrier_arm_copied): a store after it waits
  * until the decoder has read the draws pushed before the store. */
+static struct {
+    uint32_t from, len;
+    uint64_t swap;
+    bool again;
+} g_recopied[1024];
+
 static bool recopied(uint32_t from, uint32_t len)
 {
-    static struct {
-        uint32_t from, len;
-        uint64_t swap;
-        bool again;
-    } t[1024];
-    const unsigned i = (from ^ (from >> 12) ^ len * 31u) & 1023u;
-    if (t[i].from != from || t[i].len != len) {
-        t[i].from = from;
-        t[i].len = len;
-        t[i].again = false;
-    } else if (t[i].swap == g_pd.swaps) {
-        t[i].again = true;
+    typeof(g_recopied[0]) *t = &g_recopied[(from ^ (from >> 12) ^ len * 31u) & 1023u];
+    if (t->from != from || t->len != len) {
+        t->from = from;
+        t->len = len;
+        t->again = false;
+    } else if (t->swap == g_pd.swaps) {
+        t->again = true;
     }
-    t[i].swap = g_pd.swaps;
-    return t[i].again;
+    t->swap = g_pd.swaps;
+    return t->again;
 }
 
 /* The vertex arrays the indices reach, read in place or copied to the
@@ -3390,14 +3418,25 @@ static int xf_slot(uint32_t m, unsigned *comp)
  * last SET_TRANSFORM_DATA, its writes going to the constants (D3D's vertex
  * state shaders, RunVertexStateShader), on the CPU as xemu does. Wreckless
  * builds each object's transform so; ignored, its world drew nothing. */
+static struct {
+    Nv2aVshProgram prog;
+    uint64_t hash;                      /* its slots' (the program memory changes as the title
+                                           switches programs, the state programs stay) */
+    bool parsed, ok;
+} g_sprog[HLE_VSH_MAX_SLOTS];           /* by start slot */
+
+static void sprog_free(void)
+{
+    for (unsigned i = 0; i < HLE_VSH_MAX_SLOTS; i++) {
+        if (g_sprog[i].ok) {
+            nv2a_vsh_program_destroy(&g_sprog[i].prog);
+        }
+    }
+    memset(g_sprog, 0, sizeof(g_sprog));
+}
+
 static void launch_state_program(uint32_t start)
 {
-    static struct {
-        Nv2aVshProgram prog;
-        uint64_t hash;                  /* its slots' (the program memory changes as the title
-                                           switches programs, the state programs stay) */
-        bool parsed, ok;
-    } cache[HLE_VSH_MAX_SLOTS];
     if (start >= HLE_VSH_MAX_SLOTS) {
         return;
     }
@@ -3405,7 +3444,7 @@ static void launch_state_program(uint32_t start)
     while (start + n < HLE_VSH_MAX_SLOTS && !(g_pd.pmem[start + n++][3] & 1)) {
     }
     const uint64_t h = XXH3_64bits(g_pd.pmem[start], 16 * n);
-    typeof(cache[0]) *c = &cache[start];
+    typeof(g_sprog[0]) *c = &g_sprog[start];
     if (!c->parsed || c->hash != h) {
         if (c->ok) {
             nv2a_vsh_program_destroy(&c->prog);
@@ -3414,8 +3453,7 @@ static void launch_state_program(uint32_t start)
         c->parsed = true;
         c->hash = h;
         if (!c->ok) {
-            static unsigned logged;
-            if (logged++ < 4) {
+            if (g_lg.sprog++ < 4) {
                 hle_log("hakuX-hle-pb", "state program at %u: not a program it can run", start);
             }
             return;
@@ -3791,4 +3829,30 @@ bool hle_pbd_state_set(const HlePbdState *s, const float *imm, const uint32_t *i
     g_pd.st_sent = false;
     hle_pbd_restored();
     return true;
+}
+
+void hle_pbd_reset(void)
+{
+    pd_free();
+    memset(&g_pd, 0, sizeof(g_pd));
+    g_dlog_left = 0;
+    g_phase = 0;
+    memset(&g_lg, 0, sizeof(g_lg));
+    g_mode_seen = 0;                        /* the modes count from 0 again (hle_pb_reset) */
+    g_disp_moded = false;
+    g_restored_until = 0;
+    g_restored_display = false;
+    memset(&g_fps, 0, sizeof(g_fps));
+    memset(&g_vh_prog, 0, sizeof(g_vh_prog));
+    memset(&g_vh_ff, 0, sizeof(g_vh_ff));
+    memset(g_skips, 0, sizeof(g_skips));
+    memset(g_pal_hash, 0, sizeof(g_pal_hash));
+    memset(&g_keep, 0, sizeof(g_keep));
+    memset(&g_front, 0, sizeof(g_front));
+    g_vb_in_place = -1;
+    memset(&g_vbrace, 0, sizeof(g_vbrace));
+    memset(g_recopied, 0, sizeof(g_recopied));
+    sprog_free();
+    memset(g_swz, 0, sizeof(g_swz));        /* pointers into the arena, gone */
+    g_nswz = 0;
 }

@@ -32,6 +32,9 @@ set(HLE_PURE_SOURCES
   ${NC_DEPS}/root/subprojects/nv2a_vsh_cpu/src/nv2a_vsh_disassembler.c
 )
 add_library(hle_pure STATIC ${HLE_PURE_SOURCES})
+if(UNIX)
+  target_link_libraries(hle_pure PUBLIC m)
+endif()
 
 function(hle_test name)
   add_executable(${name} ${name}.c)

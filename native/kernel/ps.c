@@ -433,6 +433,12 @@ void nc_ps_schedule(NcKernel *k, NcFrame *f)
          * give up after a while without one. Paused meanwhile, here it
          * waits (the pause's wake brings it round). */
         nc_kernel_pause_point(k, f, true);
+        if (nc_kernel_host_stopping(k)) {
+            if (!k->stop) {
+                nc_kernel_request_stop(k, f, "the front end stopped the console");
+            }
+            return;
+        }
         const uint64_t now = nc_ke_now_ns();
         if (!idle_since) {
             idle_since = now;

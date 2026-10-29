@@ -10,6 +10,7 @@
 #include "hw/xbox/hle/pb/kelvin.h"
 #include "hw/xbox/hle/pb/pbdraw.h"
 #include "hw/xbox/hle/pb/pbmode.h"
+#include "hw/xbox/hle/pb/pbres.h"
 #include "hw/xbox/hle/pb/pbstate.h"
 #include "hw/xbox/hle/pb/pusher.h"
 #include "hw/xbox/hle/prop.h"
@@ -126,6 +127,12 @@ static struct {
  * which reports); one that does has its first frame of reports ungated
  * (read as without the gate). */
 static bool g_sc_gate, g_sc_on;
+
+/* The log lines' limits: the first few of each a boot (hle_pb_reset) */
+static struct {
+    unsigned flips, reports, sems, traps, scout;
+    uint32_t classes[8];                /* the object classes logged, a bit each */
+} g_lg;
 
 bool hle_pb_active(void)
 {
@@ -278,8 +285,7 @@ static int kelvin(uint32_t m, uint32_t v)
         return HLE_PB_GO;
     }
     if (m >= NV097_SET_FLIP_READ && m <= NV097_FLIP_STALL) {
-        static unsigned s_logged;
-        if (s_logged++ < 24) {
+        if (g_lg.flips++ < 24) {
             hle_log("hakuX-hle-pb", "flip method %04x = %u (read %u write %u modulo %u)", m, v,
                     surf_get(SURF_READ), surf_get(SURF_WRITE), surf_get(SURF_MODULO));
         }
@@ -335,8 +341,7 @@ static int kelvin(uint32_t m, uint32_t v)
         if (g_pb.report_inst) {
             uint32_t pa = dma_base(g_pb.report_inst) + (v & 0x00FFFFFFu);
             uint8_t *p = hle_pa_ptr(pa, 16);
-            static unsigned s_logged;
-            if (s_logged++ < 8) {
+            if (g_lg.reports++ < 8) {
                 /* the guest stamped its report pending (-1 at +0xc) before this */
                 hle_log("hakuX-hle-pb", "GET_REPORT %08x: object %05x base %08x -> pa %08x [%08x %08x "
                         "%08x %08x]", v, g_pb.report_inst, dma_base(g_pb.report_inst), pa,
@@ -363,8 +368,7 @@ static int kelvin(uint32_t m, uint32_t v)
     case NV097_BACK_END_WRITE_SEMAPHORE_RELEASE:
         if (g_pb.sem_inst) {
             uint32_t pa = dma_base(g_pb.sem_inst) + g_pb.sem_offset;
-            static unsigned s_logged;
-            if (s_logged++ < 8) {
+            if (g_lg.sems++ < 8) {
                 hle_log("hakuX-hle-pb", "semaphore release %08x at pa %08x (object %05x: %08x %08x "
                         "%08x, offset %08x)", v, pa, g_pb.sem_inst, pramin(g_pb.sem_inst),
                         pramin(g_pb.sem_inst + 4), pramin(g_pb.sem_inst + 8), g_pb.sem_offset);
@@ -729,8 +733,7 @@ static int count_method(void *opaque, unsigned subch, uint32_t m, uint32_t v)
         /* a software trap: D3D's ISR does the work (state its own way,
          * callbacks) from the trap registers and the clear values, then
          * clears the interrupt, and the decoder goes on */
-        static unsigned s_logged;
-        if (s_logged++ < 64 || (g_pb.traps & 65535) == 0) {
+        if (g_lg.traps++ < 64 || (g_pb.traps & 65535) == 0) {
             hle_log("hakuX-hle-pb", "trap %03x (packet of %u%s, word %u): arg %08x color %08x "
                     "(flip read %u write %u)", v, g_pb.p.count, g_pb.p.noninc ? " non-incrementing" : "",
                     g_pb.p.count - g_pb.p.left, hle_host_gpu_reg(NV_PGRAPH_ZSTENCILCLEARVALUE),
@@ -766,10 +769,9 @@ static int count_method(void *opaque, unsigned subch, uint32_t m, uint32_t v)
         g_pb.obj_inst[subch] = inst;
         g_pb.obj_class[subch] = inst ? (uint8_t)pramin(inst) : 0;
         g_pb.binds++;
-        static uint32_t s_seen[8];                  /* each class logged once */
-        const uint8_t cls = g_pb.obj_class[subch];
-        if (!(s_seen[cls >> 5] & (1u << (cls & 31)))) {
-            s_seen[cls >> 5] |= 1u << (cls & 31);
+        const uint8_t cls = g_pb.obj_class[subch];  /* each class logged once */
+        if (!(g_lg.classes[cls >> 5] & (1u << (cls & 31)))) {
+            g_lg.classes[cls >> 5] |= 1u << (cls & 31);
             hle_log("hakuX-hle-pb", "subchannel %u: object %08x, class %02x", subch, v, cls);
         }
         return HLE_PB_GO;
@@ -1241,8 +1243,7 @@ static uint32_t scout_to(uint32_t put)
     }
     g_sc.at_trap = false;
     if (hle_pb_pusher_run(&g_sc.p, put, scout_fetch, NULL, &k_scout) == HLE_PB_ERR_LOOP) {
-        static unsigned logged;                 /* it syncs again at the next PUT */
-        if (logged++ < 8) {
+        if (g_lg.scout++ < 8) {                 /* it syncs again at the next PUT */
             hle_log("hakuX-hle-pb", "report scout: lost the stream at GET %08x (PUT %08x, %s)",
                     g_sc.p.error_get, put, g_sc.p.error_word ? "branches only" : "over its budget");
         }
@@ -1550,6 +1551,13 @@ void hle_pb_stop(void)
     g_pb.on = false;
 }
 
+/* hle_pb_diag's counts at its last line (each line's are the second's) */
+static struct {
+    uint32_t hist[8][PB_METHODS];
+    uint64_t words, heads, cu, rw;
+    uint32_t kicks;
+} g_diag;
+
 void hle_pb_diag(void)
 {
     if (!g_pb.on) {
@@ -1569,15 +1577,12 @@ void hle_pb_diag(void)
         }
     }
 #endif
-    static uint32_t prev[8][PB_METHODS];
-    static uint64_t prev_words, prev_heads;
-    static uint32_t prev_kicks;
     struct { uint32_t n; uint16_t sm; } top[12] = { { 0 } };
     uint64_t total = 0;
     for (unsigned s = 0; s < 8; s++) {
         for (unsigned m = 0; m < PB_METHODS; m++) {
-            uint32_t now = g_pb.hist[s][m], d = now - prev[s][m];
-            prev[s][m] = now;
+            uint32_t now = g_pb.hist[s][m], d = now - g_diag.hist[s][m];
+            g_diag.hist[s][m] = now;
             total += d;
             if (d <= top[11].n) {
                 continue;
@@ -1655,8 +1660,8 @@ void hle_pb_diag(void)
             "skipped %llu vis %llu (kicks %llu) overlays %llu repeats %llu const reuses %llu "
             "vb in place %llu copied %llu (barrier kicks %llu) unindexed %llu first writes %llu (armed %llu, waits %llu, "
             "%.0f ms, pages%s) cache cleans %llu pages writebacks %llu "
-            "display written %llu presented %llu dropped %llu waits %llu%s | top%s", kicks - prev_kicks,
-            (unsigned long long)(words - prev_words), (unsigned long long)(heads - prev_heads),
+            "display written %llu presented %llu dropped %llu waits %llu%s | top%s", kicks - g_diag.kicks,
+            (unsigned long long)(words - g_diag.words), (unsigned long long)(heads - g_diag.heads),
             (unsigned long long)total, g_pb.faults, g_pb.last_get,
             hle_host_gpu_reg(NV_PFIFO_CACHE1_DMA_PUT), (unsigned long long)g_pb.binds,
             (unsigned long long)g_pb.sem_releases, (unsigned long long)g_pb.flips,
@@ -1678,13 +1683,12 @@ void hle_pb_diag(void)
             (unsigned long long)hle_pbd_writebacks(), (unsigned long long)ds.written,
             (unsigned long long)ds.presented, (unsigned long long)ds.dropped,
             (unsigned long long)ds.write_waits, state, buf);
-    prev_kicks = kicks;
-    prev_words = words;
-    prev_heads = heads;
-    static uint64_t prev_cu;
+    g_diag.kicks = kicks;
+    g_diag.words = words;
+    g_diag.heads = heads;
     const uint64_t cu = __atomic_load_n(&g_cu.waits, __ATOMIC_RELAXED);
-    if (cu != prev_cu) {
-        prev_cu = cu;
+    if (cu != g_diag.cu) {
+        g_diag.cu = cu;
         hle_log("hakuX-hle-pb", "catch-up: %llu stores waited for the decoder (caught up %llu; it "
                 "waited on the guest at a trap %llu, a flip stall %llu, the FIFO off %llu; for arena "
                 "room %llu; timed out %llu), %.1f ms", (unsigned long long)cu,
@@ -1693,15 +1697,38 @@ void hle_pb_diag(void)
                 (unsigned long long)g_cu.gave_up[3], (unsigned long long)g_cu.timeouts,
                 (double)g_cu.ns / 1e6);
     }
-    static uint64_t prev_rw;
     uint64_t rw, rns, rto, rheld;
     hle_barrier_report_stats(&rw, &rns, &rto, &rheld);
-    if (rw != prev_rw) {
+    if (rw != g_diag.rw) {
         hle_log("hakuX-hle-pb", "report gate: %llu reads waited for their visibility tests (+%llu), "
                 "%.1f ms in all, %llu given up, %llu at once (the decoder held short of them)",
-                (unsigned long long)rw, (unsigned long long)(rw - prev_rw), (double)rns / 1e6,
+                (unsigned long long)rw, (unsigned long long)(rw - g_diag.rw), (double)rns / 1e6,
                 (unsigned long long)rto, (unsigned long long)rheld);
-        prev_rw = rw;
+        g_diag.rw = rw;
     }
     hle_back_draw_diag();               /* the back end's state recorded per draw (hakuX-hle-emit) */
+}
+
+void hle_pb_reset(void)
+{
+    if (g_pb.on) {
+        /* its stop needs the back end, which may be gone by now */
+        hle_log("hakuX-hle-pb", "reset while push-buffer mode runs: not done (hle_pb_stop first)");
+        return;
+    }
+    memset(&g_pb, 0, sizeof(g_pb));         /* its semaphores destroyed, its thread joined */
+    g_sc_gate = g_sc_on = false;
+    memset(&g_lg, 0, sizeof(g_lg));
+    g_disp_mode = 0;                        /* the next title's AvSetDisplayMode sets it */
+    g_disp_modes = 0;
+    g_pblog = -1;
+    g_bnd_req = 0;
+    memset(&g_trel, 0, sizeof(g_trel));
+    memset(&g_cu, 0, sizeof(g_cu));
+    memset(&g_sc, 0, sizeof(g_sc));
+    memset(&g_park, 0, sizeof(g_park));     /* a savestate's park the stop cut short */
+    memset(&g_diag, 0, sizeof(g_diag));
+    hle_pbd_reset();
+    hle_kelvin_reset();
+    hle_res_reset();
 }

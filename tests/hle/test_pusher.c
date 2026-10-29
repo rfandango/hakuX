@@ -77,7 +77,7 @@ static void test_increasing_and_noninc(void)
     HlePusher p;
     pusher(&p, 0x100);
     Log l = { 0 };
-    HlePbSink s = { &l, method, run, NULL };
+    HlePbSink s = { &l, method, run, NULL, NULL };
     HT_EQ_INT(hle_pb_pusher_run(&p, 0x120, fetch, NULL, &s), HLE_PB_OK);
     HT_EQ_U32(p.get, 0x120);
     HT_EQ_INT(l.n, 5);
@@ -104,7 +104,7 @@ static void test_batched_data(void)
     HlePusher p;
     pusher(&p, 0);
     Log l = { .batch = true };
-    HlePbSink s = { &l, method, run, NULL };
+    HlePbSink s = { &l, method, run, NULL, NULL };
     HT_EQ_INT(hle_pb_pusher_run(&p, 36, fetch, NULL, &s), HLE_PB_OK);
     HT_EQ_INT(l.runs, 1);
     HT_EQ_INT(l.n, 8);
@@ -122,7 +122,7 @@ static void test_packet_across_kicks(void)
     HlePusher p;
     pusher(&p, 0x40);
     Log l = { 0 };
-    HlePbSink s = { &l, method, NULL, NULL };
+    HlePbSink s = { &l, method, NULL, NULL, NULL };
     HT_EQ_INT(hle_pb_pusher_run(&p, 0x4C, fetch, NULL, &s), HLE_PB_OK);
     HT_EQ_INT(l.n, 2);
     HT_EQ_INT(p.left, 2);
@@ -144,7 +144,7 @@ static void test_jumps(void)
     HlePusher p;
     pusher(&p, 0);
     Log l = { 0 };
-    HlePbSink s = { &l, method, NULL, NULL };
+    HlePbSink s = { &l, method, NULL, NULL, NULL };
     HT_EQ_INT(hle_pb_pusher_run(&p, 0xC08, fetch, NULL, &s), HLE_PB_OK);
     HT_EQ_INT(l.n, 2);
     HT_EQ_U32(l.v[0], 7);
@@ -164,7 +164,7 @@ static void test_call_return(void)
     HlePusher p;
     pusher(&p, 0);
     Log l = { 0 };
-    HlePbSink s = { &l, method, NULL, NULL };
+    HlePbSink s = { &l, method, NULL, NULL, NULL };
     HT_EQ_INT(hle_pb_pusher_run(&p, 0x00C, fetch, NULL, &s), HLE_PB_OK);
     HT_EQ_INT(l.n, 2);
     HT_EQ_U32(l.m[0], 0x0504);
@@ -195,10 +195,10 @@ static void test_call_left_by_jump(void)
     ram[0x800 / 4] = 0x00000008u | 1;               /* jump back after the second */
     HlePusher p;
     pusher(&p, 0);
-    HlePbSink plain = { NULL, nop_method, NULL, NULL };
+    HlePbSink plain = { NULL, nop_method, NULL, NULL, NULL };
     HT_EQ_INT(hle_pb_pusher_run(&p, 0x008, fetch, NULL, &plain), HLE_PB_ERR_CALL);
     unsigned calls = 0;
-    HlePbSink s = { &calls, nop_method, NULL, clear_sub };
+    HlePbSink s = { &calls, nop_method, NULL, clear_sub, NULL };
     pusher(&p, 0);
     HT_EQ_INT(hle_pb_pusher_run(&p, 0x008, fetch, NULL, &s), HLE_PB_OK);
     HT_EQ_U32(p.get, 0x008);
@@ -213,7 +213,7 @@ static void test_branch_errors(void)
     HlePusher p;
     pusher(&p, 0);
     Log l = { 0 };
-    HlePbSink s = { &l, method, NULL, NULL };
+    HlePbSink s = { &l, method, NULL, NULL, NULL };
     HT_EQ_INT(hle_pb_pusher_run(&p, 0x40, fetch, NULL, &s), HLE_PB_ERR_CALL);
     HT_EQ_U32(p.error_get, 0x100);
     HT_EQ_INT(hle_pb_pusher_run(&p, 0x40, fetch, NULL, &s), HLE_PB_ERR_CALL);  /* sticky */
@@ -246,7 +246,7 @@ static void test_budget(void)
     pusher(&p, 0x100);
     p.budget = 1000;
     Log l = { 0 };
-    HlePbSink s = { &l, method, NULL, NULL };
+    HlePbSink s = { &l, method, NULL, NULL, NULL };
     HT_EQ_INT(hle_pb_pusher_run(&p, 0x40, fetch, NULL, &s), HLE_PB_ERR_LOOP);
     HT_CHECK(p.words > 1000 && p.words <= 1004);
     HT_EQ_U32(p.error_word, 0);
@@ -266,7 +266,7 @@ static void test_limits(void)
     HlePusher p;
     pusher(&p, 0);
     Log l = { 0 };
-    HlePbSink s = { &l, method, NULL, NULL };
+    HlePbSink s = { &l, method, NULL, NULL, NULL };
     HT_EQ_INT(hle_pb_pusher_run(&p, 0x40, fetch, NULL, &s), HLE_PB_ERR_LIMIT);
 
     hle_pb_pusher_init(&p, 0, 0x1FFF);              /* an object of 8 KiB */
@@ -290,7 +290,7 @@ static void test_stall(void)
     HlePusher p;
     pusher(&p, 0);
     Log l = { .stall_at = 0x0100 };
-    HlePbSink s = { &l, method, NULL, NULL };
+    HlePbSink s = { &l, method, NULL, NULL, NULL };
     HT_EQ_INT(hle_pb_pusher_run(&p, 16, fetch, NULL, &s), HLE_PB_OK);
     HT_EQ_U32(p.get, 8);
     HT_EQ_INT(l.n, 1);
@@ -308,7 +308,7 @@ static void test_hold(void)
     HlePusher p;
     pusher(&p, 0);
     Log l = { .hold_at = 0x0204, .hold = true };
-    HlePbSink s = { &l, method, NULL, NULL };
+    HlePbSink s = { &l, method, NULL, NULL, NULL };
     HT_EQ_INT(hle_pb_pusher_run(&p, 12, fetch, NULL, &s), HLE_PB_OK);
     HT_EQ_U32(p.get, 8);
     HT_EQ_INT(l.n, 1);

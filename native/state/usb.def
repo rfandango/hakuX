@@ -4,7 +4,7 @@
  * with its state. */
 NC_SECTION(USB)
 
-NC_REC(Ohci, 264)
+NC_REC(Ohci, NC_ABI_SIZE(264, 272))
 NC_SKIP(Ohci, vm)
 NC_SKIP(Ohci, lock)
 NC_SKIP(Ohci, run)

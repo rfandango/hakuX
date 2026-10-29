@@ -7,9 +7,7 @@
  */
 #include "hw/xbox/hle/base.h"
 #include <math.h>
-#ifdef __ANDROID__
-#include <sys/system_properties.h>
-#endif
+#include "native/platform/properties.h"
 
 #include "hw/xbox/hle/hle.h"
 #include "hw/xbox/hle/prop.h"
@@ -145,6 +143,7 @@ typedef struct FixedKey {
 
 static struct {
     bool ready;
+    bool glsl;                          /* hle_glsl_init's, for hle_draw_shutdown */
     VkDescriptorSetLayout dsl;          /* caps.bindless off: the draws' own sets' */
     VkDescriptorPool pool;
     VkDescriptorSet set;
@@ -795,6 +794,7 @@ int hle_draw_init(void)
     }
     g_dr.next_slot = 1;
     hle_glsl_init();
+    g_dr.glsl = true;
     pipe_async_init();                  /* before the caches: they read its nocache switch */
     hle_pcache_init();
     /* glslang builds its per-stage built-in tables on first use (~120 ms on
@@ -812,13 +812,14 @@ int hle_draw_init(void)
 /* The white texture's contents and layout, recorded once into the first
  * command buffer, before any pass (a clear and layout changes are not
  * allowed in one; at the first draw they were, the validation layer said). */
+static bool g_white_done;
+
 static void white_init(VkCommandBuffer cb)
 {
-    static bool done;
-    if (done) {
+    if (g_white_done) {
         return;
     }
-    done = true;
+    g_white_done = true;
     VkClearColorValue c = { .float32 = { 1, 1, 1, 1 } };
     VkImage imgs[3] = { g_dr.white.img, g_dr.white_cube.img, g_dr.white_3d.img };
     for (unsigned i = 0; i < 3; i++) {
@@ -1583,6 +1584,10 @@ static VkSamplerAddressMode addr_mode(uint32_t a)
     }
 }
 
+/* sampler_index, one per stage a draw: the index last found for the key's
+ * hash, before the scan */
+static uint16_t g_smp_hot[64];
+
 /* sampler_index's lod_down: how many levels finer the stage must sample (the
  * source surface's resolution scale over the target's, as log2 in 1/16ths). */
 static uint32_t sampler_index(const uint32_t *tss, uint32_t lod_down)
@@ -1595,16 +1600,14 @@ static uint32_t sampler_index(const uint32_t *tss, uint32_t lod_down)
                    (uint64_t)(tss[TSS_ADDRESSW] & 7) << 15 | (uint64_t)base << 18 |
                    (uint64_t)tss[TSS_BORDERCOLOR] << 32;
     uint64_t key2 = tss[TSS_MIPMAPLODBIAS] | (uint64_t)lod_down << 32;
-    /* one per stage a draw: the index last found for the key's hash, before the scan */
-    static uint16_t hot[64];
     unsigned h = (unsigned)(((key ^ key2 * 0x9E3779B97F4A7C15ull) * 0xFF51AFD7ED558CCDull) >> 58);
-    uint32_t i = hot[h];
+    uint32_t i = g_smp_hot[h];
     if (i < g_dr.nsmp && g_dr.smp[i].key == key && g_dr.smp[i].key2 == key2) {
         return i;
     }
     for (i = 0; i < g_dr.nsmp; i++) {
         if (g_dr.smp[i].key == key && g_dr.smp[i].key2 == key2) {
-            hot[h] = (uint16_t)i;
+            g_smp_hot[h] = (uint16_t)i;
             return i;
         }
     }
@@ -1655,7 +1658,7 @@ static uint32_t sampler_index(const uint32_t *tss, uint32_t lod_down)
         return 0;
     }
     i = g_dr.nsmp++;
-    hot[h] = (uint16_t)i;
+    g_smp_hot[h] = (uint16_t)i;
     g_dr.smp[i].key = key;
     g_dr.smp[i].key2 = key2;
     g_dr.smp[i].s = s;
@@ -1947,21 +1950,26 @@ static VkPipeline pipeline_new(const PipeKey *k, uint64_t h, const HleVkSurf *ta
     return p;
 }
 
+/* pipeline: the previous draw's key and pipeline (ok: a draw with that key
+ * takes it) */
+static struct {
+    PipeKey key;
+    VkPipeline p;
+    bool ok;
+} g_last;
+
 /* The draw's pipeline: the previous draw's when the key is unchanged, else by
  * hash, else made (and remembered, failures included); VK_NULL_HANDLE with
  * *pending while the workers build it. */
 static VkPipeline pipeline(const PipeKey *k, HleVkSurf *target, bool *pending)
 {
-    static PipeKey last;
-    static VkPipeline last_p;
-    static bool last_ok;
     *pending = false;
     if (hle_pipe_async()) {
         pipe_collect();
         target_note(target);
     }
-    if (last_ok && memcmp(k, &last, g_key_bytes) == 0) {
-        return last_p;
+    if (g_last.ok && memcmp(k, &g_last.key, g_key_bytes) == 0) {
+        return g_last.p;
     }
     uint64_t h = key_hash(k, g_key_bytes);
     int i = pipe_lookup(h);
@@ -1970,7 +1978,7 @@ static VkPipeline pipeline(const PipeKey *k, HleVkSurf *target, bool *pending)
         HlePipe *e = &g_dr.pipes[i];
         if (e->state == PIPE_PENDING) {
             *pending = true;
-            last_ok = false;
+            g_last.ok = false;
             return VK_NULL_HANDLE;
         }
         if (e->state == PIPE_PREBUILT) {
@@ -1982,13 +1990,13 @@ static VkPipeline pipeline(const PipeKey *k, HleVkSurf *target, bool *pending)
     } else {
         p = pipeline_new(k, h, target, pending);
         if (*pending) {
-            last_ok = false;
+            g_last.ok = false;
             return VK_NULL_HANDLE;
         }
     }
-    last = *k;
-    last_p = p;
-    last_ok = i >= 0 || g_dr.npipes >= HLE_MAX_PIPES || pipe_lookup(h) >= 0;
+    g_last.key = *k;
+    g_last.p = p;
+    g_last.ok = i >= 0 || g_dr.npipes >= HLE_MAX_PIPES || pipe_lookup(h) >= 0;
     return p;
 }
 
@@ -2677,6 +2685,8 @@ static int64_t g_psf_frame = -2;
 static uint32_t g_psf_maxn;
 static uint64_t g_psf_seen[1024];
 static unsigned g_psf_nseen;
+/* Android: the swap at which hle_draw_psframe_poll next reads the properties */
+static int64_t g_prop_next;
 /* debug (debug.hakux.norec, live): 1 records every draw's whole state (no
  * cache of the recorded state), 2 keeps the vertex offset in the binding
  * (firstVertex 0), 3 both */
@@ -2889,13 +2899,12 @@ void hle_draw_psframe_poll(uint64_t swap)
     probe_log(swap);
     hle_quirks_poll();
 #ifdef __ANDROID__
-    static int64_t next_poll;
-    if ((int64_t)swap < next_poll) {
+    if ((int64_t)swap < g_prop_next) {
         return;
     }
-    next_poll = swap + 3;   /* every 3 swaps: odd, so re-arming reaches either frame parity */
+    g_prop_next = swap + 3; /* every 3 swaps: odd, so re-arming reaches either frame parity */
     g_prop_gen++;           /* and the draws' own properties at their next draw */
-    char v[PROP_VALUE_MAX] = "";
+    char v[NC_PROPERTY_VALUE_MAX] = "";
     hle_prop_get("debug.hakux.norec", v);
     if ((unsigned)atoi(v) != g_norec) {
         g_norec = (unsigned)atoi(v);
@@ -2951,7 +2960,7 @@ void hle_draw_psframe_poll(uint64_t swap)
     }
     static HleProp psf_prop;
     if (hle_prop_new(&psf_prop, "debug.hakux.psframe", v)) {
-        char n[PROP_VALUE_MAX] = "";
+        char n[NC_PROPERTY_VALUE_MAX] = "";
         hle_prop_get("debug.hakux.psmaxn", n);
         g_psf_maxn = (uint32_t)atoi(n);
         g_psf_frame = swap + 1;
@@ -3315,9 +3324,9 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         static int64_t skip_n[8], skip_at[8];
         static int nskip = -1;
         static unsigned polled;
-        static char last[PROP_VALUE_MAX];
+        static char last[NC_PROPERTY_VALUE_MAX];
         const char *e = NULL;
-        char v[PROP_VALUE_MAX];
+        char v[NC_PROPERTY_VALUE_MAX];
         if (nskip < 0) {
             e = getenv("HAKUX_HLE_SKIPVSH");
         }
@@ -3360,9 +3369,9 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         static uint64_t want;
         static unsigned polled;
         if (polled != g_prop_gen) {
-            static char last[PROP_VALUE_MAX];
+            static char last[NC_PROPERTY_VALUE_MAX];
             polled = g_prop_gen;
-            char v[PROP_VALUE_MAX] = "";
+            char v[NC_PROPERTY_VALUE_MAX] = "";
             if (hle_prop_get("debug.hakux.vtok", v) > 0 && strcmp(v, last)) {
                 snprintf(last, sizeof(last), "%s", v);
                 want = strtoull(v, NULL, 16);
@@ -3511,7 +3520,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
              * made drops every draw, and must still be switched off. */
             static unsigned polled;
             if (polled != g_prop_gen) {
-                char v[PROP_VALUE_MAX] = "";
+                char v[NC_PROPERTY_VALUE_MAX] = "";
                 polled = g_prop_gen;
                 if (hle_prop_get("debug.hakux.psdbg", v) > 0) {
                     psdbg = atoi(v);
@@ -4265,42 +4274,47 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     }
 }
 
+/* hle_draw_ff_diag: the counts at its last log (its lines are per second) */
+static struct {
+    uint64_t emits[EM_N], draws, merge, no[5], verts;
+    uint64_t batches, merged, isame, icontig;
+    uint64_t pipe[6];                   /* the pipelines' line (cache ... skipped draws) */
+} g_prev;
+
 void hle_draw_ff_diag(void)
 {
-    static uint64_t prev[EM_N], prev_draws, prev_merge, prev_no[5], prev_verts;
     char line[512];
     int n = snprintf(line, sizeof(line), "per s: draws=%llu verts=%llu mergeable=%llu (not: strip "
                      "%llu idx %llu state %llu work %llu gap %llu)",
-                     (unsigned long long)(g_dr.draws - prev_draws),
-                     (unsigned long long)(g_dr.verts - prev_verts),
-                     (unsigned long long)(g_dr.mergeable - prev_merge),
-                     (unsigned long long)(g_dr.nomerge[0] - prev_no[0]),
-                     (unsigned long long)(g_dr.nomerge[1] - prev_no[1]),
-                     (unsigned long long)(g_dr.nomerge[2] - prev_no[2]),
-                     (unsigned long long)(g_dr.nomerge[3] - prev_no[3]),
-                     (unsigned long long)(g_dr.nomerge[4] - prev_no[4]));
-    prev_merge = g_dr.mergeable;
-    memcpy(prev_no, g_dr.nomerge, sizeof(prev_no));
-    static uint64_t prev_batches, prev_merged;
+                     (unsigned long long)(g_dr.draws - g_prev.draws),
+                     (unsigned long long)(g_dr.verts - g_prev.verts),
+                     (unsigned long long)(g_dr.mergeable - g_prev.merge),
+                     (unsigned long long)(g_dr.nomerge[0] - g_prev.no[0]),
+                     (unsigned long long)(g_dr.nomerge[1] - g_prev.no[1]),
+                     (unsigned long long)(g_dr.nomerge[2] - g_prev.no[2]),
+                     (unsigned long long)(g_dr.nomerge[3] - g_prev.no[3]),
+                     (unsigned long long)(g_dr.nomerge[4] - g_prev.no[4]));
+    g_prev.merge = g_dr.mergeable;
+    memcpy(g_prev.no, g_dr.nomerge, sizeof(g_prev.no));
     uint64_t batches, merged;
     hle_batch_stats(&batches, &merged);
     n += snprintf(line + n, sizeof(line) - (size_t)n, " batches=%llu of %llu draws",
-                  (unsigned long long)(batches - prev_batches), (unsigned long long)(merged - prev_merged));
-    prev_batches = batches;
-    prev_merged = merged;
-    static uint64_t prev_isame, prev_icontig;
+                  (unsigned long long)(batches - g_prev.batches),
+                  (unsigned long long)(merged - g_prev.merged));
+    g_prev.batches = batches;
+    g_prev.merged = merged;
     n += snprintf(line + n, sizeof(line) - (size_t)n, " indexed: no state between %llu, "
-                  "contiguous %llu", (unsigned long long)(g_dr.idx_same - prev_isame),
-                  (unsigned long long)(g_dr.idx_contig - prev_icontig));
-    prev_isame = g_dr.idx_same;
-    prev_icontig = g_dr.idx_contig;
+                  "contiguous %llu", (unsigned long long)(g_dr.idx_same - g_prev.isame),
+                  (unsigned long long)(g_dr.idx_contig - g_prev.icontig));
+    g_prev.isame = g_dr.idx_same;
+    g_prev.icontig = g_dr.idx_contig;
     for (unsigned i = 0; i < EM_N && n > 0 && (size_t)n < sizeof(line); i++) {
         n += snprintf(line + n, sizeof(line) - (size_t)n, " %s=%llu", k_em_names[i],
-                      (unsigned long long)(g_dr.emits[i] - prev[i]));
-        prev[i] = g_dr.emits[i];
+                      (unsigned long long)(g_dr.emits[i] - g_prev.emits[i]));
+        g_prev.emits[i] = g_dr.emits[i];
     }
-    prev_draws = g_dr.draws;
-    prev_verts = g_dr.verts;
+    g_prev.draws = g_dr.draws;
+    g_prev.verts = g_dr.verts;
     hle_log("hakuX-hle-emit", "%s", line);
     hle_log("hakuX-hle-back", "ff3d=%llu lit=%llu fog=%llu texgen=%llu texxform=%llu "
             "blend=%llu psprite=%llu prog=%llu prog_fog=%llu dropped: state=%llu target=%llu "
@@ -4315,7 +4329,7 @@ void hle_draw_ff_diag(void)
     {   /* new pipelines this second: from the caches at once, queued to the
          * workers and built by them, built in place; prebuilt ones first used;
          * draws skipped while theirs were being built */
-        static uint64_t p[6];
+        uint64_t *p = g_prev.pipe;
         uint64_t v[6] = { g_dr.cache_hits, g_dr.async_queued, g_dr.async_built, g_dr.inplace,
                           g_dr.prebuilt_used, g_dr.drops[DROP_PENDING] };
         uint32_t inflight = hle_pipe_inflight();
@@ -4326,8 +4340,126 @@ void hle_draw_ff_diag(void)
                     (unsigned long long)(v[2] - p[2]), (unsigned long long)(v[3] - p[3]),
                     inflight, (unsigned long long)(v[4] - p[4]), (unsigned long long)(v[5] - p[5]),
                     g_dr.npipes, (unsigned long long)g_dr.prebuilt);
-            memcpy(p, v, sizeof(p));
+            memcpy(p, v, sizeof(v));
         }
     }
 }
+
+/* ---- shutdown ------------------------------------------------------------------ */
+
+/* h destroyed by fn when it was made: nothing goes to the device for what
+ * never was (no init, an init that failed halfway, a second shutdown) */
+#define DESTROY(fn, h) do { if (h) { T.fn(d, (h), NULL); } } while (0)
+
+/* An image with its views and memory */
+static void img_destroy(VkImage img, VkImageView view, VkImageView cube, VkDeviceMemory mem)
+{
+    VkDevice d = g_hvk.dev;
+    DESTROY(vkDestroyImageView, cube);
+    DESTROY(vkDestroyImageView, view);
+    DESTROY(vkDestroyImage, img);
+    DESTROY(vkFreeMemory, mem);
+}
+
+void hle_draw_shutdown(void)
+{
+    VkDevice d = g_hvk.dev;
+    /* the users before what they use: the pipelines (the prebuild's and those
+     * taken from the workers too), the pools (their sets with them), the
+     * layouts and samplers, then the images and the memory */
+    for (uint32_t i = 0; i < g_dr.npipes; i++) {
+        DESTROY(vkDestroyPipeline, g_dr.pipes[i].pipe);
+    }
+    DESTROY(vkDestroyDescriptorPool, g_dr.pool);
+    DESTROY(vkDestroyDescriptorPool, g_dr.cpool);
+    DESTROY(vkDestroyDescriptorPool, g_dr.ppool);
+    for (unsigned i = 0; i < HLE_FRAMES; i++) {
+        DESTROY(vkDestroyDescriptorPool, g_dr.fbpool[i]);
+        for (unsigned j = 0; j < g_dr.fx[i].npool; j++) {
+            DESTROY(vkDestroyDescriptorPool, g_dr.fx[i].pool[j]);
+        }
+    }
+    DESTROY(vkDestroyPipelineLayout, g_dr.layout);
+    DESTROY(vkDestroyDescriptorSetLayout, g_dr.dsl);
+    DESTROY(vkDestroyDescriptorSetLayout, g_dr.cdsl);
+    DESTROY(vkDestroyDescriptorSetLayout, g_dr.fbdsl);
+    DESTROY(vkDestroyDescriptorSetLayout, g_dr.pdsl);
+    DESTROY(vkDestroyDescriptorSetLayout, g_dr.edsl);
+    for (uint32_t i = 0; i < g_dr.nsmp; i++) {
+        DESTROY(vkDestroySampler, g_dr.smp[i].s);
+    }
+    for (unsigned i = 0; i < HLE_MAX_TEX; i++) {    /* a free entry has none */
+        const HleVkTex *t = &g_dr.tex[i];
+        img_destroy(t->img, t->view, t->cube_view, t->mem);
+    }
+    const HleVkTex *const w[3] = { &g_dr.white, &g_dr.white_cube, &g_dr.white_3d };
+    for (unsigned i = 0; i < 3; i++) {
+        img_destroy(w[i]->img, w[i]->view, w[i]->cube_view, w[i]->mem);
+    }
+    for (unsigned i = 0; i < g_nretire; i++) {      /* parked or not: the device is idle */
+        img_destroy(g_retire[i].img, g_retire[i].view, g_retire[i].cube_view, g_retire[i].mem);
+    }
+    for (unsigned i = 0; i < g_nsnap; i++) {        /* a failed copy is not counted */
+        img_destroy(g_snap[i].img, g_snap[i].view, VK_NULL_HANDLE, g_snap[i].mem);
+    }
+    DESTROY(vkDestroyBuffer, g_dr.pbuf);
+    if (g_dr.pmap) {
+        T.vkUnmapMemory(d, g_dr.pmem);
+    }
+    DESTROY(vkFreeMemory, g_dr.pmem);
+    DESTROY(vkDestroyQueryPool, g_probe.pool);
+    /* host memory: the draw sets' tables (their keys with them), the slots'
+     * mirror, the vertex programs' tokens */
+    for (unsigned i = 0; i < HLE_FRAMES; i++) {
+        if (g_dr.fx[i].sets) {
+            g_hash_table_destroy(g_dr.fx[i].sets);
+        }
+    }
+    g_free(g_dr.mirror);
+    for (uint32_t i = 0; i < g_dr.nprog; i++) {
+        g_free(g_dr.prog[i].tok);
+    }
+    if (g_dr.glsl) {    /* glslang's built-in tables (MiBs a stage): the next init builds them */
+        hle_glsl_finalize();
+    }
+    /* The state as before hle_draw_init, for a next init on any device (its
+     * formats and caps): white_init, the lookups, the slots and the probe's
+     * pool start over. Kept: the debug settings read from the environment and
+     * properties, the log-once flags, and g_prop_gen (a generation the draw
+     * path compares with its own). */
+    memset(&g_dr, 0, sizeof(g_dr));
+    memset(&g_rec, 0, sizeof(g_rec));
+    memset(&g_decl, 0, sizeof(g_decl));
+    memset(&g_last, 0, sizeof(g_last));
+    memset(g_pipe_idx, 0, sizeof(g_pipe_idx));
+    g_key_bytes = offsetof(PipeKey, vi);
+    memset(g_smp_hot, 0, sizeof(g_smp_hot));
+    g_white_done = false;
+    memset(g_tex_hint, 0, sizeof(g_tex_hint));
+    memset(g_tex_miss, 0, sizeof(g_tex_miss));
+    g_tex_gen = 1;
+    g_nretire = 0;
+    g_nfree_slot = 0;
+    g_tex_retired = 0;
+    memset(g_snap, 0, sizeof(g_snap));
+    g_nsnap = 0;
+    g_snap_cur = -1;
+    g_snap_rt = 0;
+    memset(g_rt_seen, 0, sizeof(g_rt_seen));
+    g_rt_told = 0;
+    g_hle_zeq = 0;
+    /* the probe's pool and frames (the programs it watches are a property's) */
+    g_probe.pool = VK_NULL_HANDLE;
+    g_probe.failed = false;
+    memset(g_probe.fr, 0, sizeof(g_probe.fr));
+    /* the dump's frame and the property polls are swaps of this run's, and
+     * the next one counts from 0 again (back.c) */
+    g_psf_frame = -2;
+    g_psf_maxn = 0;
+    g_psf_nseen = 0;
+    g_prop_next = 0;
+    memset(&g_prev, 0, sizeof(g_prev));
+}
+
+#undef DESTROY
 

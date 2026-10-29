@@ -122,6 +122,9 @@ extern MCPXAPUState *g_state; /* the one APU: the savestate section's */
  * it at the high watermark). Returns the callback's size in bytes (the
  * device's, or the request's). */
 int apu_out_open(int capacity_bytes, int samples, pthread_cond_t *wake);
+/* After the frame thread has stopped: the device closed and the ring freed,
+ * for another open (the core stopped in its process; nc_dev_apu_free). */
+void apu_out_close(void);
 /* the bytes queued */
 int apu_out_queued(void);
 /* one EP frame in (the frame thread: the only producer; there is room) */

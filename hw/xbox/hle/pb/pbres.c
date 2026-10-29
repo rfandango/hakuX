@@ -14,6 +14,16 @@
 #include "hw/xbox/hle/vk/back.h"
 #include "hw/xbox/hle/vk/guest_ram.h"
 
+/* The log lines' limits, the first few of each a boot, and the texture dump
+ * asked for (HAKUX_HLE_TEXDUMP: -2 not read yet, -1 none or done):
+ * hle_res_reset */
+static struct {
+    unsigned yuv, headers;
+    uint32_t kinds;                     /* the resource kinds logged, a bit each */
+    uint32_t fmts[8];                   /* the formats logged, + 1 */
+} g_lg;
+static int64_t g_texdump = -2;
+
 /* ---- arena ------------------------------------------------------------------- */
 
 /* Room in arena a for len bytes (HLE_ARENA_FULL: none even with the GPU
@@ -216,10 +226,9 @@ static bool yuv_define(uint32_t id, const uint32_t h5[5], const HleResDesc *d)
         return false;
     }
     yuv_convert(src, pitch, d->w, d->h, d->fmt == HLE_XFMT_UYVY, dst);
-    static unsigned s_logged;
-    if (s_logged++ < 4) {               /* movies: when their frames start converting */
+    if (g_lg.yuv++ < 4) {               /* movies: when their frames start converting */
         hle_log("hakuX-hle-front", "YUV texture %u: %ux%u %s converted (#%u of 4 logged)", id,
-                d->w, d->h, d->fmt == HLE_XFMT_UYVY ? "UYVY" : "YUY2", s_logged);
+                d->w, d->h, d->fmt == HLE_XFMT_UYVY ? "UYVY" : "YUY2", g_lg.yuv);
     }
     HleCmdTex *c = hle_fe_begin(HLE_OP_TEX, sizeof(*c));
     c->id = id;
@@ -241,8 +250,7 @@ static bool tex_desc(const uint32_t h5[5], HleResDesc *dp, HleResInfo *rip)
     HleResDesc d;
     HleResInfo ri;
     if (!hle_res_from_header(h5[0], h5[3], h5[4], &d) || !hle_res_info(&d, &ri)) {
-        static unsigned s_logged;
-        if (s_logged++ < 8) {
+        if (g_lg.headers++ < 8) {
             hle_log("hakuX-hle-front", "texture header not understood: %08x %08x %08x %08x "
                     "%08x (not bound; first 8 logged)", h5[0], h5[1], h5[2], h5[3], h5[4]);
         }
@@ -250,9 +258,8 @@ static bool tex_desc(const uint32_t h5[5], HleResDesc *dp, HleResInfo *rip)
     }
     if (d.kind != HLE_RK_TEXTURE && d.kind != HLE_RK_CUBE && d.kind != HLE_RK_SURFACE &&
         d.kind != HLE_RK_VOLUME) {
-        static uint32_t s_kinds;
-        if (!(s_kinds & (1u << (d.kind & 31)))) {
-            s_kinds |= 1u << (d.kind & 31);
+        if (!(g_lg.kinds & (1u << (d.kind & 31)))) {
+            g_lg.kinds |= 1u << (d.kind & 31);
             hle_log("hakuX-hle-front", "texture kind %u not bound (%08x %08x %08x %08x %08x)",
                     d.kind, h5[0], h5[1], h5[2], h5[3], h5[4]);
         }
@@ -275,13 +282,12 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
     bool p8 = d.fmt == HLE_XFMT_P8;
     if (!fi || (fi->flags & (HLE_FI_YUV | HLE_FI_DEPTH)) || (p8 && !npal)) {
         /* YUV / depth textures, P8 without a palette */
-        static uint32_t s_seen[8];
         for (unsigned i = 0; i < 8; i++) {
-            if (s_seen[i] == d.fmt + 1) {
+            if (g_lg.fmts[i] == d.fmt + 1) {
                 break;
             }
-            if (!s_seen[i]) {
-                s_seen[i] = d.fmt + 1;
+            if (!g_lg.fmts[i]) {
+                g_lg.fmts[i] = d.fmt + 1;
                 hle_log("hakuX-hle-front", "texture format 0x%x not uploaded yet (%ux%u kind %u)",
                         d.fmt, d.w, d.h, d.kind);
                 break;
@@ -375,22 +381,21 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
         }
     }
     {   /* debug: HAKUX_HLE_TEXDUMP=<id>, that texture's linear texels once */
-        static int64_t want = -2;
-        if (want == -2) {
+        if (g_texdump == -2) {
             const char *e = getenv("HAKUX_HLE_TEXDUMP");
-            want = e ? atoll(e) : -1;
+            g_texdump = e ? atoll(e) : -1;
         }
 #ifdef __ANDROID__
         {   /* on demand: a new value of debug.hakux.texdump=<id>, its next upload */
             static HleProp prop;
             char v[PROP_VALUE_MAX];
             if (hle_prop_new(&prop, "debug.hakux.texdump", v) && atoll(v) > 0) {
-                want = atoll(v);
+                g_texdump = atoll(v);
             }
         }
 #endif
-        if (want == id) {
-            want = -1;
+        if (g_texdump == id) {
+            g_texdump = -1;
             g_autofree char *p = g_strdup_printf("%shle_shadow/tex_%u_f%x_%ux%u_l%u.bin",
                                                  hle_host_base_path(), id, oxfmt, d.w, d.h,
                                                  levels);
@@ -599,4 +604,10 @@ bool hle_res_zread_map(uint32_t xfmt, uint8_t map[4])
         }
     }
     return false;
+}
+
+void hle_res_reset(void)
+{
+    memset(&g_lg, 0, sizeof(g_lg));
+    g_texdump = -2;
 }

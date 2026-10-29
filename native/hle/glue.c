@@ -97,7 +97,8 @@ void nc_hle_boot(NcKernel *k, NcVm *vm, NcCpu *cpu, const NcCpuContext *boot)
         }
     }
     if (!hle_active()) {
-        nc_log("hakuX-native-hle", "HLE GPU off (HAKUX_HLE_MODE unset)");
+        const char *mode = getenv("HAKUX_HLE_MODE");
+        nc_log("hakuX-native-hle", "HLE GPU off (HAKUX_HLE_MODE %s)", mode ? mode : "unset");
         return;
     }
     g_active = true;
@@ -153,6 +154,8 @@ bool nc_hle_pb_active(void)
 
 static pthread_t g_smp_thread;
 static bool g_smp_ready;
+static bool g_smp_installed;            /* the handler, g_smp_old the one before it */
+static struct sigaction g_smp_old;
 static uintptr_t g_smp_base;
 static volatile uint32_t g_smp_pc;
 static uint32_t g_smp_seq;
@@ -184,7 +187,7 @@ static bool smp_sample(uint32_t *pc)
     bool ok = false;
     pthread_mutex_lock(&g_smp_mu);
     const uint32_t seq = __atomic_load_n(&g_smp_seq, __ATOMIC_ACQUIRE);
-    if (pthread_kill(g_smp_thread, SMP_SIGNAL) == 0) {
+    if (g_smp_ready && pthread_kill(g_smp_thread, SMP_SIGNAL) == 0) {
         /* the handler runs at the vCPU thread's next instruction: microseconds */
         for (int i = 0; i < 200 && !ok; i++) {
             if (__atomic_load_n(&g_smp_seq, __ATOMIC_ACQUIRE) != seq) {
@@ -213,9 +216,10 @@ static void smp_setup(void)
     sa.sa_sigaction = smp_signal;
     sa.sa_flags = SA_SIGINFO | SA_RESTART | SA_ONSTACK;
     sigemptyset(&sa.sa_mask);
-    if (sigaction(SMP_SIGNAL, &sa, NULL) != 0) {
+    if (sigaction(SMP_SIGNAL, &sa, &g_smp_old) != 0) {
         return;
     }
+    g_smp_installed = true;
     sigset_t set;
     sigemptyset(&set);
     sigaddset(&set, SMP_SIGNAL);
@@ -226,6 +230,12 @@ static void smp_setup(void)
     nc_log("hakuX-native-hle", "pc sampler: SIGPROF on the vCPU thread, core library at %p", info.dli_fbase);
 }
 
+void nc_hle_cpu_leave(void)
+{
+    pthread_mutex_lock(&g_smp_mu);      /* after the sample it may be in */
+    g_smp_ready = false;
+    pthread_mutex_unlock(&g_smp_mu);
+}
 
 /* ------------------------------------------------------------ the probes */
 
@@ -254,4 +264,31 @@ void nc_hle_after_sysop(NcKernel *k)
 {
     nc_hle_watch_rearm();
     nc_hle_host_flush();
+}
+
+void nc_hle_native_stop(void)
+{
+    if (g_cpu) {
+        hle_shutdown();
+    }
+}
+
+void nc_hle_native_reset(void)
+{
+    if (g_smp_installed) {      /* the one before back, if ours is still the one */
+        struct sigaction now;
+        if (sigaction(SMP_SIGNAL, NULL, &now) == 0 && now.sa_sigaction == smp_signal) {
+            sigaction(SMP_SIGNAL, &g_smp_old, NULL);
+        }
+        g_smp_installed = false;
+    }
+    g_hle_pc_sampler = NULL;
+    g_smp_ready = false;
+    memset(&g_smp_thread, 0, sizeof(g_smp_thread));
+    g_cpu = NULL;
+    g_fs_base = 0;
+    g_active = false;
+    g_fatal[0] = 0;
+    g_fatal_kind = NC_FATAL_NONE;
+    nc_hle_host_reset();
 }

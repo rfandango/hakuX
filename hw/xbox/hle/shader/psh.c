@@ -528,8 +528,8 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
         "outc", "t0", "v0", "r0", "vec4(vec3(fogf), 1.0)", "v1", "t3", "vec4(vec3(r0.a), 1.0)",
         "t2",
         /* 16-pixel bands: stage 1 (a shadow compare), its r / 65535 */
-        "((int(gl_FragCoord.y) & 16) == 0 ? t1 : "
-        "vec4(vec3(clamp(vTex1.z / vTex1.w / 65535.0, 0.0, 1.0)), 1.0))",
+        ("((int(gl_FragCoord.y) & 16) == 0 ? t1 : "
+         "vec4(vec3(clamp(vTex1.z / vTex1.w / 65535.0, 0.0, 1.0)), 1.0))"),
         "vec4(vec3(vSpecular.a), 1.0)", "vec4(vec3(t0.a), 1.0)", "vec4(vec3(t3.a), 1.0)",
         "vec4(fract(vTex3.xy / vTex3.w), 0.0, 1.0)", "vec4(clamp(abs(vTex3.xyz) * 0.25, 0.0, 1.0), 1.0)",
         "t3s", "t0s" };

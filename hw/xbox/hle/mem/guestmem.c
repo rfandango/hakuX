@@ -14,6 +14,12 @@ void hle_guestmem_init(uint8_t *ram, uint64_t size, uint64_t ram_addr_base)
     g_ram_addr_base = ram_addr_base;
 }
 
+void hle_guestmem_reset(void)
+{
+    g_ram = NULL;
+    g_ram_size = g_ram_addr_base = 0;
+}
+
 uint64_t hle_ram_size(void)
 {
     return g_ram_size;

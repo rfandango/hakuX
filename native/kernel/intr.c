@@ -256,3 +256,9 @@ void nc_intr_register(NcKernel *k)
     nc_kernel_impl(k, "KeDisconnectInterrupt", KeDisconnectInterrupt);
     nc_kernel_impl(k, "KeSynchronizeExecution", KeSynchronizeExecution);
 }
+
+void nc_intr_reset(void)
+{
+    memset(g_hold, 0, sizeof(g_hold));
+    g_isr_line = 0xFF;
+}

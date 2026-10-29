@@ -115,6 +115,13 @@ typedef struct NcCpuConfig {
 /* Creates the JIT and its one host thread state: flat segments, FS at
  * fs_base (the KPCR, shared by all guest threads). */
 NcCpu *nc_cpu_create(const NcCpuConfig *cfg, uint32_t fs_base);
+/* After nc_cpu_run has returned: the JIT's thread and context freed (FEX's
+ * DestroyThread and the context), the call-ret stack unmapped and FEX's
+ * configuration reset, for a later nc_cpu_create. */
+void nc_cpu_destroy(NcCpu *cpu);
+/* At the end of a thread that ran the CPU (nc_cpu_create, nc_cpu_run): its
+ * FEX allocator heap given back for the next thread to reuse. */
+void nc_cpu_thread_done(void);
 
 /* A new guest thread's initial state: the JIT's reset state (EFLAGS 0x202,
  * default x87 control word and MXCSR) at eip with esp. */

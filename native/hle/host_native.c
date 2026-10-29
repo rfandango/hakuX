@@ -27,6 +27,16 @@ void nc_hle_host_init(NcKernel *k, NcVm *vm, NcCpu *cpu)
     g_cpu = cpu;
 }
 
+void nc_hle_host_reset(void)
+{
+    memset(&nc_hle_regs, 0, sizeof(nc_hle_regs));
+    g_vm = NULL;
+    g_cpu = NULL;
+    g_flush = false;
+    g_flushes = 0;
+    nc_hle_dirty_reset();
+}
+
 /* ---------------------------------------------------------- the guest CPU */
 
 HleCpu *hle_host_cpu(void)
@@ -102,12 +112,34 @@ int hle_va_rw(uint32_t va, void *buf, size_t len, bool write)
 
 /* ---------------------------------------------------------- configuration */
 
+/* The front end's (nc_hle_set_base_path, nc_hle_set_mode): for a front end
+ * that may not set the process's environment (the libretro core). */
+static char g_base[256];
+static const char *g_mode;
+static char g_base_path[256];   /* hle_host_base_path's, made from g_base once */
+
+void nc_hle_set_base_path(const char *path)
+{
+    snprintf(g_base, sizeof(g_base), "%s", path);
+    g_base_path[0] = 0;
+}
+
+void nc_hle_set_mode(const char *mode)
+{
+    g_mode = mode;
+}
+
+const char *hle_host_hle_mode(void)
+{
+    return g_mode;
+}
+
 const char *hle_host_base_path(void)
 {
-    static char path[256];
+    char *path = g_base_path;
     if (!path[0]) {
-        const char *b = getenv("HAKUX_NATIVE_BASE");
-        snprintf(path, sizeof(path), "%s/", b ? b : "/data/local/tmp/native/hle");
+        const char *b = g_base[0] ? g_base : getenv("HAKUX_NATIVE_BASE");
+        snprintf(path, sizeof(g_base_path), "%s/", b ? b : "/data/local/tmp/native/hle");
         for (char *p = path + 1; *p; p++) {
             if (*p == '/') {
                 *p = 0;

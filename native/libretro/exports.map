@@ -1,0 +1,5 @@
+/* hakux_libretro.so exports the libretro ABI and nothing else. */
+{
+  global: retro_*;
+  local: *;
+};

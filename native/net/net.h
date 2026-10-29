@@ -50,6 +50,9 @@ bool nc_net_option(const char *arg);
 NcNetMode nc_net_mode(void);
 /* The boot: the backend's thread starts (nothing in mode off). */
 void nc_net_start(void);
+/* After the NIC stops: join the backend and release this run's queues,
+ * sockets and capture file. Configuration is kept for the next boot. */
+void nc_net_stop(void);
 /* Whether the NIC's link is up (a backend running). */
 bool nc_net_link(void);
 
@@ -80,6 +83,7 @@ struct pollfd;
 typedef struct NcNetBackend {
     const char *name;
     bool (*init)(void);
+    void (*close)(void);                /* after its thread has joined; partial init too */
     /* a guest frame, on the network thread */
     void (*input)(const uint8_t *frame, size_t len);
     /* the descriptors to poll (up to max) and the longest wait (ms);

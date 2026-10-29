@@ -6,7 +6,9 @@
 #define HW_XBOX_HLE_VK_VKDEV_H
 
 #include <volk.h>
+#ifdef __ANDROID__
 #include <vulkan/vulkan_android.h>
+#endif
 
 /* Command buffers in flight (back.c's ring, one recording each): a slot's
  * recording starts once its previous submission has completed, so the
@@ -103,8 +105,11 @@ typedef struct HleVk {
                                  * only the struct tag, no typedef) */
     VkPhysicalDeviceProperties props;
     VkPhysicalDeviceMemoryProperties mem;
+#ifdef __ANDROID__
     PFN_vkGetAndroidHardwareBufferPropertiesANDROID get_ahb_props;
+#endif
     HleCaps caps;
+    bool shared;                /* inst and dev are a frontend's (hle_vk_init_shared) */
 } HleVk;
 
 extern HleVk g_hvk;
@@ -113,6 +118,29 @@ extern HleVk g_hvk;
  * Vulkan 1.1 is the floor's version: 1.2's and 1.3's parts come from their
  * extensions (timeline semaphores required) or vk/compat.c. */
 int hle_vk_init(void);
+/* hle_vk_init on a frontend's instance (the libretro core): gpu, or the first
+ * one when VK_NULL_HANDLE; a queue that can present to surface if it isn't
+ * VK_NULL_HANDLE; the device made by make, as vkCreateDevice would (the
+ * frontend's wrapper, which adds what it needs itself). The frontend uses
+ * that device and queue too and destroys them; nothing here does. A later
+ * hle_vk_init finds them. Same results as hle_vk_init. */
+typedef VkDevice (*HleVkMakeDevice)(VkPhysicalDevice gpu, void *opaque, const VkDeviceCreateInfo *ci);
+int hle_vk_init_shared(PFN_vkGetInstanceProcAddr gipa, VkInstance inst, VkPhysicalDevice gpu,
+                       VkSurfaceKHR surface, HleVkMakeDevice make, void *opaque);
+/* After hle_back_shutdown (the core stops, M2): the device and instance
+ * destroyed, a frontend's forgotten (it destroys them), and g_hvk as before
+ * hle_vk_init, which makes or finds the next. */
+void hle_vk_shutdown(void);
+/* The frontend's lock on the queue it shares (libretro's lock_queue and
+ * unlock_queue), taken inside hle_vk_queue_lock; NULL: none. */
+void hle_vk_set_frontend_queue_lock(void (*lock)(void *), void (*unlock)(void *), void *handle);
+/* The instance extensions for the window's surface, at most. */
+#define HLE_VK_WINDOW_EXTS 8
+#ifndef __ANDROID__
+/* Linux: the instance extensions the window's surface needs (SDL's), before
+ * hle_vk_init; enabled when the loader has them all (the swapchain with them). */
+void hle_vk_set_window_extensions(const char *const *names, uint32_t n);
+#endif
 /* The back end is up (hle_back_start done): other threads may use g_hvk. */
 bool hle_vk_ready(void);
 
@@ -130,7 +158,8 @@ bool hle_vk_check(VkResult r, const char *what);
 const char *hle_vk_result_text(VkResult r);
 void hle_vk_set_ready(void);
 /* g_hvk.queue's external synchronization: the render thread, the window's
- * presenter and a capture submit to it, and vkDeviceWaitIdle needs it too. */
+ * presenter and a capture submit to it, and vkDeviceWaitIdle needs it too.
+ * A frontend sharing the queue has its lock taken with it. */
 void hle_vk_queue_lock(void);
 void hle_vk_queue_unlock(void);
 /* The time its lock was waited for since the last call (statistics). */

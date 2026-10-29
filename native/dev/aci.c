@@ -427,13 +427,20 @@ static void transfer_po(Aci *a, uint32_t bytes)
     }
 }
 
+/* The PCM thread (outside Aci, whose layout the savestate keeps). */
+static struct {
+    pthread_t th;
+    bool started;
+    int quit;                   /* nc_dev_aci_stop */
+} g_aci_thr;
+
 static void *pcm_thread(void *arg)
 {
     Aci *a = arg;
     nc_pause_register("ac97");
     struct timespec next;
     clock_gettime(CLOCK_MONOTONIC, &next);
-    for (;;) {
+    while (!__atomic_load_n(&g_aci_thr.quit, __ATOMIC_ACQUIRE)) {
         if (nc_paused()) {
             nc_pause_wait();                /* the emulation paused: no samples played */
             clock_gettime(CLOCK_MONOTONIC, &next);
@@ -512,9 +519,23 @@ void nc_dev_aci_init(struct NcVm *vm)
         .opaque = &g_aci,
     };
     nc_mmio_register(&dev);
-    pthread_t t;
-    pthread_create(&t, NULL, pcm_thread, a);
-    pthread_detach(t);
+    g_aci_thr.quit = 0;
+    g_aci_thr.started = pthread_create(&g_aci_thr.th, NULL, pcm_thread, a) == 0;
+}
+
+void nc_dev_aci_stop(void)
+{
+    if (g_aci_thr.started) {
+        __atomic_store_n(&g_aci_thr.quit, 1, __ATOMIC_RELEASE);
+        pthread_join(g_aci_thr.th, NULL);   /* within its 5 ms period */
+        g_aci_thr.started = false;
+    }
+}
+
+void nc_dev_aci_free(void)
+{
+    pthread_mutex_destroy(&g_aci.lock);
+    memset(&g_aci, 0, sizeof(g_aci));
 }
 
 /* ---------------------------------------------------------- savestates */

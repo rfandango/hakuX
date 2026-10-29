@@ -36,6 +36,7 @@
 
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
@@ -44,6 +45,8 @@
 #include <time.h>
 #include <ucontext.h>
 #include <unistd.h>
+#include <errno.h>
+#include <sys/stat.h>
 
 static NcCore g_core;
 
@@ -271,15 +274,57 @@ static void *watchdog(void *arg)
 
 int main(int argc, char **argv)
 {
+#ifndef __ANDROID__
+    /* --render: the HLE GPU draws, with no display; NC_CAPTURE_EVERY's frames
+     * (every 2 s unless set) go to <data>/frames. */
+    const bool render = argc >= 4 && !strcmp(argv[1], "--render");
+    if (argc < 4 || (strcmp(argv[1], "--headless") && !render)) {
+        fprintf(stderr, "usage: xboxrun --headless|--render <disc image> <diagnostic data directory> [option...]\n");
+        return 2;
+    }
+    char data[PATH_MAX], hdd[PATH_MAX + 8], cache[PATH_MAX + 8];
+    struct stat st;
+    if ((mkdir(argv[3], 0700) != 0 && errno != EEXIST) || stat(argv[3], &st) != 0 || !S_ISDIR(st.st_mode) ||
+        !realpath(argv[3], data)) {
+        fprintf(stderr, "invalid diagnostic data directory: %s\n", argv[3]);
+        return 2;
+    }
+    snprintf(hdd, sizeof(hdd), "%s/hdd", data);
+    snprintf(cache, sizeof(cache), "%s/cache", data);
+    if ((mkdir(hdd, 0700) != 0 && errno != EEXIST) ||
+        (mkdir(cache, 0700) != 0 && errno != EEXIST)) {
+        perror("diagnostic data directories");
+        return 2;
+    }
+    nc_io_set_hdd_root(hdd);
+    setenv("HAKUX_NATIVE_BASE", cache, 1);
+    setenv("HAKUX_HLE_MODE", render ? "replace" : "off", 1);
+    if (render) {
+        setenv("NC_CAPTURE_EVERY", "2", 0);
+        nc_log("hakuX-native", "explicit render diagnostics: renderer ON without a display, "
+               "frames to %s/frames, paced silent audio", data);
+    } else {
+        nc_log("hakuX-native", "explicit headless diagnostics: renderer OFF, paced silent audio");
+    }
+    const char *disc = argv[2];
+#else
     if (argc < 2) {
         fprintf(stderr, "usage: xboxrun <disc image> [option...]\n");
         return 2;
     }
-    int fd = open(argv[1], O_RDONLY | O_CLOEXEC);
+    const char *disc = argv[1];
+#endif
+    int fd = open(disc, O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
-        perror(argv[1]);
+        perror(disc);
         return 2;
     }
+#ifndef __ANDROID__
+    if (render && chdir(data) != 0) {
+        perror(data);
+        return 2;
+    }
+#endif
 
     struct sigaction sa = {0};
     sa.sa_sigaction = fault;
@@ -311,7 +356,12 @@ int main(int argc, char **argv)
     }
     const char *capture = NULL;
     uint64_t stop = 0;
-    for (int i = 2; i < argc; i++) {
+#ifdef __ANDROID__
+    const int first_option = 2;
+#else
+    const int first_option = 4;
+#endif
+    for (int i = first_option; i < argc; i++) {
         if (nc_option(&opt, argv[i])) {
             continue;
         }
@@ -331,7 +381,7 @@ int main(int argc, char **argv)
         }
     }
     nc_options_apply(&opt);
-    nc_log("hakuX-native", "xboxrun: disc %s, hdd %s", argv[1], nc_io_hdd_root());
+    nc_log("hakuX-native", "xboxrun: disc %s, hdd %s", disc, nc_io_hdd_root());
 
     if (!nc_core_boot(&g_core, fd)) {
         nc_log("hakuX-native-frontier", "boot failed%s%s", nc_hle_fatal() ? ": " : "",

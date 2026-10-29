@@ -17,6 +17,7 @@ enum {
 SRC_STATE *src_callback_new(src_callback_t cb, int converter_type, int channels, int *error, void *cb_data);
 long src_callback_read(SRC_STATE *state, double ratio, long frames, float *data);
 int src_reset(SRC_STATE *state);
+SRC_STATE *src_delete(SRC_STATE *state);    /* NULL */
 const char *src_strerror(int error);
 void src_float_to_short_array(const float *in, short *out, int len);
 

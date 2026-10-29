@@ -8,15 +8,17 @@
 #define NATIVE_APP_APP_H
 
 #include "native/core/nc.h"
+#include "native/dev/usb.h"
+#include "hw/xbox/hle/vk/swapchain.h"
 
-struct ANativeWindow;
+struct SDL_Gamepad;
 
 /* present.c — on the window's thread. */
 bool nc_present_init(void);
 /* Once per display refresh: the newest frame (or the last one) letterboxed
  * into win, waiting for the panel; false when nothing could be presented
  * (the HLE GPU not up yet, no window). */
-bool nc_present_frame(struct ANativeWindow *win);
+bool nc_present_frame(HleWindow *win);
 /* The picture's shape on screen: the frame's own (auto: 4:3 for 640x480),
  * 4:3, 16:9 (a widescreen title's anamorphic 640x480), or the whole window. */
 enum { NC_ASPECT_AUTO, NC_ASPECT_4_3, NC_ASPECT_16_9, NC_ASPECT_STRETCH };
@@ -35,6 +37,11 @@ void nc_present_set_upscale(int mode);
 void nc_present_stats(float *fps, float *avg_ms, float *last_ms);
 /* A title frame has been on screen (any thread). */
 bool nc_present_shown(void);
+
+/* gamepad.c — a modern gamepad's state added to s as the Duke's: face and
+ * shoulder buttons fully pressed, the triggers and sticks the furthest of
+ * the two. */
+void nc_read_gamepad(struct SDL_Gamepad *p, NcPadState *s);
 
 /* vklayer.c — debug.hakux.vkvalidation=1: the Khronos validation layer in
  * front of the custom driver, its vkGetInstanceProcAddr returned in place of

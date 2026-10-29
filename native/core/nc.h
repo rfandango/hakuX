@@ -51,6 +51,14 @@ static inline void nc_wr32(void *p, uint32_t v)
     memcpy(p, &v, 4);
 }
 
+/* A large zeroed block for a boot (MiBs), mapped rather than from the heap:
+ * freeing it gives it back. glibc keeps a freed heap block in the arena it
+ * came from once its mmap threshold has risen, and in one process (the
+ * libretro core) each boot's threads get other arenas: every boot would
+ * leave its copy. NULL if it can't be mapped. */
+void *nc_big_alloc(size_t size);
+void nc_big_free(void *p, size_t size);
+
 static inline uint32_t nc_align_up(uint32_t v, uint32_t a)
 {
     return (v + a - 1) & ~(a - 1);

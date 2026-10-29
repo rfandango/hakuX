@@ -450,7 +450,8 @@ static struct {
     pthread_cond_t cv;
     CloseJob q[64];
     unsigned head, n;
-    bool started;
+    bool started, quit;     /* quit: nc_io_stop (what is queued still closes first) */
+    pthread_t th;
 } g_closer = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER};
 
 static void close_now(const CloseJob *j)
@@ -468,8 +469,11 @@ static void *closer_thread(void *arg)
 {
     pthread_mutex_lock(&g_closer.mu);
     for (;;) {
-        while (!g_closer.n) {
+        while (!g_closer.n && !g_closer.quit) {
             pthread_cond_wait(&g_closer.cv, &g_closer.mu);
+        }
+        if (!g_closer.n) {
+            break;
         }
         const CloseJob j = g_closer.q[g_closer.head];
         g_closer.head = (g_closer.head + 1) % 64u;
@@ -478,6 +482,7 @@ static void *closer_thread(void *arg)
         close_now(&j);
         pthread_mutex_lock(&g_closer.mu);
     }
+    pthread_mutex_unlock(&g_closer.mu);
     return NULL;
 }
 
@@ -488,11 +493,8 @@ static void close_later(const NcFile *nf)
     snprintf(j.old_path, sizeof(j.old_path), "%s", nf->old_path);
     pthread_mutex_lock(&g_closer.mu);
     if (!g_closer.started) {
-        pthread_t t;
-        g_closer.started = pthread_create(&t, NULL, closer_thread, NULL) == 0;
-        if (g_closer.started) {
-            pthread_detach(t);
-        }
+        g_closer.quit = false;
+        g_closer.started = pthread_create(&g_closer.th, NULL, closer_thread, NULL) == 0;
     }
     const bool queued = g_closer.started && g_closer.n < 64u;
     if (queued) {
@@ -637,15 +639,19 @@ static struct {
     DiscJob done[DISC_JOBS]; /* read, for the kernel to complete */
     unsigned ndone;
     unsigned busy;           /* queued, reading or done: at most DISC_JOBS */
-    bool started;
+    bool started, quit;      /* quit: nc_io_stop (what is queued is still read first) */
+    pthread_t th;
 } g_reader = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER};
 
 static void *reader_thread(void *arg)
 {
     pthread_mutex_lock(&g_reader.mu);
     for (;;) {
-        while (!g_reader.n) {
+        while (!g_reader.n && !g_reader.quit) {
             pthread_cond_wait(&g_reader.cv, &g_reader.mu);
+        }
+        if (!g_reader.n) {
+            break;
         }
         DiscJob j = g_reader.q[g_reader.head];
         g_reader.head = (g_reader.head + 1) % DISC_JOBS;
@@ -670,6 +676,7 @@ static void *reader_thread(void *arg)
         nc_irq_post_work();
         pthread_mutex_lock(&g_reader.mu);
     }
+    pthread_mutex_unlock(&g_reader.mu);
     return NULL;
 }
 
@@ -746,11 +753,8 @@ static bool disc_read_later(NcKernel *k, const NcFile *nf, const uint32_t *a, ui
     }
     pthread_mutex_lock(&g_reader.mu);
     if (!g_reader.started) {
-        pthread_t t;
-        g_reader.started = pthread_create(&t, NULL, reader_thread, NULL) == 0;
-        if (g_reader.started) {
-            pthread_detach(t);
-        }
+        g_reader.quit = false;
+        g_reader.started = pthread_create(&g_reader.th, NULL, reader_thread, NULL) == 0;
     }
     const bool queued = g_reader.started && g_reader.busy < DISC_JOBS;
     if (queued) {
@@ -2475,6 +2479,55 @@ const char *nc_io_state_drain(NcKernel *k, uint64_t timeout_ns)
     nc_irq_post_work();
     nc_io_poll(k);
     return NULL;
+}
+
+static void file_drop(NcFile *nf);
+
+void nc_io_stop(void)
+{
+    pthread_mutex_lock(&g_closer.mu);
+    const bool closer = g_closer.started;
+    g_closer.quit = true;
+    pthread_cond_signal(&g_closer.cv);
+    pthread_mutex_unlock(&g_closer.mu);
+    if (closer) {
+        pthread_join(g_closer.th, NULL);    /* every queued sync and close done */
+    }
+    pthread_mutex_lock(&g_reader.mu);
+    const bool reader = g_reader.started;
+    g_reader.quit = true;
+    pthread_cond_signal(&g_reader.cv);
+    pthread_mutex_unlock(&g_reader.mu);
+    if (reader) {
+        pthread_join(g_reader.th, NULL);    /* every queued read landed */
+    }
+    /* read, but never completed for the guest: their descriptors and runs */
+    for (unsigned i = 0; i < g_reader.ndone; i++) {
+        if (g_reader.done[i].fd >= 0) {
+            close(g_reader.done[i].fd);
+        }
+        free(g_reader.done[i].seg);
+    }
+    g_closer.started = g_closer.quit = false;
+    g_closer.head = g_closer.n = 0;
+    g_reader.started = g_reader.quit = false;
+    g_reader.head = g_reader.n = g_reader.ndone = g_reader.busy = 0;
+}
+
+void nc_io_reset(void)
+{
+    /* as the process's end leaves them: closed, the deleted and the side
+     * files (.overwrite) as they are, swept by the next run (set_aside) */
+    for (unsigned i = 0; i < MAX_FILES; i++) {
+        file_drop(&g_files[i]);
+    }
+    memset(g_links, 0, sizeof(g_links));
+    memset(g_devices, 0, sizeof(g_devices));
+    memset(g_cluster_sectors, 0, sizeof(g_cluster_sectors));
+    g_swept = false;
+    g_usage_bytes = g_usage_cluster = 0;
+    memset(g_part_used, 0, sizeof(g_part_used));
+    memset(g_part_scanned_ns, 0, sizeof(g_part_scanned_ns));
 }
 
 bool nc_file_state_save(NcBuf *b)

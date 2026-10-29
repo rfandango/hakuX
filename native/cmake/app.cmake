@@ -34,6 +34,7 @@ add_subdirectory("${NC_SDL3}" sdl3 EXCLUDE_FROM_ALL)
 add_library(hakuxcore SHARED
   "${CMAKE_CURRENT_SOURCE_DIR}/app/app_main.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/present.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/gamepad.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/vsync.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/vklayer.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/vkdriver.c"

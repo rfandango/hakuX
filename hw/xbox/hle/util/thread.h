@@ -88,6 +88,9 @@ void hle_event_wait(HleEvent *e);
 /* An 8 MiB stack (the code was written for desktop thread stacks; bionic's
  * default is 1 MiB), named for the profilers. */
 void hle_thread_create(HleThread *t, const char *name, void *(*fn)(void *), void *arg, int mode);
+/* The timers' thread stopped and joined and every timer freed (the renderer
+ * stopping: their owners forget them); the next hle_timer_new starts it. */
+void hle_timers_stop(void);
 void *hle_thread_join(HleThread *t);
 
 /* The monotonic clock. */

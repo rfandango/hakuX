@@ -15,7 +15,7 @@ NC_F(Channel, bd_addr, U32, 1, 1, 0)
 NC_F(Channel, bd_ctl, U32, 1, 1, 0)
 NC_END(Channel)
 
-NC_REC(Aci, 520)
+NC_REC(Aci, NC_ABI_SIZE(520, 528))
 NC_SKIP(Aci, vm)
 NC_SKIP(Aci, lock)
 NC_F(Aci, glob_cnt, U32, 1, 1, 0)

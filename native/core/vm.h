@@ -48,6 +48,10 @@ typedef struct NcVm {
 #define NC_PTE_VALID 1u
 
 bool nc_vm_init(NcVm *vm, uint32_t ram_size);
+/* Everything nc_vm_init made unmapped, closed and freed (the reservation and
+ * every guest mapping in it, the RAM view and its fd, the tables), and the
+ * hooks set on guest memory cleared: no thread may touch the memory after. */
+void nc_vm_destroy(NcVm *vm);
 
 /* Map guest VA [va, va+len) onto physical [pa, pa+len). Page-aligned. */
 bool nc_vm_map(NcVm *vm, uint32_t va, uint32_t pa, uint32_t len);

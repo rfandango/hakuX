@@ -8,7 +8,13 @@ set(NC_DEPS "D:/tools/native-deps" CACHE PATH "native core third-party sources")
 
 add_library(nc_volk STATIC "${NC_DEPS}/volk/volk.c")
 target_include_directories(nc_volk PUBLIC "${NC_DEPS}/volk")
-target_compile_definitions(nc_volk PUBLIC VK_NO_PROTOTYPES VK_USE_PLATFORM_ANDROID_KHR)
+if(EXISTS "${NC_DEPS}/Vulkan-Headers/include/vulkan/vulkan.h")
+  target_include_directories(nc_volk PUBLIC "${NC_DEPS}/Vulkan-Headers/include")
+endif()
+target_compile_definitions(nc_volk PUBLIC VK_NO_PROTOTYPES)
+if(ANDROID)
+  target_compile_definitions(nc_volk PUBLIC VK_USE_PLATFORM_ANDROID_KHR)
+endif()
 
 add_library(nc_spirv_reflect STATIC "${NC_DEPS}/spirv_reflect/spirv_reflect.c")
 target_include_directories(nc_spirv_reflect PUBLIC "${NC_DEPS}/spirv_reflect")
@@ -59,7 +65,6 @@ add_library(hakux_hle STATIC
   ${NC_HLE}/util/thread.c
   ${NC_HLE}/vk/back.c
   ${NC_HLE}/vk/display.c
-  ${NC_HLE}/vk/swapchain.c
   ${NC_HLE}/vk/batch.c
   ${NC_HLE}/vk/compat.c
   ${NC_HLE}/vk/draw.c
@@ -80,6 +85,9 @@ add_library(hakux_hle STATIC
   ${CMAKE_CURRENT_SOURCE_DIR}/hle/host_native.c
   ${CMAKE_CURRENT_SOURCE_DIR}/hle/dirty.c
 )
+if(ANDROID)
+  target_sources(hakux_hle PRIVATE ${NC_HLE}/vk/swapchain.c)
+endif()
 target_include_directories(hakux_hle PUBLIC "${NC_REPO}" "${NC_DEPS}/root" "${NC_DEPS}/vma/include"
                            "${NC_DEPS}/glslang")
 # xxhash (single header, FEX's copy): pb/pbdraw.c's span hashes
@@ -87,14 +95,13 @@ target_include_directories(hakux_hle PRIVATE "${HAKUX_FEX_DIR}/External/xxhash")
 target_compile_definitions(hakux_hle PUBLIC CONFIG_VULKAN=1 HAKUX_HLE_GPU=1 HAKUX_NATIVE_CORE=1)
 target_compile_options(hakux_hle PRIVATE -Wno-unused-parameter -Wno-unused-function -Wno-sign-compare)
 target_link_libraries(hakux_hle PUBLIC nc_glib nc_volk nc_spirv_reflect glslang SPIRV
-                      glslang-default-resource-limits android log)
+                      glslang-default-resource-limits nc_platform)
 
 # The MCPX APU: xemu's device (hw/xbox/mcpx/apu) ported onto the core's own
 # services (native/dev/apu/apu_base.h).
 set(NC_APU "${CMAKE_CURRENT_SOURCE_DIR}/dev/apu")
 add_library(hakux_apu STATIC
   ${NC_APU}/apu.c
-  ${NC_APU}/out.c
   ${NC_APU}/state.c
   ${NC_APU}/dsp/debug.c
   ${NC_APU}/dsp/dsp.c
@@ -104,7 +111,15 @@ add_library(hakux_apu STATIC
   ${NC_APU}/vp/resample.c
   ${NC_APU}/vp/vp.c
 )
+if(ANDROID)
+  target_sources(hakux_apu PRIVATE ${NC_APU}/out.c)
+  target_link_libraries(hakux_apu PUBLIC aaudio)
+else()
+  # Linux: each executable brings its output (apu_out_*), the diagnostics
+  # the paced silent sink; the libretro core has its own (libretro/audio.c).
+  set(NC_APU_OUT_NULL "${NC_APU}/out_null.c")
+endif()
 target_include_directories(hakux_apu PRIVATE "${NC_REPO}")
 target_compile_options(hakux_apu PRIVATE -Wno-unused-parameter -Wno-unused-function -Wno-sign-compare
                        -Wno-unused-variable)
-target_link_libraries(hakux_apu PUBLIC hakux_hle aaudio log)
+target_link_libraries(hakux_apu PUBLIC hakux_hle nc_platform)

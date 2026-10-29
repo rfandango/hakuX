@@ -1,0 +1,21 @@
+{
+  "sources": {
+    "fex": {"url": "https://github.com/rfandango/FEX.git", "commit": "52018bf46a8279b22bce738548ab3f40db467064"},
+    "volk": {"url": "https://github.com/zeux/volk.git", "commit": "0b17a763ba5643e32da1b2152f8140461b3b7345"},
+    "glslang": {"url": "https://github.com/KhronosGroup/glslang.git", "commit": "b5782e52ee2f7b3e40bb9c80d15b47016e008bc9"},
+    "spirv_reflect": {"url": "https://github.com/KhronosGroup/SPIRV-Reflect.git", "commit": "ef913b3ab3da1becca3cf46b15a10667c67bebe5"},
+    "vma": {"url": "https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git", "commit": "1d8f600fd424278486eade7ed3e877c99f0846b1"},
+    "Vulkan-Headers": {"url": "https://github.com/KhronosGroup/Vulkan-Headers.git", "commit": "a4f8ada9f4f97c45b8c89c57997be9cebaae65d2"},
+    "root/subprojects/nv2a_vsh_cpu": {"url": "https://github.com/abaire/nv2a_vsh_cpu.git", "commit": "561fe80da57a881f89000256b459440c0178a7ce"},
+    "SDL3": {"url": "https://github.com/libsdl-org/SDL.git", "commit": "fa2c02bb6e21974a89ea9824bc53c9932abe5f9c"},
+    "libchdr": {"url": "https://github.com/rtissera/libchdr.git", "commit": "47d794151b2b64f6aba60304e6480f4f5a2bc24b"}
+  },
+  "fex_submodules": {
+    "External/fmt": "c07e2aa4b130b4fd359a1c6455a5201b17af01fa",
+    "External/range-v3": "ca1388fb9da8e69314dda222dc7b139ca84e092f",
+    "External/rpmalloc": "09142d726429416bfa7b459151515fe3ab7622dd",
+    "External/unordered_dense": "3234af2c03549bc85656bfd3a86993bf1cd8aef1",
+    "External/xxhash": "e626a72bc2321cd320e953a0ccf1584cad60f363",
+    "Source/Common/cpp-optparse": "9f94388a339fcbb0bc95c17768eb786c85988f6e"
+  }
+}

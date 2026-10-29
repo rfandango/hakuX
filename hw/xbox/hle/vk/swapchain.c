@@ -23,8 +23,8 @@
  * puts our reads of a frame after its writes, and the render thread's next
  * write of the slot after our reads (its barriers). The device table is the
  * presenter's own: the render thread's wraps its commands for
- * strip batching (batch.c). The surface follows the window: a new
- * ANativeWindow (the activity's surface made again) gets a new surface and
+ * strip batching (batch.c). The surface follows the window: a new one (on
+ * Android, the activity's surface made again) gets a new surface and
  * swapchain, none drops them.
  */
 #include "hw/xbox/hle/base.h"
@@ -36,7 +36,12 @@
 #include "hw/xbox/hle/vk/quirks.h"
 #include "hw/xbox/hle/vk/swapchain.h"
 
+#ifdef __ANDROID__
 #include <android/native_window.h>
+#else
+#include <SDL3/SDL_video.h>
+#include <SDL3/SDL_vulkan.h>
+#endif
 
 #define T (g_ps.t)
 #define PS_FRAMES 3             /* the presenter's submits in flight */
@@ -72,7 +77,7 @@ static struct {
     PsFrame fr[PS_FRAMES];
     unsigned cur;
     /* the window */
-    struct ANativeWindow *win;
+    HleWindow *win;
     int64_t lost_ns;            /* its surface was lost then: tried again a while after */
     VkSurfaceKHR surf;
     VkSwapchainKHR sc;
@@ -619,6 +624,36 @@ static bool make_swapchain(uint32_t w, uint32_t h)
     return g_ps.pipe[P_BILINEAR] != VK_NULL_HANDLE;
 }
 
+/* ---- the window: an Android window, or an SDL window on Linux ---- */
+
+static void win_size(HleWindow *win, uint32_t *w, uint32_t *h)
+{
+#ifdef __ANDROID__
+    *w = (uint32_t)ANativeWindow_getWidth(win);
+    *h = (uint32_t)ANativeWindow_getHeight(win);
+#else
+    int iw = 0, ih = 0;
+    SDL_GetWindowSizeInPixels(win, &iw, &ih);
+    *w = (uint32_t)iw;
+    *h = (uint32_t)ih;
+#endif
+}
+
+static bool win_surface(HleWindow *win, VkSurfaceKHR *surf)
+{
+#ifdef __ANDROID__
+    VkAndroidSurfaceCreateInfoKHR sci = { .sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR,
+                                          .window = win };
+    return vkCreateAndroidSurfaceKHR(g_hvk.inst, &sci, NULL, surf) == VK_SUCCESS;
+#else
+    if (!SDL_Vulkan_CreateSurface(win, g_hvk.inst, NULL, surf)) {
+        hle_log("hakuX-hle-back", "present: SDL_Vulkan_CreateSurface: %s", SDL_GetError());
+        return false;
+    }
+    return true;
+#endif
+}
+
 /* ---- each refresh ---- */
 
 static bool wait_value(uint64_t v)
@@ -641,11 +676,15 @@ static void lose_window(void)
     drop_window();
 }
 
-bool hle_present_unchanged(struct ANativeWindow *win, uint64_t key)
+bool hle_present_unchanged(HleWindow *win, uint64_t key)
 {
     if (!g_ps.shown || !win || win != g_ps.win || g_ps.stale || !g_ps.sc || key != g_ps.shown_key ||
-        (uint32_t)ANativeWindow_getWidth(win) != g_ps.wsize.width ||
-        (uint32_t)ANativeWindow_getHeight(win) != g_ps.wsize.height || hle_disp_gamma_seq() != g_ps.ramp_gen) {
+        hle_disp_gamma_seq() != g_ps.ramp_gen) {
+        return false;
+    }
+    uint32_t ww, wh;
+    win_size(win, &ww, &wh);
+    if (ww != g_ps.wsize.width || wh != g_ps.wsize.height) {
         return false;
     }
     uint32_t gen, swap_id;
@@ -656,7 +695,7 @@ bool hle_present_unchanged(struct ANativeWindow *win, uint64_t key)
     return !front || (gen == g_ps.f.gen && swap_id == g_ps.f.swap_id);
 }
 
-bool hle_present_begin(struct ANativeWindow *win, uint32_t *w, uint32_t *h)
+bool hle_present_begin(HleWindow *win, uint32_t *w, uint32_t *h)
 {
     if (g_ps.failed || !hle_vk_ready() || hle_vk_lost()) {
         return false;
@@ -675,9 +714,7 @@ bool hle_present_begin(struct ANativeWindow *win, uint32_t *w, uint32_t *h)
     if (win != g_ps.win && (!win || hle_now_ns() - g_ps.lost_ns > 250000000ll)) {
         drop_window();
         if (win) {
-            VkAndroidSurfaceCreateInfoKHR sci = { .sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR,
-                                                  .window = win };
-            if (vkCreateAndroidSurfaceKHR(g_hvk.inst, &sci, NULL, &g_ps.surf) != VK_SUCCESS) {
+            if (!win_surface(win, &g_ps.surf)) {
                 g_ps.surf = VK_NULL_HANDLE;
                 g_ps.lost_ns = hle_now_ns();
                 hle_log("hakuX-hle-back", "present: no surface for the window");
@@ -689,7 +726,8 @@ bool hle_present_begin(struct ANativeWindow *win, uint32_t *w, uint32_t *h)
     if (!g_ps.surf) {
         return false;
     }
-    const uint32_t ww = (uint32_t)ANativeWindow_getWidth(win), wh = (uint32_t)ANativeWindow_getHeight(win);
+    uint32_t ww, wh;
+    win_size(win, &ww, &wh);
     if ((!g_ps.sc || g_ps.stale || ww != g_ps.wsize.width || wh != g_ps.wsize.height) && !make_swapchain(ww, wh)) {
         return false;
     }

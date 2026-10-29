@@ -232,6 +232,12 @@ int apu_out_open(int capacity_bytes, int samples, pthread_cond_t *wake)
     return samples * OUT_FRAME_BYTES;
 }
 
+/* Its front ends (hakux, the app) end their process instead of stopping
+ * the core: nothing is closed. */
+void apu_out_close(void)
+{
+}
+
 /* The emulation paused with the activity (app_main.c): the stream stops
  * pulling silence meanwhile, and starts again on resuming. */
 void nc_audio_set_paused(bool on)

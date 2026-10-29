@@ -99,6 +99,9 @@ void hle_hitch_pb_swap(uint32_t id);
 /* The emulation paused (the host's): no hang while it is, and the window it
  * falls in isn't measured (its next swap closes it). */
 void hle_hitch_pause(void);
+/* The renderer stopping (M2): the watchdog stopped and joined, the monitor
+ * as at a new process. */
+void hle_hitch_stop(void);
 /* a frame's stages (any thread): the display slot written, GPU done, made
  * the front image at a vblank, picked up by the UI; the guest flipped to
  * it (its vblank handler, or a display start) */

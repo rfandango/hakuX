@@ -26,10 +26,7 @@
 #include <cstring>
 #include <string>
 #include <sys/mman.h>
-#ifdef __ANDROID__
-#include <sys/system_properties.h>
 #include "hw/xbox/hle/prop.h"
-#endif
 #include <ucontext.h>
 
 static_assert(NC_SYSOP_CPUID == static_cast<int>(FEXCore::Core::SystemOpKind::Cpuid));
@@ -279,7 +276,7 @@ extern "C" NcCpu* nc_cpu_create(const NcCpuConfig* cfg, uint32_t fs_base) {
   bool x87_full = false;
   {
     const char* e = getenv("NC_FEX_X87");
-    char v[PROP_VALUE_MAX] = "";
+    char v[NC_PROPERTY_VALUE_MAX] = "";
 #ifdef __ANDROID__
     hle_prop_get("debug.hakux.fex_x87", v);
 #endif
@@ -299,7 +296,7 @@ extern "C" NcCpu* nc_cpu_create(const NcCpuConfig* cfg, uint32_t fs_base) {
   bool x87_pc_off = false;
   {
     const char* e = getenv("NC_FEX_PC");
-    char v[PROP_VALUE_MAX] = "";
+    char v[NC_PROPERTY_VALUE_MAX] = "";
 #ifdef __ANDROID__
     hle_prop_get("debug.hakux.fex_pc", v);
 #endif
@@ -318,7 +315,7 @@ extern "C" NcCpu* nc_cpu_create(const NcCpuConfig* cfg, uint32_t fs_base) {
   // host call, a little more code for scalar SSE and min/max.
   {
     const char* e = getenv("NC_FEX_AFP");
-    char v[PROP_VALUE_MAX] = "";
+    char v[NC_PROPERTY_VALUE_MAX] = "";
 #ifdef __ANDROID__
     hle_prop_get("debug.hakux.fex_afp", v);
 #endif
@@ -389,6 +386,35 @@ extern "C" NcCpu* nc_cpu_create(const NcCpuConfig* cfg, uint32_t fs_base) {
   }
   Save(S, cpu->Reset);
   return cpu;
+}
+
+// FEX's allocator (rpmalloc, FEXCore/Utils/AllocatorHooks.cpp).
+extern "C" void rpmalloc_thread_finalize(void);
+
+extern "C" void nc_cpu_thread_done(void) {
+  // rpmalloc gives a thread's heap back for reuse at its exit, but not the
+  // thread it takes for the process's main one: the first that used it. The
+  // next core thread, reusing that one's control block, passed for it too,
+  // and each boot left its heap's two 512 MiB spans behind.
+  rpmalloc_thread_finalize();
+}
+
+extern "C" void nc_cpu_destroy(NcCpu* cpu) {
+  if (!cpu) {
+    return;
+  }
+  if (cpu->Thread) {
+    constexpr size_t CRS = FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE;
+    auto* Crs = static_cast<uint8_t*>(cpu->Thread->CallRetStackBase);
+    cpu->CTX->DestroyThread(cpu->Thread); // its JIT, code buffer and lookup cache
+    if (Crs) {
+      munmap(Crs - NC_PAGE, CRS + 2 * NC_PAGE);
+    }
+  }
+  cpu->CTX.reset();
+  delete cpu;
+  // The next nc_cpu_create starts from FEX's defaults, as in a new process.
+  FEXCore::Config::Shutdown();
 }
 
 extern "C" void nc_cpu_run(NcCpu* cpu, const NcCpuContext* c) {

@@ -21,6 +21,7 @@ typedef struct HleDispSlot {
     bool held;
     uint32_t swap_id;
     uint64_t value;
+    int64_t front_ns;           /* when it became the front image */
 } HleDispSlot;
 
 static struct {
@@ -33,6 +34,8 @@ static struct {
     HleDispStats st;
     bool present_late;          /* hle_disp_present_late */
     uint32_t want;              /* ... the latest swap presented before it was written */
+    uint32_t last_shown;        /* hle_disp_acquire: the swap of the last new frame taken */
+    unsigned no_slot_logs;      /* hle_disp_begin_write's */
 } g_disp;
 
 static void slot_free_vk(HleDispSlot *s)
@@ -175,13 +178,13 @@ static void to_front(int i, uint32_t swap_id)
         }
     }
     g_disp.s[i].state = SLOT_FRONT;
+    g_disp.s[i].front_ns = hle_now_ns();
     g_disp.st.presented++;
     hle_hitch_frame(swap_id, HLE_FR_FRONT);
 }
 
 int hle_disp_begin_write(uint32_t swap_id, uint64_t value)
 {
-    static unsigned s_none;
     hle_mutex_lock(&g_disp.lock);
     int pick = -1;
     bool any = false;
@@ -244,7 +247,7 @@ int hle_disp_begin_write(uint32_t swap_id, uint64_t value)
         if (g_disp.present_late && swap_id <= g_disp.want) {
             to_front(pick, swap_id);      /* presented already */
         }
-    } else if (s_none++ < 8) {
+    } else if (g_disp.no_slot_logs++ < 8) {
         hle_log("hakuX-hle-back", "display: no free slot for swap %u (frame skipped)",
                 swap_id);
     }
@@ -298,10 +301,54 @@ bool hle_disp_present(uint32_t swap_id)
     return found;
 }
 
+/* HAKUX_DISP_STATS=1: every 10 s, the new frames the consumer took (the
+ * window's presenter, or the libretro core), their age from front image to
+ * taken (avg, max) and the gaps between them (avg, max, and over 25 ms).
+ * The same code for every front end, to compare their display paths. */
+static struct {
+    int on;                     /* -1: HAKUX_DISP_STATS not read yet */
+    int64_t t0, last, age_sum, age_max, gap_max;
+    uint64_t n, late;
+} g_dst = { .on = -1 };
+
+static void disp_stat(int64_t front_ns)
+{
+    if (g_dst.on < 0) {
+        const char *e = getenv("HAKUX_DISP_STATS");
+        g_dst.on = e && atoi(e) != 0;
+    }
+    if (!g_dst.on) {
+        return;
+    }
+    const int64_t now = hle_now_ns(), age = now - front_ns;
+    if (!g_dst.t0) {
+        g_dst.t0 = g_dst.last = now;
+        return;
+    }
+    const int64_t gap = now - g_dst.last;
+    g_dst.last = now;
+    g_dst.n++;
+    g_dst.age_sum += age;
+    g_dst.age_max = MAX(g_dst.age_max, age);
+    g_dst.gap_max = MAX(g_dst.gap_max, gap);
+    g_dst.late += gap > 25000000;
+    if (now - g_dst.t0 >= 10000000000ll) {
+        const double n = (double)g_dst.n, span = (double)(now - g_dst.t0);
+        hle_log("hakuX-hle-disp", "stats: %.1f new frames/s, age front to taken %.2f ms (max %.2f), "
+                "gap %.2f ms (max %.2f, %llu over 25 ms)", n * 1e9 / span,
+                (double)g_dst.age_sum / n / 1e6, (double)g_dst.age_max / 1e6, span / n / 1e6,
+                (double)g_dst.gap_max / 1e6, (unsigned long long)g_dst.late);
+        g_dst.t0 = now;
+        g_dst.n = g_dst.late = 0;
+        g_dst.age_sum = g_dst.age_max = g_dst.gap_max = 0;
+    }
+}
+
 bool hle_disp_acquire(HleDispFrame *f)
 {
     bool found = false;
     uint32_t shown = 0;
+    int64_t front_ns = 0;
     if (!hle_atomic_load_acquire(&g_disp.inited)) {
         return false;
     }
@@ -309,10 +356,10 @@ bool hle_disp_acquire(HleDispFrame *f)
     for (int i = 0; i < HLE_DISP_SLOTS; i++) {
         HleDispSlot *s = &g_disp.s[i];
         if (s->state == SLOT_FRONT && s->img) {
-            static uint32_t s_last_shown;
-            if (s->swap_id != s_last_shown) {
-                s_last_shown = s->swap_id;
-                shown = s_last_shown;
+            if (s->swap_id != g_disp.last_shown) {
+                g_disp.last_shown = s->swap_id;
+                shown = g_disp.last_shown;
+                front_ns = s->front_ns;
             }
             s->held = true;
             *f = (HleDispFrame){ i, g_disp.gen, s->swap_id, g_disp.w, g_disp.h, s->value, s->img, s->view };
@@ -323,6 +370,7 @@ bool hle_disp_acquire(HleDispFrame *f)
     hle_mutex_unlock(&g_disp.lock);
     if (shown) {
         hle_hitch_frame(shown, HLE_FR_SHOWN);   /* a new frame on screen */
+        disp_stat(front_ns);
     }
     return found;
 }
@@ -493,4 +541,51 @@ bool hle_disp_gamma(uint8_t rgb[3][256], bool *identity, uint32_t *gen)
     }
     *gen = s0;
     return true;
+}
+
+/* The core stops (display.h): the slots' images destroyed and the display as
+ * before its first hle_disp_init, which then makes them at any size. Kept on
+ * purpose: the locks (hle_disp_setup makes them once, and the presenter's
+ * thread may still call in), the generation and the ramp's sequence (they go
+ * on: the window's presenter and the libretro core's readback keep the ones
+ * they saw, and a value seen before would pass for the next images or ramp),
+ * and hle_disp_gamma_by_consumer (the consumer's, set once before the core
+ * starts). */
+void hle_disp_shutdown(void)
+{
+    static const uint8_t k_none[3][256];
+    if (hle_atomic_load_acquire(&g_disp.inited)) {
+        /* as hle_disp_init: the presenter's reads of the images submitted
+         * (use), then done; a frame it holds is let go (gen) */
+        hle_mutex_lock(&g_disp.use);
+        if (!hle_vk_lost()) {
+            hle_vk_queue_lock();
+            const VkResult r = T.vkDeviceWaitIdle(g_hvk.dev);
+            hle_vk_queue_unlock();
+            hle_vk_check(r, "vkDeviceWaitIdle (display)");
+        }
+        hle_mutex_lock(&g_disp.lock);
+        bool any = false;
+        for (int i = 0; i < HLE_DISP_SLOTS; i++) {
+            any |= g_disp.s[i].img != VK_NULL_HANDLE;
+            slot_free_vk(&g_disp.s[i]);
+        }
+        if (any) {
+            g_disp.gen++;
+        }
+        g_disp.w = g_disp.h = 0;
+        memset(&g_disp.st, 0, sizeof(g_disp.st));
+        g_disp.present_late = false;
+        g_disp.want = 0;
+        g_disp.last_shown = 0;
+        g_disp.no_slot_logs = 0;
+        memset(&g_dst, 0, sizeof(g_dst));       /* the presenter takes frames inside use */
+        g_dst.on = -1;
+        hle_mutex_unlock(&g_disp.lock);
+        hle_mutex_unlock(&g_disp.use);
+    }
+    /* no ramp, as a change the consumer sees (the render thread, its writer,
+     * is gone); the bytes are not read with identity */
+    hle_disp_set_gamma(k_none, true);
+    memset(g_gamma.rgb, 0, sizeof(g_gamma.rgb));
 }

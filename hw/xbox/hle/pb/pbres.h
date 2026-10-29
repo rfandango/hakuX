@@ -43,5 +43,8 @@ void hle_res_rb_land(HleCmdReadback *rb, uint32_t fb, uint32_t len, uint64_t val
 /* The depth word's byte for each channel (HleCmdZRead.map) of a 32-bit
  * linear colour format read over a D24S8 buffer; false for other formats. */
 bool hle_res_zread_map(uint32_t xfmt, uint8_t map[4]);
+/* The core stops (M2): the log lines' limits and the texture dump asked
+ * for as at the start (hle_pb_reset's). */
+void hle_res_reset(void);
 
 #endif

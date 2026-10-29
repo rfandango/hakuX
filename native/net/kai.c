@@ -186,9 +186,19 @@ static void kai_poll(struct pollfd *fds, int n)
     }
 }
 
+static void kai_close(void)
+{
+    if (g_kai.fd >= 0) {
+        close(g_kai.fd);
+    }
+    memset(&g_kai, 0, sizeof(g_kai));
+    g_kai.fd = -1;
+}
+
 const NcNetBackend nc_net_kai = {
     .name = "kai",
     .init = kai_init,
+    .close = kai_close,
     .input = kai_input,
     .fill = kai_fill,
     .poll = kai_poll,

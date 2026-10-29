@@ -10,6 +10,11 @@
 #include <stdint.h>
 
 void hle_barrier_init(uint64_t ram_size);
+/* The core stops (M2; the guest's CPU, the decoder and the back end done):
+ * the tables freed, the hooks and counts as before hle_barrier_init. The
+ * stale ranges and report pages are forgotten, their access given back as
+ * push-buffer mode stopped. */
+void hle_barrier_free(void);
 /* GPU work up to `value` reads [pa, pa+len) in place: the first CPU write
  * waits, and the CPU cache lines of its pages written since they were last
  * cleaned go to memory first (the GPU doesn't snoop the CPU's caches over

@@ -19,6 +19,9 @@ extern "C" {
 
 /* The CPU whose doorbell asserted lines ring (set once it exists). */
 void nc_irq_attach(NcCpu *cpu);
+/* The core stopped: no lines, no CPU, not paused, no threads registered for
+ * the pause, as in a new process. */
+void nc_irq_reset(void);
 void nc_irq_set(unsigned line, bool level);
 /* Bit n set: line n asserted. */
 uint32_t nc_irq_lines(void);

@@ -1295,3 +1295,18 @@ void nc_ke_register(NcKernel *k)
     nc_kernel_impl(k, "KeSetDisableBoostThread", KeNoBoost);
     nc_kernel_impl(k, "KeBoostPriorityThread", KeNoBoost);
 }
+
+void nc_ke_reset(void)
+{
+    g_boot_ns = 0;
+    g_time_offset = 0;          /* clock_boot sets it again (g_clock_ms, the front end's, stays) */
+    g_entry = false;
+    g_entry_ns = g_entry_coarse = 0;
+    memset(&g_entry_thread, 0, sizeof(g_entry_thread));
+    g_tseq = 0;
+    g_tpaused = false;
+    g_tpause_raw = g_off = 0;
+    g_refreshes = 0;
+    g_pub_ns = g_pub_coarse = 0;
+    g_times_t = 0;              /* else the next boot's tick counts stay at this one's last */
+}

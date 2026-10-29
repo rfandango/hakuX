@@ -10,6 +10,9 @@
 
 /* A Kelvin method the decoder ran. */
 void hle_kelvin_method(uint32_t m, uint32_t v);
+/* The core stops (M2; the decoder joined): every register as never written,
+ * as at power-on (the next title's draws take the state's defaults). */
+void hle_kelvin_reset(void);
 /* The draw state the registers make: render states, texture-stage states,
  * the combiner block (over st's defaults where never written). */
 void hle_kelvin_state(HleCmdState *st);

@@ -457,3 +457,27 @@ const char *hle_zread_pass(VkCommandBuffer cb, unsigned slot, HleVkSurf *src, Hl
     hle_surf_transition(cb, dst, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     return NULL;
 }
+
+/* The core stops (back_int.h): the passes' objects destroyed (the depth
+ * buffers' views go with their surfaces, surf.c), and init and the
+ * pipelines made on first use as before the first conversion (a setup that
+ * failed is tried again, on the next device). */
+void hle_zread_shutdown(void)
+{
+    VkDevice d = g_hvk.dev;
+    for (unsigned i = 0; i < g_zr.npipe; i++) {
+        T.vkDestroyPipeline(d, g_zr.pipe[i].p, NULL);
+    }
+    for (unsigned i = 0; i < g_zr.nzw; i++) {
+        T.vkDestroyPipeline(d, g_zr.zw[i].p, NULL);
+    }
+    T.vkDestroyShaderModule(d, g_zr.vs, NULL);
+    T.vkDestroyShaderModule(d, g_zr.fs, NULL);
+    T.vkDestroyShaderModule(d, g_zr.fs_zw, NULL);
+    T.vkDestroyShaderModule(d, g_zr.fs_zws, NULL);
+    T.vkDestroyDescriptorPool(d, g_zr.pool, NULL);      /* its sets with it */
+    T.vkDestroySampler(d, g_zr.smp, NULL);
+    T.vkDestroyPipelineLayout(d, g_zr.pl, NULL);
+    T.vkDestroyDescriptorSetLayout(d, g_zr.dsl, NULL);
+    memset(&g_zr, 0, sizeof(g_zr));
+}

@@ -3,12 +3,14 @@
  */
 #include "hw/xbox/hle/base.h"
 #include "hw/xbox/hle/hle.h"
+#include "hw/xbox/hle/core/probe.h"
 #include "hw/xbox/hle/pb/pbmode.h"
 #include "hw/xbox/hle/prop.h"
 #include "hw/xbox/hle/hitch.h"
 #include "hw/xbox/hle/prof.h"
 #include "hw/xbox/hle/mem/barrier.h"
 #include "hw/xbox/hle/mem/guestmem.h"
+#include "hw/xbox/hle/vk/back.h"
 
 #ifdef __ANDROID__
 #include <android/log.h>
@@ -371,7 +373,8 @@ void hle_prof_diag(void)
 void hle_init(void)
 {
     memset(&g_hle, 0, sizeof(g_hle));
-    g_hle.posture = parse_posture(getenv("HAKUX_HLE_MODE"));
+    const char *mode = getenv("HAKUX_HLE_MODE");
+    g_hle.posture = parse_posture(mode ? mode : hle_host_hle_mode());
     hle_prof_init();
     hle_barrier_init(hle_ram_size());
     hle_log("hakuX-hle", "init posture=%s", hle_posture_name(g_hle.posture));
@@ -383,4 +386,24 @@ void hle_init(void)
             hle_timer_mod(g_pch_timer, hle_now_ms() + 1);
         }
     }
+}
+
+void hle_shutdown(void)
+{
+    hle_timers_stop();                  /* first: diag_tick reads the renderer */
+    g_diag_timer = g_pch_timer = NULL;
+    hle_title_stop();                   /* the push-buffer decoder joined */
+    hle_back_shutdown();
+    hle_hitch_stop();                   /* the threads it watches gone */
+    memset(g_pch, 0, sizeof(g_pch));
+    g_pch_samples = g_pch_other = 0;
+#ifdef __ANDROID__
+    smp_stop();
+#endif
+    hle_pb_reset();                     /* after the readers of its counters */
+    hle_probe_reset();
+    hle_barrier_free();
+    hle_guestmem_reset();               /* last: the teardown's landings wrote guest RAM */
+    g_hle_unavailable[0] = 0;
+    memset(&g_hle, 0, sizeof(g_hle));
 }

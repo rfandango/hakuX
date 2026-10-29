@@ -6,12 +6,14 @@
 #include "native/dev/usb.h"
 #include "native/hle/hle_native.h"
 #include "native/core/mmio.h"
+#include "native/core/irq.h"
 #include "native/core/mods.h"
 #include "native/net/net.h"
 #include "native/state/save.h"
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <strings.h>
 #include <sys/prctl.h>
 #include <unistd.h>
@@ -41,6 +43,19 @@ static bool boot_failed(const char *why)
     return false;
 }
 
+/* NC_BOOT_FAIL_AT=<stage> (the tests): the boot fails once it is past that
+ * stage, leaving what it made by then to the stop: kernel, disc, xbe, cpu,
+ * thread, hle (the HLE GPU started). */
+static bool fail_at(const char *stage)
+{
+    const char *e = getenv("NC_BOOT_FAIL_AT");
+    if (!e || strcmp(e, stage)) {
+        return false;
+    }
+    nc_log("hakuX-native-frontier", "boot: failing after %s (NC_BOOT_FAIL_AT)", stage);
+    return true;
+}
+
 bool nc_core_boot(NcCore *c, int disc_fd)
 {
     memset(c, 0, sizeof(*c));
@@ -49,6 +64,15 @@ bool nc_core_boot(NcCore *c, int disc_fd)
     const char *mb = getenv("NC_RAM_MB");
     const uint32_t ram = mb && atoi(mb) == 128 ? 128u << 20 : NC_RAM_RETAIL;
     if (!nc_vm_init(&c->vm, ram) || !nc_kernel_init(&c->kernel, &c->vm)) {
+        if (disc_fd >= 0) {
+            close(disc_fd);
+        }
+        return boot_failed("The emulated console couldn't be set up.");
+    }
+    if (fail_at("kernel")) {
+        if (disc_fd >= 0) {
+            close(disc_fd);
+        }
         return boot_failed("The emulated console couldn't be set up.");
     }
     if (g_relaunch) {
@@ -67,6 +91,9 @@ bool nc_core_boot(NcCore *c, int disc_fd)
     }
     if (!nc_disc_open(&c->disc, disc_fd)) {
         close(disc_fd);
+        return boot_failed("The game's file isn't an Xbox disc image.");
+    }
+    if (fail_at("disc")) {
         return boot_failed("The game's file isn't an Xbox disc image.");
     }
     nc_mods_install(&c->disc);          /* the mods' files and XBE patches, the cheats */
@@ -113,6 +140,9 @@ bool nc_core_boot(NcCore *c, int disc_fd)
                  "it yet.", xbe_path[0] == '\\' ? xbe_path + 1 : xbe_path);
         return boot_failed(why);
     }
+    if (fail_at("xbe")) {
+        return boot_failed("The game's program can't be loaded.");
+    }
     nc_kernel_title_loaded(&c->kernel, &c->disc, &c->xbe.file, c->xbe.info.base, c->xbe.info.sizeof_image);
     if (have_page) {
         nc_kernel_launch_page_restore(&c->kernel, page);
@@ -128,7 +158,7 @@ bool nc_core_boot(NcCore *c, int disc_fd)
         .idt_limit = 0x7FF,
     };
     c->cpu = nc_cpu_create(&cfg, c->kernel.kpcr_va);
-    if (!c->cpu) {
+    if (!c->cpu || fail_at("cpu")) {
         return boot_failed("The emulated CPU couldn't start.");
     }
     nc_mods_bind(&c->vm, c->cpu, &c->xbe.info);
@@ -138,7 +168,7 @@ bool nc_core_boot(NcCore *c, int disc_fd)
         stack = nc_align_up(c->xbe.stack_commit, NC_PAGE);
     }
     g_boot = nc_kernel_boot_thread(&c->kernel, c->cpu, c->xbe.info.entry, stack);
-    if (!g_boot) {
+    if (!g_boot || fail_at("thread")) {
         return boot_failed("The emulated CPU couldn't start.");
     }
     nc_log("hakuX-native-frontier", "stage S1 entry %08x, stack %08x-%08x, fs %08x",
@@ -148,6 +178,9 @@ bool nc_core_boot(NcCore *c, int disc_fd)
     c->kernel.hle_hook = nc_hle_hook;
     c->kernel.hle_after_sysop = nc_hle_after_sysop;
     nc_hle_boot(&c->kernel, &c->vm, c->cpu, &g_boot->ctx);
+    if (fail_at("hle")) {
+        return boot_failed("The renderer couldn't start.");
+    }
     nc_state_attach(c);
     if (g_loadstate[0]) {
         const char *err = nc_state_load(g_loadstate);
@@ -369,4 +402,56 @@ bool nc_core_fault(NcCore *c, int sig, siginfo_t *info, void *ucontext)
     }
     nc_cpu_fault_resume(c->cpu, ucontext);
     return true;
+}
+
+/* ---------------------------------------------------------------- stop */
+
+void nc_core_request_stop(NcCore *c)
+{
+    nc_kernel_host_stop(&c->kernel);
+}
+
+void nc_core_halt(NcCore *c)
+{
+    /* The CPU has left (nc_core_run returned): devices paused with the
+     * emulation leave their pause, see their stop and end. */
+    nc_pause_set(false);
+    nc_dev_nv2a_stop();
+    nc_hle_native_stop();
+    nc_dev_apu_stop();
+    nc_dev_ohci_stop();
+    nc_dev_aci_stop();
+    nc_dev_nvnet_stop();
+    nc_net_stop();
+    nc_kernel_clock_stop();
+    nc_io_stop();
+}
+
+void nc_core_destroy(NcCore *c)
+{
+    nc_dev_nv2a_free();
+    nc_dev_apu_free();
+    nc_dev_ohci_free();
+    nc_dev_aci_free();
+    nc_dev_nvnet_free();
+    nc_cpu_destroy(c->cpu);
+    c->cpu = NULL;
+    nc_kernel_destroy(&c->kernel);
+    nc_disc_close(&c->disc);
+    nc_vm_destroy(&c->vm);
+    nc_mmio_reset();
+    nc_irq_reset();
+    nc_mods_reset();
+    nc_hle_native_reset();
+    memset(c, 0, sizeof(*c));
+    c->disc.fd = -1;
+    c->vm.ram_fd = -1;
+    g_boot = NULL;
+    g_loaded = false;
+    g_loadstate[0] = 0;
+    memset(g_mfs, 0, sizeof(g_mfs));
+    __atomic_store_n(&g_nc_faults_callret, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_nc_faults_dirty, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_nc_faults_mmio, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_nc_faults_unaligned, 0, __ATOMIC_RELAXED);
 }

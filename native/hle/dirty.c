@@ -26,6 +26,11 @@
 
 static NcVm *g_vm;
 
+void nc_hle_dirty_reset(void)
+{
+    g_vm = NULL;                /* nc_vm_destroy cleared the hooks */
+}
+
 void nc_hle_dirty_init(NcVm *vm)
 {
     g_vm = vm; /* every page starts dirty (unprotected) */

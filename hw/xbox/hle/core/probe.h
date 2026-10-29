@@ -17,6 +17,8 @@ struct HleCpu;
 
 /* The probes the environment asks for (title start): how many. */
 unsigned hle_probe_register(void);
+/* The core stops (M2): no probe until the next title's hle_probe_register. */
+void hle_probe_reset(void);
 /* Whether a probe is at va (the host hooks it). */
 bool hle_probe_at(uint32_t va);
 /* Execution reached a probe: the registers at it (eip the probe's VA). */

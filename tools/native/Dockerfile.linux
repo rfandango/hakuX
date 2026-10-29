@@ -1,0 +1,7 @@
+FROM debian:stable-slim@sha256:a717a33469731894e77e912ea7d714e27c2dc38ee6554fd1a3102e92999cfc66
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential clang-19 clang-tools-19 lld-19 llvm-19 cmake ninja-build git python3 \
+    pkg-config ca-certificates zlib1g-dev libvulkan1 mesa-vulkan-drivers \
+    && rm -rf /var/lib/apt/lists/*
+ENV CC=clang-19 CXX=clang++-19
+WORKDIR /src

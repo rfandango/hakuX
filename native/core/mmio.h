@@ -28,6 +28,8 @@ typedef struct NcMmioDev {
 } NcMmioDev;
 
 void nc_mmio_register(const NcMmioDev *dev);
+/* Every device unregistered and the access log cleared (the core stopped). */
+void nc_mmio_reset(void);
 
 /* From a SIGSEGV/SIGBUS handler: handles the fault if it is a device access
  * the decoder knows. Returns false to let the caller report the fault. */

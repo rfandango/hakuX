@@ -35,6 +35,7 @@ libraries in, then build the APK.
 | `SDL3` | release-3.4.18 |
 | `adrenotools` | 8fae8ce, with `tools/native/adrenotools-kgsl-context-priority.patch` applied (`git apply`): the KGSL draw context priority hook |
 | `root/subprojects/nv2a_vsh_cpu` | 561fe80 |
+| `libchdr` (optional: CHD images) | 47d7941 |
 
 ## Steps
 
@@ -61,12 +62,13 @@ A release build (`assembleRelease`) is signed with the keystore that
 
 ## Host tests
 
-The HLE layer's pure modules have host tests (any C compiler with CMake):
+The HLE layer's pure modules have host tests (any C compiler with CMake).
+Use the dependency directory from the native build:
 
 ```
-cmake -S tests/hle -B build/hle-tests -G Ninja
+cmake -S tests/hle -B build/hle-tests -G Ninja -DNC_DEPS=<native-deps>
 ninja -C build/hle-tests
-cd build/hle-tests && ctest
+ctest --test-dir build/hle-tests --output-on-failure
 ```
 
 ## Debug builds

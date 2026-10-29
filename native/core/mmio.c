@@ -31,6 +31,15 @@ static unsigned g_logged;
 static uint64_t g_total;
 static uint64_t g_other;       /* accesses whose site found no slot in a few probes */
 
+void nc_mmio_reset(void)
+{
+    memset(g_devs, 0, sizeof(g_devs));
+    g_ndevs = 0;
+    memset(g_sites, 0, sizeof(g_sites));
+    g_logged = 0;
+    g_total = g_other = 0;
+}
+
 void nc_mmio_register(const NcMmioDev *dev)
 {
     if (g_ndevs < MAX_DEVS) {

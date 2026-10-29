@@ -139,3 +139,8 @@ unsigned hle_probe_register(void)
     }
     return n;
 }
+
+void hle_probe_reset(void)
+{
+    memset(g_probe, 0, sizeof(g_probe));
+}

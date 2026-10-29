@@ -29,7 +29,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/system_properties.h>
 #include "hw/xbox/hle/prop.h"
 
 #define SCAN_MAX 300
@@ -306,7 +305,7 @@ static void log_word(const NcVm *vm, uint32_t va)
 void nc_memscan_poll(const NcVm *vm)
 {
     static unsigned polls;
-    static char last[PROP_VALUE_MAX];
+    static char last[NC_PROPERTY_VALUE_MAX];
     static bool mats_next;
     static uint32_t mats_word;          /* "mats1:<va>": that guest word at both ends */
     if (mats_next) {
@@ -318,7 +317,7 @@ void nc_memscan_poll(const NcVm *vm)
     if (polls++ % 30) {
         return;
     }
-    char v[PROP_VALUE_MAX] = "";
+    char v[NC_PROPERTY_VALUE_MAX] = "";
     if (hle_prop_get("debug.hakux.memscan", v) <= 0 || !strcmp(v, last)) {
         return;
     }

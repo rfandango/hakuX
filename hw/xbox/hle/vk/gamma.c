@@ -204,6 +204,7 @@ static VkImageView dst_view(VkImage img)
     if (g_gm.dst_gen != hle_disp_gen()) {
         for (unsigned i = 0; i < g_gm.ndst; i++) {
             T.vkDestroyImageView(g_hvk.dev, g_gm.dst[i].view, NULL);
+            g_gm.dst[i].view = VK_NULL_HANDLE;  /* not destroyed again when i is reused */
         }
         g_gm.ndst = 0;
         g_gm.dst_gen = hle_disp_gen();
@@ -278,4 +279,26 @@ bool hle_gamma_pass(VkCommandBuffer cb, unsigned slot, const uint8_t ramp[3][256
     hle_img_barrier(cb, dst, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     return true;
+}
+
+/* The core stops (back_int.h): the pass's objects and the display images'
+ * views destroyed, and init and dst_view as before the first ramp (a setup
+ * that failed is tried again, on the next device). */
+void hle_gamma_shutdown(void)
+{
+    VkDevice d = g_hvk.dev;
+    for (unsigned i = 0; i < g_gm.ndst; i++) {
+        T.vkDestroyImageView(d, g_gm.dst[i].view, NULL);
+    }
+    T.vkDestroyPipeline(d, g_gm.pipe, NULL);
+    T.vkDestroyDescriptorPool(d, g_gm.pool, NULL);      /* its sets with it */
+    if (g_gm.map) {
+        T.vkUnmapMemory(d, g_gm.mem);
+    }
+    T.vkDestroyBuffer(d, g_gm.ubo, NULL);
+    T.vkFreeMemory(d, g_gm.mem, NULL);
+    T.vkDestroySampler(d, g_gm.smp, NULL);
+    T.vkDestroyPipelineLayout(d, g_gm.pl, NULL);
+    T.vkDestroyDescriptorSetLayout(d, g_gm.dsl, NULL);
+    memset(&g_gm, 0, sizeof(g_gm));
 }

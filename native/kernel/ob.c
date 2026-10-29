@@ -157,3 +157,8 @@ void nc_ob_register(NcKernel *k)
     nc_kernel_impl(k, "NtClose", NtClose);
     nc_kernel_impl(k, "NtDuplicateObject", NtDuplicateObject);
 }
+
+void nc_ob_reset(void)
+{
+    memset(g_ob_size, 0, sizeof(g_ob_size));
+}

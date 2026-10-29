@@ -442,3 +442,24 @@ uint32_t nc_irq_idle_wait(uint64_t deadline_ns, uint64_t max_ns)
     __atomic_store_n(&g_nc_idle_waiting, 0, __ATOMIC_RELAXED);
     return nc_irq_lines();
 }
+
+void nc_irq_reset(void)
+{
+    pthread_once(&g_once, init_cv);
+    pthread_mutex_lock(&g_mu);
+    __atomic_store_n(&g_lines, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_enabled, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_cpu, NULL, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_cpu_tid, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_have_cpu_clock, false, __ATOMIC_RELEASE);
+    memset(g_up_ns, 0, sizeof(g_up_ns));
+    memset(g_lat_max_ns, 0, sizeof(g_lat_max_ns));
+    memset(g_up_cpu_ns, 0, sizeof(g_up_cpu_ns));
+    memset(g_up_delay_ns, 0, sizeof(g_up_delay_ns));
+    __atomic_store_n(&g_work, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_paused, false, __ATOMIC_RELEASE);
+    memset(g_pt, 0, sizeof(g_pt));      /* the stopped devices' threads */
+    g_npt = 0;
+    g_cpu_work = false;
+    pthread_mutex_unlock(&g_mu);
+}

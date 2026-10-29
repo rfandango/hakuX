@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
@@ -108,6 +109,27 @@ static inline void *hle_memalign(size_t alignment, size_t size)
         abort();
     }
     return p;
+}
+
+/* A large zeroed block for a boot (MiBs), mapped rather than from the heap:
+ * freeing it gives it back. glibc keeps a freed heap block in the arena it
+ * came from once its mmap threshold has risen, and in one process (the
+ * libretro core) each boot's threads get other arenas: every boot would
+ * leave its copy. */
+static inline void *hle_big_alloc(size_t size)
+{
+    void *p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (p == MAP_FAILED) {
+        abort();
+    }
+    return p;
+}
+
+static inline void hle_big_free(void *p, size_t size)
+{
+    if (p) {
+        munmap(p, size);
+    }
 }
 
 static inline size_t hle_host_page_size(void)

@@ -25,12 +25,10 @@ static const int16_t ep_silence[256][2] = { 0 };
 
 void mcpx_apu_update_dsp_preference(MCPXAPUState *d)
 {
-    static int last_known_preference = -1;
-
-    if (last_known_preference == (int)g_apu_config.use_dsp) {
-        return;
-    }
-
+    /* Set on the state every time, not cached in a static: the libretro core
+     * boots again in its frontend's process (a reset, a title's relaunch)
+     * with a new, zeroed APU, which kept monitor point 0 (AC97) and sent
+     * only silence to the output. */
     if (g_apu_config.use_dsp) {
         d->monitor.point = MCPX_APU_DEBUG_MON_GP_OR_EP;
         d->gp.realtime = true;
@@ -40,8 +38,6 @@ void mcpx_apu_update_dsp_preference(MCPXAPUState *d)
         d->gp.realtime = false;
         d->ep.realtime = false;
     }
-
-    last_known_preference = g_apu_config.use_dsp;
 }
 
 static void scatter_gather_rw(MCPXAPUState *d, uint64_t sge_base,

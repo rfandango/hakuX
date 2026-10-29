@@ -12,6 +12,7 @@
 #include "hw/xbox/hle/vk/compat.h"
 #include "hw/xbox/hle/vk/quirks.h"
 
+#include <unistd.h>
 #ifdef __ANDROID__
 #include <sys/system_properties.h>
 #include "hw/xbox/hle/prop.h"
@@ -22,6 +23,11 @@ static HleMutex g_queue_lock;
 static bool g_ready;
 static bool g_lost;                     /* hle_vk_lose */
 static int64_t g_lock_wait_ns;          /* hle_vk_queue_wait_ns */
+static struct {                         /* hle_vk_set_frontend_queue_lock */
+    void (*lock)(void *);
+    void (*unlock)(void *);
+    void *handle;
+} g_fe;
 
 const char *hle_vk_result_text(VkResult r)
 {
@@ -77,16 +83,30 @@ bool hle_vk_check(VkResult r, const char *what)
 
 void hle_vk_queue_lock(void)
 {
-    if (pthread_mutex_trylock(&g_queue_lock.m) == 0) {
-        return;
+    if (pthread_mutex_trylock(&g_queue_lock.m) != 0) {
+        const int64_t t0 = hle_now_ns();
+        hle_mutex_lock(&g_queue_lock);
+        __atomic_fetch_add(&g_lock_wait_ns, hle_now_ns() - t0, __ATOMIC_RELAXED);
     }
-    const int64_t t0 = hle_now_ns();
-    hle_mutex_lock(&g_queue_lock);
-    __atomic_fetch_add(&g_lock_wait_ns, hle_now_ns() - t0, __ATOMIC_RELAXED);
+    if (g_fe.lock) {
+        g_fe.lock(g_fe.handle);
+    }
 }
 
 void hle_vk_queue_unlock(void)
 {
+    if (g_fe.unlock) {
+        g_fe.unlock(g_fe.handle);
+    }
+    hle_mutex_unlock(&g_queue_lock);
+}
+
+void hle_vk_set_frontend_queue_lock(void (*lock)(void *), void (*unlock)(void *), void *handle)
+{
+    hle_mutex_lock(&g_queue_lock);
+    g_fe.lock = lock;
+    g_fe.unlock = unlock;
+    g_fe.handle = handle;
     hle_mutex_unlock(&g_queue_lock);
 }
 
@@ -205,14 +225,30 @@ int hle_vk_memtype(uint32_t bits, VkMemoryPropertyFlags want,
     return -1;
 }
 
-int hle_vk_init(void)
+#ifndef __ANDROID__
+static const char *g_window_exts[HLE_VK_WINDOW_EXTS];
+static uint32_t g_window_nexts;
+
+void hle_vk_set_window_extensions(const char *const *names, uint32_t n)
+{
+    g_window_nexts = 0;
+    for (uint32_t i = 0; i < n && i < HLE_VK_WINDOW_EXTS; i++) {
+        g_window_exts[g_window_nexts++] = names[i];
+    }
+}
+#endif
+
+static int vk_init(PFN_vkGetInstanceProcAddr gipa_shared, VkInstance inst_shared, VkPhysicalDevice gpu,
+                   VkSurfaceKHR surface, HleVkMakeDevice make, void *opaque)
 {
     HleVk *v = &g_hvk;
     HleCaps *c = &v->caps;
     if (v->dev) {
         return 0;
     }
-    if (volkGetInstanceVersion() == 0) {
+    if (gipa_shared) {
+        volkInitializeCustom(gipa_shared);
+    } else if (volkGetInstanceVersion() == 0) {
         PFN_vkGetInstanceProcAddr gipa = (PFN_vkGetInstanceProcAddr)hle_host_vk_loader();
         if (gipa) {
             volkInitializeCustom(gipa);
@@ -222,39 +258,62 @@ int hle_vk_init(void)
         }
     }
     hle_mutex_init(&g_queue_lock);
+    v->shared = inst_shared != VK_NULL_HANDLE;
     caps_read();
     /* debug: a 1.3 device used as a 1.1 one (every 1.3 part from its extension
      * or vk/compat.c, as on the drivers below 1.3) */
     const bool force11 = caps_off("vk13");
-    VkApplicationInfo app = {
-        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-        .pApplicationName = "hakuX-hle",
-        .apiVersion = force11 ? VK_API_VERSION_1_1 : VK_API_VERSION_1_3,
-    };
-    /* the window's surface (vk/swapchain.c): where the loader has it */
-    uint32_t nie = 0;
-    vkEnumerateInstanceExtensionProperties(NULL, &nie, NULL);
-    g_autofree VkExtensionProperties *iext = g_new(VkExtensionProperties, nie ? nie : 1);
-    vkEnumerateInstanceExtensionProperties(NULL, &nie, iext);
-    const char *iexts[2];
+    const char *iexts[HLE_VK_WINDOW_EXTS];
     uint32_t nix = 0;
-    if (has_ext(iext, nie, VK_KHR_SURFACE_EXTENSION_NAME) &&
-        has_ext(iext, nie, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME)) {
-        iexts[nix++] = VK_KHR_SURFACE_EXTENSION_NAME;
-        iexts[nix++] = VK_KHR_ANDROID_SURFACE_EXTENSION_NAME;
-    }
-    VkInstanceCreateInfo ici = {
-        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-        .pApplicationInfo = &app,
-        .enabledExtensionCount = nix, .ppEnabledExtensionNames = iexts,
-    };
-    if (vkCreateInstance(&ici, NULL, &v->inst) != VK_SUCCESS) {
-        hle_log("hakuX-hle-back", "vk: vkCreateInstance failed");
-        return -1;
+    if (v->shared) {
+        v->inst = inst_shared;
+    } else {
+        VkApplicationInfo app = {
+            .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+            .pApplicationName = "hakuX-hle",
+            .apiVersion = force11 ? VK_API_VERSION_1_1 : VK_API_VERSION_1_3,
+        };
+        /* the window's surface (vk/swapchain.c): where the loader has it */
+        uint32_t nie = 0;
+        vkEnumerateInstanceExtensionProperties(NULL, &nie, NULL);
+        g_autofree VkExtensionProperties *iext = g_new(VkExtensionProperties, nie ? nie : 1);
+        vkEnumerateInstanceExtensionProperties(NULL, &nie, iext);
+#ifdef __ANDROID__
+        if (has_ext(iext, nie, VK_KHR_SURFACE_EXTENSION_NAME) &&
+            has_ext(iext, nie, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME)) {
+            iexts[nix++] = VK_KHR_SURFACE_EXTENSION_NAME;
+            iexts[nix++] = VK_KHR_ANDROID_SURFACE_EXTENSION_NAME;
+        }
+#else
+        /* the window system's (hle_vk_set_window_extensions): all or none */
+        bool all = g_window_nexts > 0;
+        for (uint32_t i = 0; i < g_window_nexts; i++) {
+            all &= has_ext(iext, nie, g_window_exts[i]);
+        }
+        for (uint32_t i = 0; all && i < g_window_nexts; i++) {
+            iexts[nix++] = g_window_exts[i];
+        }
+        if (g_window_nexts && !all) {
+            hle_log("hakuX-hle-back", "vk: the window's instance extensions are missing: no swapchain");
+        }
+#endif
+        VkInstanceCreateInfo ici = {
+            .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+            .pApplicationInfo = &app,
+            .enabledExtensionCount = nix, .ppEnabledExtensionNames = iexts,
+        };
+        if (vkCreateInstance(&ici, NULL, &v->inst) != VK_SUCCESS) {
+            hle_log("hakuX-hle-back", "vk: vkCreateInstance failed");
+            return -1;
+        }
     }
     volkLoadInstanceOnly(v->inst);
     uint32_t n = 1;
-    vkEnumeratePhysicalDevices(v->inst, &n, &v->phys);
+    if (gpu) {
+        v->phys = gpu;
+    } else {
+        vkEnumeratePhysicalDevices(v->inst, &n, &v->phys);
+    }
     if (!n) {
         hle_log("hakuX-hle-back", "vk: no physical device");
         return -1;
@@ -270,7 +329,11 @@ int hle_vk_init(void)
     for (int pass = 0; pass < 2 && v->qfam == UINT32_MAX; pass++) {
         VkQueueFlags want = VK_QUEUE_GRAPHICS_BIT | (pass ? 0 : VK_QUEUE_COMPUTE_BIT);
         for (uint32_t i = 0; i < nq && v->qfam == UINT32_MAX; i++) {
-            if ((qf[i].queueFlags & want) == want) {
+            VkBool32 present = VK_TRUE;     /* the frontend presents from this queue */
+            if (surface) {
+                vkGetPhysicalDeviceSurfaceSupportKHR(v->phys, i, surface, &present);
+            }
+            if ((qf[i].queueFlags & want) == want && present) {
                 v->qfam = i;
             }
         }
@@ -292,9 +355,12 @@ int hle_vk_init(void)
     bool e_4444 = has_ext(ext, ne, VK_EXT_4444_FORMATS_EXTENSION_NAME);
     bool e_iu8x = has_ext(ext, ne, "VK_EXT_index_type_uint8");
     bool e_iu8k = has_ext(ext, ne, "VK_KHR_index_type_uint8");
-    bool e_ahb = has_ext(ext, ne,
-                         VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME) &&
+#ifdef __ANDROID__
+    bool e_ahb = has_ext(ext, ne, VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME) &&
                  has_ext(ext, ne, VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME);
+#else
+    const bool e_ahb = false;           /* AHardwareBuffers are Android's */
+#endif
     bool e_eds3 = has_ext(ext, ne, VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME);
     bool e_gpl = has_ext(ext, ne, VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME) &&
                  has_ext(ext, ne, VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME);
@@ -319,7 +385,9 @@ int hle_vk_init(void)
         hle_log("hakuX-hle-back", "vk: \"%s\" is a Vulkan 1.0 device", v->props.deviceName);
         snprintf(g_hle_unavailable, sizeof(g_hle_unavailable), "%s lacks vulkan1.1",
                  v->props.deviceName);
-        vkDestroyInstance(v->inst, NULL);
+        if (!v->shared) {
+            vkDestroyInstance(v->inst, NULL);
+        }
         v->inst = VK_NULL_HANDLE;
         return -2;
     }
@@ -536,7 +604,9 @@ int hle_vk_init(void)
                 v->props.deviceName, c->missing);
         snprintf(g_hle_unavailable, sizeof(g_hle_unavailable), "%s lacks %s", v->props.deviceName,
                  c->missing);
-        vkDestroyInstance(v->inst, NULL);
+        if (!v->shared) {
+            vkDestroyInstance(v->inst, NULL);
+        }
         v->inst = VK_NULL_HANDLE;
         return -2;
     }
@@ -669,10 +739,12 @@ int hle_vk_init(void)
     if (u_dce) exts[nx++] = VK_EXT_DEPTH_CLIP_ENABLE_EXTENSION_NAME;
     if (u_4444) exts[nx++] = VK_EXT_4444_FORMATS_EXTENSION_NAME;
     if (u_iu8) exts[nx++] = e_iu8k ? "VK_KHR_index_type_uint8" : "VK_EXT_index_type_uint8";
+#ifdef __ANDROID__
     if (c->ahb) {
         exts[nx++] = VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME;
         exts[nx++] = VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME;
     }
+#endif
     if (c->eds3) exts[nx++] = VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME;
     if (c->gpl) {
         exts[nx++] = VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME;
@@ -695,10 +767,18 @@ int hle_vk_init(void)
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .pNext = &f,
         .queueCreateInfoCount = 1, .pQueueCreateInfos = &qci,
         .enabledExtensionCount = nx, .ppEnabledExtensionNames = exts };
-    VkResult r = vkCreateDevice(v->phys, &dci, NULL, &v->dev);
+    VkResult r;
+    if (make) {
+        v->dev = make(v->phys, opaque, &dci);
+        r = v->dev ? VK_SUCCESS : VK_ERROR_INITIALIZATION_FAILED;
+    } else {
+        r = vkCreateDevice(v->phys, &dci, NULL, &v->dev);
+    }
     if (r != VK_SUCCESS) {
         hle_log("hakuX-hle-back", "vk: vkCreateDevice failed (%d)", r);
-        vkDestroyInstance(v->inst, NULL);
+        if (!v->shared) {
+            vkDestroyInstance(v->inst, NULL);
+        }
         v->inst = VK_NULL_HANDLE;
         v->dev = VK_NULL_HANDLE;
         return -1;
@@ -708,8 +788,10 @@ int hle_vk_init(void)
     hle_batch_install(&v->t);           /* strip batching sees every recorded command */
     g_hle_glsl_vk11 = !c->vk13;
     v->t.vkGetDeviceQueue(v->dev, v->qfam, 0, &v->queue);
+#ifdef __ANDROID__
     v->get_ahb_props = c->ahb ? (PFN_vkGetAndroidHardwareBufferPropertiesANDROID)
         vkGetDeviceProcAddr(v->dev, "vkGetAndroidHardwareBufferPropertiesANDROID") : NULL;
+#endif
     hle_log("hakuX-hle-back", "vk: device \"%s\" api %u.%u.%u driver 0x%x floor=ok "
             "plus: gpl=%d eds3=%d dbuf=%d m5=%d sscaled=%d local_read=%d fbfetch=%d cache_control=%d "
             "swapchain=%d",
@@ -725,5 +807,42 @@ int hle_vk_init(void)
             c->dyn_render, c->sync2, c->eds1, c->eds2, c->bindless, c->depth_clamp);
     hle_quirks_init(v->phys);           /* what this driver needs worked around */
     return 0;
+}
+
+void hle_vk_shutdown(void)
+{
+    HleVk *v = &g_hvk;
+    if (v->dev) {
+        /* the table's wrappers outlive the renderer (a reset keeps the
+         * device): theirs go with it, after the frontend's views */
+        hle_compat_shutdown();
+        hle_batch_shutdown();
+    }
+    if (!v->shared) {
+        if (v->dev) {
+            v->t.vkDestroyDevice(v->dev, NULL);
+        }
+        if (v->inst) {
+            vkDestroyInstance(v->inst, NULL);
+        }
+    }
+    if (v->inst) {
+        hle_mutex_destroy(&g_queue_lock);
+    }
+    memset(v, 0, sizeof(*v));
+    hle_atomic_set(&g_ready, false);
+    __atomic_store_n(&g_lost, false, __ATOMIC_RELEASE);
+    g_lock_wait_ns = 0;
+}
+
+int hle_vk_init(void)
+{
+    return vk_init(NULL, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, NULL, NULL);
+}
+
+int hle_vk_init_shared(PFN_vkGetInstanceProcAddr gipa, VkInstance inst, VkPhysicalDevice gpu,
+                       VkSurfaceKHR surface, HleVkMakeDevice make, void *opaque)
+{
+    return vk_init(gipa, inst, gpu, surface, make, opaque);
 }
 

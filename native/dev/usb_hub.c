@@ -190,6 +190,20 @@ static void hub_reset(NcUsbDev *d)
     }
 }
 
+/* A hub (its find) frees what hangs off it first; a hub and a gamepad both
+ * have their NcUsbDev first (NcUsbDev's layout is the savestate's: no room
+ * for a destroy callback). */
+void nc_usb_dev_free(NcUsbDev *d)
+{
+    if (d && d->find == hub_find) {
+        Hub *h = (Hub *)d;
+        for (unsigned p = 0; p <= MAX_PORTS; p++) {
+            nc_usb_dev_free(h->child[p]);
+        }
+    }
+    free(d);
+}
+
 NcUsbDev *nc_usb_hub_new(unsigned nports)
 {
     Hub *h = calloc(1, sizeof(Hub));

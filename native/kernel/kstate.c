@@ -216,3 +216,10 @@ const NcCpuContext *nc_kstate_start_context(NcKernel *k)
     }
     return t ? &t->ctx : NULL;
 }
+
+void nc_kstate_reset(void)
+{
+    g_point = 0;
+    memset(&g_live, 0, sizeof(g_live));
+    g_live_slot = -1;
+}

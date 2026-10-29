@@ -228,3 +228,13 @@ bool nc_page_state_load(NcRd *r, unsigned v)
     }
     return !r->fail;
 }
+
+void nc_page_reset(void)
+{
+    g_pd_pa = UINT32_MAX;
+    memset(g_pd_applied, 0, sizeof(g_pd_applied));
+    for (unsigned i = 0; i < 1024; i++) {
+        free(g_pt_applied[i]);
+        g_pt_applied[i] = NULL;
+    }
+}

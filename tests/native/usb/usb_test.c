@@ -2,9 +2,13 @@
  * Host test of the native USB stack (native/dev/ohci.c, usb.c, usb_hub.c,
  * xid.c): a small host driver enumerates the front panel hub, a controller's
  * hub and its gamepad through OHCI EDs and TDs in fake guest RAM, then reads
- * a report and sends rumble.
+ * a report and sends rumble. Then the controllers on the root ports, as
+ * nc_dev_ohci_init makes them: plugged in before the boot and while the
+ * console runs (nc_pad_plug), pulled out, and enumerated again.
  *
- *   gcc -O1 -I. tests/native/usb/usb_test.c native/dev/usb.c native/dev/usb_hub.c native/dev/xid.c -o usb_test
+ *   cc -O1 -I. tests/native/usb/usb_test.c native/dev/usb.c native/dev/usb_hub.c native/dev/xid.c -lpthread
+ *
+ * The build's usb-smoke test (native/cmake/linux-tests.cmake) is this.
  */
 #include <stdarg.h>
 #include <stdio.h>
@@ -38,8 +42,43 @@ void nc_log(const char *tag, const char *fmt, ...)
     printf("\n");
     va_end(ap);
 }
+/* The emulation never pauses here; the frame thread only starts and stops
+ * (the test runs the frames). */
+bool nc_paused(void)
+{
+    return false;
+}
+static void nc_pause_register(const char *name)
+{
+}
+static void nc_pause_idle(bool idle)
+{
+}
+static void nc_pause_wait(void)
+{
+}
+/* Frame-timed input scripts have no renderer in this USB-only test. */
+uint64_t hle_back_swap_count(void)
+{
+    return 0;
+}
 
 #include "native/dev/ohci.c"
+
+/* Savestates aren't tested here. */
+void nc_buf_put(NcBuf *b, const void *p, size_t n)
+{
+}
+bool nc_rd_get(NcRd *r, void *p, size_t n)
+{
+    return false;
+}
+void nc_rec_put(NcBuf *b, const NcRecord *rec, const void *obj)
+{
+}
+void nc_rec_get(NcRd *r, const NcRecord *rec, void *obj, unsigned v)
+{
+}
 
 static int g_fail;
 #define CHECK(c)                                                                                                       \
@@ -362,6 +401,79 @@ int main(void)
     CHECK(g_irq_level);
     set_reg(0x14, INT_SF);
     CHECK(!g_irq_level);
+
+    /* The root ports, as nc_dev_ohci_init makes them, players 1 and 2 plugged
+     * in before the boot: on ports 3 and 4. */
+    nc_dev_ohci_free();
+    nc_dev_ohci_set_pads(3);     /* the Android front end: players 1 and 2 */
+    nc_dev_ohci_init(&g_vm);
+    nc_dev_ohci_stop();          /* the frames run here */
+    set_reg(0x08, CS_HCR);
+    set_reg(0x18, HCCA);
+    set_reg(0x10, INT_MIE | INT_WDH | INT_RHSC);
+    set_reg(0x04, HCFS_OPERATIONAL | CTL_PLE | CTL_CLE | CTL_BLE);
+    CHECK(!(reg(0x54) & PORT_CCS) && !(reg(0x58) & PORT_CCS));
+    CHECK((reg(0x5C) & (PORT_CCS | PORT_CSC)) == (PORT_CCS | PORT_CSC));
+    CHECK((reg(0x60) & (PORT_CCS | PORT_CSC)) == (PORT_CCS | PORT_CSC));
+
+    /* Player 1's controller: its hub at 1, the gamepad at 2. */
+    set_reg(0x5C, PORT_CSC);
+    set_reg(0x5C, PORT_PRS);
+    set_reg(0x5C, PORT_PRSC);
+    CHECK(control(0, 0x80, 6, 0x0100, 0, desc, 18) == 18 && desc[4] == 9);
+    CHECK(control(0, 0x00, 5, 1, 0, NULL, 0) == 0);
+    CHECK(control(1, 0x00, 9, 1, 0, NULL, 0) == 0);
+    for (uint16_t p = 1; p <= 3; p++) {
+        hub_port(1, p, 8, true);
+    }
+    enumerate_on_hub_port(1, 1, 2, desc);
+    CHECK(nc_rd16(desc + 8) == 0x045e && nc_rd16(desc + 10) == 0x0202);
+    pad = (NcPadState){.buttons = NC_PAD_BACK};
+    nc_pad_set(0, &pad);
+    CHECK(interrupt_in(2, 2, desc, 20) == 20 && nc_rd16(desc + 2) == NC_PAD_BACK);
+
+    /* Pulled out: the port's connection goes, it is disabled, the guest is
+     * told; what was at 1 and 2 no longer answers. */
+    set_reg(0x0C, INT_RHSC);
+    CHECK(!g_irq_level);
+    nc_pad_plug(0, false);
+    CHECK((reg(0x5C) & (PORT_CCS | PORT_PES | PORT_CSC | PORT_PESC)) == (PORT_CSC | PORT_PESC));
+    CHECK((reg(0x0C) & INT_RHSC) && g_irq_level);
+    CHECK(control(2, 0x80, 6, 0x0100, 0, desc, 18) == -CC_DEVICENOTRESPONDING);
+    CHECK(control(1, 0x80, 6, 0x0100, 0, desc, 18) == -CC_DEVICENOTRESPONDING);
+    set_reg(0x5C, PORT_CSC | PORT_PESC);
+    set_reg(0x0C, INT_RHSC);
+    nc_pad_plug(0, false);       /* already out: nothing changes */
+    CHECK(!(reg(0x0C) & INT_RHSC) && !(reg(0x5C) & PORT_WTC));
+
+    /* Plugged in again: a fresh connection, enumerated from address 0. */
+    nc_pad_plug(0, true);
+    CHECK((reg(0x5C) & (PORT_CCS | PORT_PES | PORT_CSC)) == (PORT_CCS | PORT_CSC));
+    CHECK(reg(0x0C) & INT_RHSC);
+    set_reg(0x5C, PORT_CSC);
+    set_reg(0x5C, PORT_PRS);
+    CHECK(control(0, 0x80, 6, 0x0100, 0, desc, 18) == 18 && desc[4] == 9);
+    CHECK(control(0, 0x00, 5, 4, 0, NULL, 0) == 0);
+    CHECK(control(4, 0x00, 9, 1, 0, NULL, 0) == 0);
+    for (uint16_t p = 1; p <= 3; p++) {
+        hub_port(4, p, 8, true);
+    }
+    CHECK(hub_port_status(4, 1) & (1u << 16));      /* the gamepad: a connection to see */
+    CHECK(control(2, 0x80, 6, 0x0100, 0, desc, 18) == -CC_DEVICENOTRESPONDING);  /* not enabled yet */
+    enumerate_on_hub_port(4, 1, 5, desc);
+    CHECK(nc_rd16(desc + 8) == 0x045e);
+    CHECK(interrupt_in(5, 2, desc, 20) == 20 && nc_rd16(desc + 2) == NC_PAD_BACK);
+
+    /* Player 3 plugged in while the console runs: root port 1. */
+    nc_dev_ohci_set_pads(7);     /* the mask API sees nc_pad_plug's changes too */
+    CHECK((reg(0x54) & (PORT_CCS | PORT_CSC)) == (PORT_CCS | PORT_CSC));
+
+    /* The players plugged in stay so for the next boot: 1, 2 and 3. */
+    nc_dev_ohci_free();
+    nc_dev_ohci_init(&g_vm);
+    nc_dev_ohci_stop();
+    CHECK(o->dev[2] && o->dev[3] && o->dev[0] && !o->dev[1]);
+    nc_dev_ohci_free();
 
     printf(g_fail ? "usb_test: %d FAILED\n" : "usb_test: all passed\n", g_fail);
     return g_fail != 0;

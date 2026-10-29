@@ -17,6 +17,11 @@
 /* The back end, at push-buffer mode's start; false if it can't run. */
 bool hle_pbd_start(void);
 void hle_pbd_stop(void);
+/* The core stops (M2; hle_pb_reset's, the decoder and the renderer down):
+ * the buffers and the state-program cache freed, every object, texture,
+ * cache keyed by guest memory, count and log limit as before the first
+ * start, the kept-memory and front-buffer requests dropped. */
+void hle_pbd_reset(void);
 /* A Kelvin method (after the decoder's own handling). */
 void hle_pbd_method(uint32_t m, uint32_t v);
 /* n data words of one packet (method m, then +4 each unless noninc). */
