@@ -84,6 +84,12 @@ static bool arm_blob(const HleDriver *d)
     return arm_proprietary(d) && !malisx2(d);
 }
 
+/* A G615 run by Arm's blob, not malisx2. */
+static bool mali_g615_blob(const HleDriver *d)
+{
+    return mali_g615(d) && !malisx2(d);
+}
+
 /* Seen on (driver, version, what showed it). */
 static const HleQuirk k_quirks[] = {
     /* Adreno 840 stock driver 0x8034a02c: Forza's menu text picks its glyph
@@ -116,8 +122,9 @@ static const HleQuirk k_quirks[] = {
     { HLE_QUIRK_FRESH_CLEAR, "fresh_clear", not_adreno },
     /* ARMSX2 (VKSwapChain.cpp) after PPSSPP: older PowerVR swapchain widths */
     { HLE_QUIRK_SWAP_W32, "swap_w32", powervr_old },
-    /* ARMSX2: "Mali-G615's timestamp queries never resolve" */
-    { HLE_QUIRK_NO_TIMESTAMPS, "no_timestamps", mali_g615 },
+    /* ARMSX2: "Mali-G615's timestamp queries never resolve" under Arm's
+     * blob. malisx2 reports the same device name but resolves them. */
+    { HLE_QUIRK_NO_TIMESTAMPS, "no_timestamps", mali_g615_blob },
     /* Qualcomm's driver: a present waiting on the pass's semaphore waited
      * 3-6 ms a refresh in the driver, the queue's lock held (Halo 2).
      * Turnip's makes a sync file and returns (Mesa vk_android.c); the other
