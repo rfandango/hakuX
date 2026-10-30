@@ -299,6 +299,8 @@ static int kelvin(uint32_t m, uint32_t v)
         surf_field(SURF_WRITE, mod ? (surf_get(SURF_WRITE) + 1) % mod : 0);
         hle_host_gpu_trace(HLE_GTR_FLIP_INC, surf_get(SURF_WRITE));
         g_pb.flips++;
+        hle_back_frame_pace();          /* one frame in flight: the guest, not the
+                                           ring's depth, sets the input lag */
         break;
     }
     case NV097_FLIP_STALL:

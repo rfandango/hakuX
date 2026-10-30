@@ -16,6 +16,11 @@ void hle_back_kick(void);
 /* The guest blocks on the timeline: pending fence / kick boundaries are
  * submitted at once (vCPU thread). */
 void hle_back_urgent(void);
+/* The decoder's frame pace (pbmode.c, at each flip): wait for the previous
+ * flip's work to complete, one frame in flight, so the guest's push ring
+ * fills and the guest itself throttles to the render pace (a second of
+ * input lag otherwise: the ring holds that much). */
+void hle_back_frame_pace(void);
 
 /* Timeline value = GPU time (§5.12). Any thread. */
 uint64_t hle_tl_completed(void);

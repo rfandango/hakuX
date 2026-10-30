@@ -805,6 +805,37 @@ static void submit(uint64_t value)
     g_back.st.submits++;
 }
 
+/* The decoder's frame pace (pbmode.c, at each flip). The guest's push ring
+ * held about a second of commands (Sega GT 2002's races measured: its flip
+ * reached the display 1030-1130 ms later, ~25 frames — the hitch monitor's
+ * "slot written N ms after the swap | swap -1000"), so the simulation ran
+ * that far ahead of the display and the pad was read by a game state the
+ * screen showed a second later. At each flip, wait for the previous flip's
+ * work to complete: one frame in flight, and the guest itself throttled to
+ * the render pace (measured: swap -> display 19 ms, faults 0, the same
+ * frame rate). OFF by default: the wait parks the decoder mid-decode at
+ * every flip, and that widened window trips an FEX page-fault race (the
+ * guest's write into an armed ring page SEGVs) on most boots of this
+ * device. debug.hakux.pace = 1 turns it on (an A/B until that is fixed). */
+void hle_back_frame_pace(void)
+{
+    static HleProp on_p;
+    static bool on;
+    char v[PROP_VALUE_MAX];
+    if (hle_prop_new(&on_p, "debug.hakux.pace", v)) {
+        on = v[0] == '1';
+    }
+    if (!on) {
+        return;
+    }
+    static uint64_t prev;               /* the previous flip's submitted value */
+    if (prev && prev > hle_tl_completed()) {
+        hle_tl_wait(prev);
+    }
+    pend_flush();                       /* this flip's work so far is submitted */
+    prev = g_pend.value;
+}
+
 /* Ends and submits the open recording without a timeline value (values stay
  * owned by the front end), then waits for the queue. Used before destroying
  * images the recording may reference (DEVICE_RESET/DESTROY). */

@@ -143,6 +143,13 @@ start:
 
 void hle_batch_slot(unsigned slot)
 {
+    /* the slot's buffer is about to be reset (back.c cb_get): a run held on
+     * it dies here — its recorded draws are gone, and flushing it later
+     * would record a ghost draw into whatever pass is open then (crashed
+     * Mali r34p0 in vkCmdDrawIndexed once the frame pace put submits at
+     * flips). The wrap at vkEndCommandBuffer flushes at submits; this
+     * covers a run that outlived them. */
+    g_b.cb = VK_NULL_HANDLE;
     g_b.slot_base = (slot % SLOTS) * SLOT_INDICES;
     g_b.pos = 0;
 }
