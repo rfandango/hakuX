@@ -94,7 +94,7 @@ private fun captured(e: android.view.InputEvent, input: XInput, rest: FloatArray
       best = a
     }
   }
-  if (best < 0 || kotlin.math.abs(delta) < 0.6f) return null
+  if (best < 0 || kotlin.math.abs(delta) < 0.01f) return null
   return Binding.Axis(best, if (delta < 0) -1 else 1)
 }
 
