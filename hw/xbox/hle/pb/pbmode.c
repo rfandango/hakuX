@@ -842,6 +842,8 @@ static void consume_pass(void)
     pblog_poll();
     boundary_take();
     hle_pbd_front_serve();      /* before the stalls below: the guest's write waits on it */
+    hle_back_pace_serve();      /* the flip's pace: the wait and submit here, at a
+                                   packet boundary, never mid-packet */
     if (__atomic_exchange_n(&g_pb.disp_req, false, __ATOMIC_ACQ_REL)) {
         hle_pbd_display(__atomic_load_n(&g_pb.disp_pa, __ATOMIC_RELAXED),
                         __atomic_exchange_n(&g_pb.disp_flip, false, __ATOMIC_ACQ_REL));
