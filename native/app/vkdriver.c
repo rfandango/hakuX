@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <unistd.h>
 
 static int g_kgsl_prio;                 /* nc_vk_driver_kgsl_priority */
 
@@ -58,7 +59,10 @@ static bool driver_is_mesa(const char *dir)
  * debug.hakux.kgslprio: another priority (1..15), 0 for the driver's own. */
 static int kgsl_priority(const char *dir)
 {
-    if (!driver_is_mesa(dir)) {
+    /* KGSL only: the pack's vendor says "Mesa" for Turnip, which is also
+     * built for Mali devices (malisx2 is not "Mesa", and a Mali pack has
+     * nothing to set here anyway). */
+    if (!driver_is_mesa(dir) || access("/dev/kgsl-3d0", F_OK) != 0) {
         return -1;
     }
     char v[PROP_VALUE_MAX] = "";
