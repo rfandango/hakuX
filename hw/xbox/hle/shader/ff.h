@@ -166,10 +166,12 @@ typedef struct HleFfPush {
     float alpha_ref;                  /* ALPHAREF / 255 */
     uint32_t flags;                   /* bit s: stage s samples a linear texture
                                          (texel coordinates); bit 8 + s: that
-                                         texture is a surface, rendered at the
-                                         resolution scale; bits 16-23: the
-                                         target's scale (point sizes), 24-31:
-                                         the resolution scale (those texels) */
+                                         texture is a surface rendered at the
+                                         resolution scale (not a small target,
+                                         at 1x: vk/draw.c stage_slot); bits
+                                         16-23: the target's scale (point
+                                         sizes), 24-31: the resolution scale
+                                         (those surfaces' texels) */
     float zscale;                     /* vertex programs: 1 / depth maximum (2^-n for
                                          the integer formats: HLE_ZNORM_GLSL) */
     uint32_t fog_color;               /* FOGCOLOR (D3DCOLOR) */

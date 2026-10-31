@@ -2404,7 +2404,14 @@ static unsigned g_rt_told;
  * share one object (object_view). Fable draws a lock-on's silhouette into
  * a swizzled 256 x 256 target through its linear view and blurs it from
  * there with a linear texture, by texel; addressed normalized, as the
- * swizzled object, every tap clamped to the corner and the halo was gone. */
+ * swizzled object, every tap clamped to the corner and the halo was gone.
+ * A linear surface's texel coordinates are divided by the surface's own
+ * scale, so the bit that has the shaders divide (8 + st) is set for a
+ * surface at the resolution scale only: a small target renders at 1x
+ * (surf_scale), and divided by the device's scale its texels were read
+ * from the wrong place (at 2x, a quarter of it; Sega GT 2002's car skins,
+ * twelve 64 x 64 targets a frame, lost their texture the same way at a
+ * 0.5x scale, read from their top-left corner). */
 static uint32_t stage_slot(const HleCmdDraw *c, unsigned st, uint32_t rt_id, uint32_t *flags)
 {
     HleVkTex *tx = tex_find(c->tex[st]);
@@ -2417,12 +2424,14 @@ static uint32_t stage_slot(const HleCmdDraw *c, unsigned st, uint32_t rt_id, uin
     } else if (c->tex[st] == rt_id && g_snap_cur >= 0 && g_snap_rt == rt_id &&
                (rt = hle_surf_get(rt_id)) != NULL) {
         slot = g_snap[g_snap_cur].slot;  /* the target, copied before the draw */
-        *flags |= (c->tex_lin >> st & 1) ? (1u << st) | (256u << st) : 0;
+        *flags |= (c->tex_lin >> st & 1) ? (1u << st) | (rt->scale > 1 ? 256u << st : 0) : 0;
         return slot;
     } else if (ts && (ts->general || ts->layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)) {
         slot = surf_slot(ts, c->tex_ord >> 2 * st & 3);  /* RT as texture (identity) */
-        /* linear format: texel coords, of a scaled image */
-        *flags |= (c->tex_lin >> st & 1) ? (1u << st) | (256u << st) : 0;
+        /* linear format: texel coords, of an image at the resolution scale
+         * (bit 8 + st) or at 1x (a small target, surf.c surf_scale: its
+         * texels are its own, and the scale must not divide them) */
+        *flags |= (c->tex_lin >> st & 1) ? (1u << st) | (ts->scale > 1 ? 256u << st : 0) : 0;
     }
     uint32_t id = c->tex[st];
     if (id && !tx && id < 8192 && g_rt_told < 64 && !(g_rt_seen[id >> 3] >> (id & 7) & 1)) {
@@ -3988,8 +3997,8 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     pc.tfactor = s->rs[RS_TEXTUREFACTOR];
     pc.alpha_ref = (s->rs[RS_ALPHAREF] & 0xFF) / 255.0f;
     memcpy(&pc.fog[3], &rect, 4);       /* (bits: HLE_NVRECT_GLSL) */
-    /* the target's scale (point sizes, texel edges) and linear surfaces'
-     * (always scaled); antialiased: texel edges as they are (ff.h) */
+    /* the target's scale (point sizes, texel edges) and the scaled linear
+     * surfaces' (stage_slot); antialiased: texel edges as they are (ff.h) */
     pc.flags |= MIN(rs, 255u) << 16 | MIN(g_hle_rscale, 255u) << 24 |
                 (aax > 1.0f || aay > 1.0f ? HLE_TEXEL_EDGE_FLAG : 0u) | (g_snap_trunc ? HLE_SNAP_TRUNC_FLAG : 0u);
     if (!g_hvk.caps.bindless) {
