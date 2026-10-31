@@ -238,6 +238,10 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
     if (settings.uncapped) {
       args += "uncap"
     }
+    /* The decoder waits at each frame's flip for the previous frame's GPU
+     * work: the game slows to the render pace instead of simulating ahead
+     * of the screen. On by default. */
+    args += "pace=${if (settings.framePace) 1 else 0}"
     /* The HLE GPU's render scale, 1-4x the title's resolution. */
     args += "scale=${settings.renderScale}"
     /* The picture's shape: auto (the game's), 4:3, 16:9 or stretch. */
@@ -1140,6 +1144,7 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
     private const val HELD_POLL_MS = 30L
     private const val HELD_MAX_MS = 20000L
     const val PREF_UNCAP = "uncap_fps"
+    const val PREF_FRAME_PACE = "frame_pace"
     const val PREF_ASYNC_SHADERS = "async_shaders"
     const val PREF_PREBUILD_SHADERS = "prebuild_shaders"
     const val PREF_SHOW_HITCHES = "show_hitches"

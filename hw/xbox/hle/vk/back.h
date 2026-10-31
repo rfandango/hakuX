@@ -16,6 +16,15 @@ void hle_back_kick(void);
 /* The guest blocks on the timeline: pending fence / kick boundaries are
  * submitted at once (vCPU thread). */
 void hle_back_urgent(void);
+/* The decoder's frame pace (pbmode.c, at each flip): note the request. The
+ * wait and the submit happen in hle_back_pace_serve, at the decode loop's
+ * packet boundary — a submit mid-packet splits a draw from its own binds
+ * (a Mali crash). One frame in flight, so the guest's push ring fills and
+ * the guest itself throttles to the render pace (a second of input lag
+ * otherwise: the ring holds that much). debug.hakux.pace = 1. */
+void hle_back_frame_pace(void);
+/* The decode loop, at a packet boundary: serve the noted pace. */
+void hle_back_pace_serve(void);
 
 /* Timeline value = GPU time (§5.12). Any thread. */
 uint64_t hle_tl_completed(void);

@@ -311,6 +311,8 @@ static int kelvin(uint32_t m, uint32_t v)
         surf_field(SURF_WRITE, mod ? (surf_get(SURF_WRITE) + 1) % mod : 0);
         hle_host_gpu_trace(HLE_GTR_FLIP_INC, surf_get(SURF_WRITE));
         g_pb.flips++;
+        hle_back_frame_pace();          /* one frame in flight: the guest, not the
+                                           ring's depth, sets the input lag */
         break;
     }
     case NV097_FLIP_STALL:
@@ -868,6 +870,8 @@ static void consume_pass(void)
     pblog_poll();
     boundary_take();
     hle_pbd_front_serve();      /* before the stalls below: the guest's write waits on it */
+    hle_back_pace_serve();      /* the flip's pace: the wait and submit here, at a
+                                   packet boundary, never mid-packet */
     if (__atomic_exchange_n(&g_pb.disp_req, false, __ATOMIC_ACQ_REL)) {
         hle_pbd_display(__atomic_load_n(&g_pb.disp_pa, __ATOMIC_RELAXED),
                         __atomic_exchange_n(&g_pb.disp_flip, false, __ATOMIC_ACQ_REL));

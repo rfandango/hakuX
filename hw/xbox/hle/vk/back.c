@@ -805,6 +805,59 @@ static void submit(uint64_t value)
     g_back.st.submits++;
 }
 
+/* The decoder's frame pace. The guest's push ring held about a second of
+ * commands (Sega GT 2002's races measured: its flip reached the display
+ * 1030-1130 ms later, ~25 frames — the hitch monitor's "slot written N ms
+ * after the swap | swap -1000"), so the simulation ran that far ahead of
+ * the display and the pad was read by a game state the screen showed a
+ * second later. At each flip, the previous flip's work is waited for: one
+ * frame in flight, and the guest itself throttles to the render pace
+ * (measured: swap -> display 19 ms, faults 0, the same frame rate).
+ *
+ * Two halves, because the flip is processed mid-packet: kelvin's call only
+ * notes the request (a submit there split a draw from its own pipeline and
+ * descriptor binds across two command buffers, and a later batch draw ran
+ * on a buffer without them — Mali r34p0 dereferenced freed state and
+ * died); hle_back_pace_serve runs the wait and the submit at the decode
+ * loop's packet boundary.
+ *
+ * ON by default. The submit is at a packet boundary, as every submit
+ * before the pace was; a pre-existing FEX page-fault boot crash (the
+ * guest's write into an armed ring page SEGVs in the JIT, ~1 boot in 10
+ * here) is unaffected by it and still open. debug.hakux.pace = 0 turns it
+ * off. */
+static struct {
+    int req;                            /* kelvin noted a flip */
+    bool on;
+    uint64_t prev;                      /* the previous flip's submitted value */
+} g_pace;
+
+void hle_back_frame_pace(void)
+{
+    /* the app's "Frame pacing" setting; the prop overrides when set (the
+     * trigger API's first poll is a baseline, so the value is read each
+     * flip instead) */
+    char v[PROP_VALUE_MAX];
+    hle_prop_get("debug.hakux.pace", v);
+    g_pace.on = v[0] ? v[0] != '0' : hle_host_frame_pace();
+    if (g_pace.on) {
+        __atomic_store_n(&g_pace.req, 1, __ATOMIC_RELEASE);
+    }
+}
+
+/* The decode loop, at a packet boundary. */
+void hle_back_pace_serve(void)
+{
+    if (!__atomic_exchange_n(&g_pace.req, 0, __ATOMIC_ACQ_REL)) {
+        return;
+    }
+    if (g_pace.prev && g_pace.prev > hle_tl_completed()) {
+        hle_tl_wait(g_pace.prev);
+    }
+    pend_flush();                       /* this flip's work so far is submitted */
+    g_pace.prev = g_pend.value;
+}
+
 /* Ends and submits the open recording without a timeline value (values stay
  * owned by the front end), then waits for the queue. Used before destroying
  * images the recording may reference (DEVICE_RESET/DESTROY). */
