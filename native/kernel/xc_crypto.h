@@ -51,6 +51,13 @@ void nc_des_parity(uint8_t *key, size_t len);
 /* a = b^c mod d over n little-endian 32-bit words. False if d is zero. */
 bool nc_modexp(uint32_t *a, const uint32_t *b, const uint32_t *c, const uint32_t *d, unsigned n);
 
+/* A synthetic XePublicKeyData and signatures that verify with it
+ * (xc_crypto.c). */
+#define NC_XC_PUBKEY_SIZE 0x11Cu /* BSAFE blob of a 2048-bit key */
+#define NC_XC_SIG_SIZE    256u
+void nc_xc_public_key(uint8_t blob[NC_XC_PUBKEY_SIZE]);
+void nc_xc_sign(const uint8_t digest[20], uint8_t sig[NC_XC_SIG_SIZE]);
+
 #ifdef __cplusplus
 }
 #endif

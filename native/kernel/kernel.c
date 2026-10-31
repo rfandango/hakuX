@@ -2,6 +2,7 @@
  * hakuX native core — kernel area, kernel calls and system ops.
  */
 #include "native/kernel/kernel.h"
+#include "native/kernel/xc_crypto.h"
 #include "native/state/save.h"
 #include "native/dev/dev.h"
 #include "native/core/mmio.h"
@@ -410,6 +411,10 @@ bool nc_kernel_init(NcKernel *k, NcVm *vm)
             if (strcmp(e->name, "XboxAlternateSignatureKeys") == 0) {
                 k->data_va[e->ordinal] = NC_KERNEL_VA + K_DATA_BIG;
             }
+            /* XePublicKeyData (0x11C bytes) goes right after those keys. */
+            if (strcmp(e->name, "XePublicKeyData") == 0) {
+                k->data_va[e->ordinal] = NC_KERNEL_VA + K_DATA_BIG + 0x100;
+            }
         } else {
             uint32_t va = NC_KERNEL_VA + K_TRAMPS + e->ordinal * 8u;
             uint8_t *t = nc_vm_host(vm, va);
@@ -527,6 +532,10 @@ bool nc_kernel_init(NcKernel *k, NcVm *vm)
     if (ver) {
         const uint16_t v[4] = {1, 0, 5838, 1};
         memcpy(ver, v, sizeof(v));
+    }
+    uint8_t *pub = data_ptr(k, "XePublicKeyData");
+    if (pub) {
+        nc_xc_public_key(pub);
     }
     uint8_t *inc = data_ptr(k, "KeTimeIncrement");
     if (inc) {

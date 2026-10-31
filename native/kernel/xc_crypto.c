@@ -381,3 +381,43 @@ bool nc_modexp(uint32_t *a, const uint32_t *b, const uint32_t *c, const uint32_t
     free(res);
     return true;
 }
+
+static void put32(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)v;
+    p[1] = (uint8_t)(v >> 8);
+    p[2] = (uint8_t)(v >> 16);
+    p[3] = (uint8_t)(v >> 24);
+}
+
+/* A synthetic XePublicKeyData for the emulated drive's security sector.
+ * With a public exponent of 1 and a modulus of all ones, the public-key
+ * operation returns a signature unchanged, so a valid signature is just the
+ * expected PKCS #1 block and needs no private key. It lets the check pass
+ * without proving anything about the disc.
+ * Layout (BSAFE): "RSA1", key length 0x108, 2048 bits, 255 data bytes, the
+ * public exponent, then the modulus. */
+void nc_xc_public_key(uint8_t blob[NC_XC_PUBKEY_SIZE])
+{
+    memset(blob, 0, NC_XC_PUBKEY_SIZE);
+    put32(blob, 0x31415352u);
+    put32(blob + 4, 0x108);
+    put32(blob + 8, NC_XC_SIG_SIZE * 8);
+    put32(blob + 0xC, NC_XC_SIG_SIZE - 1);
+    put32(blob + 0x10, 1);
+    memset(blob + 0x14, 0xFF, NC_XC_SIG_SIZE);
+}
+
+/* Signs digest for the synthetic XePublicKeyData: writes the PKCS #1 type 1
+ * block 00 01 FF..FF 00 digest, byte-reversed, because
+ * XcVerifyPKCS1Signature reads numbers little-endian. */
+void nc_xc_sign(const uint8_t digest[20], uint8_t sig[NC_XC_SIG_SIZE])
+{
+    memset(sig, 0xFF, NC_XC_SIG_SIZE);
+    for (int i = 0; i < 20; i++) {
+        sig[i] = digest[19 - i];
+    }
+    sig[20] = 0;
+    sig[NC_XC_SIG_SIZE - 2] = 1;
+    sig[NC_XC_SIG_SIZE - 1] = 0;
+}

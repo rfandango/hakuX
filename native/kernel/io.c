@@ -12,6 +12,7 @@
  * before the call returns; APC completion routines are not delivered yet.
  */
 #include "native/kernel/kernel.h"
+#include "native/kernel/xc_crypto.h"
 #include "native/core/irq.h"
 #include "native/core/xdvdfs.h"
 
@@ -2386,6 +2387,49 @@ static uint32_t disk_ioctl(const NcFile *nf, uint32_t code, uint8_t *out, uint32
  * read zeros. */
 #define IOCTL_SCSI_PASS_THROUGH_DIRECT 0x4D014u
 
+/* READ DVD STRUCTURE, format 0 at address FF02FDFF (layer FE), asks for the
+ * disc's security sector, returned after a 4-byte header. A real drive reads
+ * it from an area of the disc that disc images don't include, so there is no
+ * copy to return here: the drive builds one instead, signed with the key in
+ * xc_crypto.c. This is the one command, besides the security page above, that
+ * doesn't read zeros.
+ *
+ * After the security page, titles built with XAPI 5233 also read this sector
+ * when their certificate sets bit 0 of the flags at +0x1D8. XAPI 5233 checks
+ * three fields in it:
+ *   +0x4AB  the XBE certificate's time stamp (certificate +4)
+ *   +0x4CF  the SHA-1 of the length 0x4CB (as 4 bytes) followed by the
+ *           0x4CB bytes starting at +4
+ *   +0x4E3  a signature of that digest that verifies with XePublicKeyData
+ * Titles react differently when the check fails; some return to the
+ * dashboard. */
+#define SS_CERT_TIME 0x4ABu
+#define SS_SIGNED    0x4CBu
+#define SS_DIGEST    0x4CFu
+#define SS_SIG       0x4E3u
+
+static bool security_sector_cdb(const uint8_t *cdb)
+{
+    return cdb[0] == 0xAD && cdb[2] == 0xFF && cdb[3] == 0x02 && cdb[4] == 0xFD && cdb[5] == 0xFF &&
+           cdb[6] == 0xFE && cdb[7] == 0x00;
+}
+
+static void security_sector(NcKernel *k, uint8_t *d, uint32_t n)
+{
+    d[0] = (uint8_t)((n - 2) >> 8); /* data length, minus these 2 bytes */
+    d[1] = (uint8_t)(n - 2);
+    const uint32_t cert = nc_vm_rd32(k->vm, k->xbe_base + 0x118);
+    nc_wr32(d + SS_CERT_TIME, nc_vm_rd32(k->vm, cert + 4));
+    uint8_t len[4];
+    nc_wr32(len, SS_SIGNED);
+    NcSha1 s;
+    nc_sha1_init(&s);
+    nc_sha1_update(&s, len, 4);
+    nc_sha1_update(&s, d + 4, SS_SIGNED);
+    nc_sha1_final(&s, d + SS_DIGEST);
+    nc_xc_sign(d + SS_DIGEST, d + SS_SIG);
+}
+
 static void scsi_pass_through(NcKernel *k, uint32_t sptd, uint32_t len)
 {
     if (!sptd || len < 0x2C) {
@@ -2406,6 +2450,9 @@ static void scsi_pass_through(NcKernel *k, uint32_t sptd, uint32_t len)
         d[10] = 1;                             /* CDFValid */
         d[11] = 1;                             /* PartitionArea: the Xbox partition */
         d[12] = 1;                             /* Authentication */
+    } else if (security_sector_cdb(cdb) && n >= SS_SIG + NC_XC_SIG_SIZE) {
+        security_sector(k, d, n);
+        nc_log("hakuX-native-io", "scsi ad: security sector (%u bytes), signed with the console's key", n);
     } else {
         nc_log("hakuX-native-io", "scsi %02x (%u bytes): zeros", cdb[0], n);
     }
