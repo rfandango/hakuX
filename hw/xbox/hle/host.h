@@ -119,7 +119,7 @@ enum {
     HLE_GTR_TRAP,           /* the decoder raised a trap (value: argument) */
     HLE_GTR_FLIP_INC,       /* FLIP_INCREMENT_WRITE (value: new write) */
     HLE_GTR_FLIP_STALL,     /* FLIP_STALL waits (value: read << 4 | write) */
-    HLE_GTR_RESUME,         /* the decoder goes on (value: 1 trap, 2 flip) */
+    HLE_GTR_RESUME,         /* the decoder goes on (value: 1 trap, 2 flip, 3 frame pace) */
     HLE_GTR_DPC_QUEUE,      /* the kernel queued a DPC (value: its routine) */
     HLE_GTR_DPC_RUN,        /* ... dispatched one (value: its routine) */
     HLE_GTR_DPC_REFUSED,    /* ... refused to (value: the IRQL, | 0x100 a DPC running) */
@@ -146,6 +146,9 @@ void hle_host_gpu_lost(const char *why);
 const char *hle_host_base_path(void);
 /* The render scale, 1-4 times the title's resolution. */
 int hle_host_render_scale(void);
+/* The decoder's frame pace: the game slows to the render pace instead of
+ * simulating ahead of the screen (pb/pbdraw.c g_pace). */
+int hle_host_frame_pace(void);
 /* vkGetInstanceProcAddr of the Vulkan driver to use (a custom driver's or
  * the system's), as a void pointer; NULL if none. */
 void *hle_host_vk_loader(void);

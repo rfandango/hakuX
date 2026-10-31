@@ -86,6 +86,7 @@ class RunSettings(private val app: AppPrefs, private val game: GameOverrides?) {
   private fun text(s: GameSetting, global: String) = game?.get(s) ?: global
 
   val uncapped get() = bool(GameSetting.UNCAPPED, app.uncapped)
+  val framePace get() = app.framePace
   val renderScale get() = game?.get(GameSetting.RENDER_SCALE)?.toIntOrNull() ?: app.renderScale
   val asyncShaders get() = bool(GameSetting.ASYNC_SHADERS, app.asyncShaders)
   val prebuildShaders get() = bool(GameSetting.PREBUILD_SHADERS, app.prebuildShaders)

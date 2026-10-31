@@ -97,6 +97,8 @@ static struct {
     uint32_t flip_mark;                 /* ... the trace's position as it began */
     bool dumped;                        /* the trace dumped (once a run) */
     bool trap_wait;                     /* a software trap until the ISR clears it */
+    bool pace_wait;                     /* after a swap, the frame pace (hle_pbd_pace) */
+    uint64_t paces;                     /* ... stalls */
     uint32_t sub_r[8][0x400 / 4];       /* the 2D objects' methods, by subchannel */
     uint32_t s2d[0x400 / 4];            /* the 2D surfaces' (one at a time in D3D) */
     uint64_t blits, blit_bytes, m2mfs, m2mf_bytes, copies_skipped;
@@ -806,6 +808,13 @@ static int count_method(void *opaque, unsigned subch, uint32_t m, uint32_t v)
         int r = kelvin(m, v);
         hle_kelvin_method(m, v);                /* its register shadow: the draw state */
         hle_pbd_method(m, v);
+        if (m == NV097_FLIP_INCREMENT_WRITE && r == HLE_PB_GO && hle_pbd_pace()) {
+            /* the swap is on its way; the decoder stops here as at a
+             * FLIP_STALL until the GPU is close enough behind it */
+            g_pb.pace_wait = true;
+            g_pb.paces++;
+            return HLE_PB_STALL;
+        }
         return r;
     }
     if (m < 0x400) {
@@ -905,6 +914,13 @@ static void consume_pass(void)
         g_pb.flip_wait = false;
         hle_host_gpu_trace(HLE_GTR_RESUME, 2);
     }
+    if (g_pb.pace_wait) {
+        if (!hle_pbd_pace_reached()) {
+            return;                                 /* the GPU's kick comes back */
+        }
+        g_pb.pace_wait = false;
+        hle_host_gpu_trace(HLE_GTR_RESUME, 3);
+    }
     uint32_t base, limit, inst;
     uint32_t put = hle_host_gpu_reg(NV_PFIFO_CACHE1_DMA_PUT);
     if (!dma_object(&base, &limit, &inst)) {
@@ -965,14 +981,14 @@ static void consume_pass(void)
  * guest pushed before it: up to the PUT it wrote, which holds while the
  * guest runs nothing. The decoder waiting on the guest (a trap for its
  * interrupt handler, the FIFO access it turned off, a FLIP_STALL) or for the
- * GPU (arena room), or 50 ms, end the wait. */
+ * GPU (arena room, the frame pace), or 50 ms, end the wait. */
 static struct {
     uint32_t target;                    /* the PUT the decoder must reach */
     int state;                          /* 1 a store waits, 2 released (atomic) */
     HleSem sem;
     uint64_t waits, caught, timeouts, ns;
-    uint64_t gave_up[4];                /* the decoder at a trap, a FLIP_STALL, the FIFO off,
-                                         * waiting for arena room */
+    uint64_t gave_up[5];                /* the decoder at a trap, a FLIP_STALL, the FIFO off,
+                                         * waiting for arena room, the frame pace */
 } g_cu;
 static __thread bool t_decoder;
 
@@ -983,7 +999,7 @@ static void catch_up_check(void)
         return;
     }
     const bool there = g_pb.p.get == g_cu.target;
-    if (!there && !g_pb.trap_wait && !g_pb.flip_wait && fifo_open()) {
+    if (!there && !g_pb.trap_wait && !g_pb.flip_wait && !g_pb.pace_wait && fifo_open()) {
         return;
     }
     int one = 1;
@@ -991,7 +1007,7 @@ static void catch_up_check(void)
         if (there) {
             g_cu.caught++;
         } else {
-            g_cu.gave_up[g_pb.trap_wait ? 0 : g_pb.flip_wait ? 1 : 2]++;
+            g_cu.gave_up[g_pb.trap_wait ? 0 : g_pb.flip_wait ? 1 : g_pb.pace_wait ? 4 : 2]++;
         }
         hle_sem_post(&g_cu.sem);
     }
@@ -1044,9 +1060,10 @@ static void catch_up(void)
                                         __ATOMIC_ACQUIRE) && g_cu.timeouts++ < 16) {
             const char *ph = hle_pbd_phase();
             hle_log("hakuX-hle-pb", "catch-up timed out: decoder GET %08x for PUT %08x (now %08x), "
-                    "%s%s%s%s, phase %s", __atomic_load_n(&g_pb.p.get, __ATOMIC_RELAXED), put,
+                    "%s%s%s%s%s, phase %s", __atomic_load_n(&g_pb.p.get, __ATOMIC_RELAXED), put,
                     hle_host_gpu_reg(NV_PFIFO_CACHE1_DMA_PUT), g_pb.in_run ? "in a run" : "between runs",
                     g_pb.trap_wait ? ", trap" : "", g_pb.flip_wait ? ", flip stall" : "",
+                    g_pb.pace_wait ? ", frame pace" : "",
                     fifo_open() ? "" : ", FIFO off", ph ? ph : "none");
         }
     }
@@ -1293,7 +1310,7 @@ static uint32_t scout(void)
  * guest itself (the catch-up's reasons to give up) */
 static bool decoder_held(void)
 {
-    return g_pb.trap_wait || g_pb.flip_wait || !fifo_open();
+    return g_pb.trap_wait || g_pb.flip_wait || g_pb.pace_wait || !fifo_open();
 }
 
 void hle_pb_pushed(uint32_t put)
@@ -1463,6 +1480,7 @@ void hle_pb_state_set(const HlePbState *s)
     g_pb.flip_wait = s->flip_wait;
     g_pb.flip_wait_ns = hle_now_ns();
     g_pb.trap_wait = s->trap_wait;
+    g_pb.pace_wait = false;                 /* the loaded GPU has nothing in flight */
     g_trel.pending = false;                 /* the scout syncs again at the next PUT */
     g_sc.synced = false;
     memcpy(g_pb.sub_r, s->sub_r, sizeof(s->sub_r));
@@ -1483,10 +1501,11 @@ static void *decode_thread(void *opaque)
     t_decoder = true;
     while (!g_pb.stop) {
         /* asleep until a kick: waiting for the guest, the flip it stalls on
-         * (FLIP_STALL) or its interrupt handler (a trap); once a sleep, not
-         * a method */
+         * (FLIP_STALL), its interrupt handler (a trap) or the GPU (the frame
+         * pace); once a sleep, not a method */
         const uint32_t pa = hle_hitch_enter(g_pb.flip_wait ? HLE_ACT_FLIP :
-                                            g_pb.trap_wait ? HLE_ACT_TRAP : HLE_ACT_IDLE);
+                                            g_pb.trap_wait ? HLE_ACT_TRAP :
+                                            g_pb.pace_wait ? HLE_ACT_GPU : HLE_ACT_IDLE);
         hle_sem_wait(&g_pb.kick);
         hle_hitch_leave(pa);
         while (!g_pb.stop) {
@@ -1677,6 +1696,7 @@ void hle_pb_diag(void)
     /* where the decoder is: waiting for the ISR (trap), a flip, the FIFO
      * access, arena or ring space in a draw, or decoding */
     const char *ph = hle_pbd_phase(), *state = g_pb.trap_wait ? " (trap)" : g_pb.flip_wait ? " (flip stall)"
+                                              : g_pb.pace_wait    ? " (frame pace)"
                                               : !fifo_open()      ? " (fifo closed)"
                                               : ph && *ph == 'a'  ? " (arena wait)"
                                               : ph                ? " (ring wait)"
@@ -1720,10 +1740,12 @@ void hle_pb_diag(void)
         prev_cu = cu;
         hle_log("hakuX-hle-pb", "catch-up: %llu stores waited for the decoder (caught up %llu; it "
                 "waited on the guest at a trap %llu, a flip stall %llu, the FIFO off %llu; for arena "
-                "room %llu; timed out %llu), %.1f ms", (unsigned long long)cu,
+                "room %llu, the frame pace %llu of its %llu stalls; timed out %llu), %.1f ms",
+                (unsigned long long)cu,
                 (unsigned long long)g_cu.caught, (unsigned long long)g_cu.gave_up[0],
                 (unsigned long long)g_cu.gave_up[1], (unsigned long long)g_cu.gave_up[2],
-                (unsigned long long)g_cu.gave_up[3], (unsigned long long)g_cu.timeouts,
+                (unsigned long long)g_cu.gave_up[3], (unsigned long long)g_cu.gave_up[4],
+                (unsigned long long)g_pb.paces, (unsigned long long)g_cu.timeouts,
                 (double)g_cu.ns / 1e6);
     }
     static uint64_t prev_coh;
