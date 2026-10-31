@@ -146,6 +146,9 @@ void hle_host_gpu_lost(const char *why);
 const char *hle_host_base_path(void);
 /* The render scale, 1-4 times the title's resolution. */
 int hle_host_render_scale(void);
+/* The decoder's frame pace: the game slows to the render pace instead of
+ * simulating ahead of the screen (pb/pbdraw.c frame_pace). */
+int hle_host_frame_pace(void);
 /* vkGetInstanceProcAddr of the Vulkan driver to use (a custom driver's or
  * the system's), as a void pointer; NULL if none. */
 void *hle_host_vk_loader(void);

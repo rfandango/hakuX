@@ -143,6 +143,12 @@ start:
 
 void hle_batch_slot(unsigned slot)
 {
+    /* the slot's buffer is about to be reset (back.c cb_get): a run still
+     * held on it would be flushed later as a ghost draw into whatever pass
+     * is open then, its own binds gone with the reset. Every submit ends the
+     * buffer through the wrap, which flushes the run first, so none is held
+     * here; the reset drops one all the same. */
+    g_b.cb = VK_NULL_HANDLE;
     g_b.slot_base = (slot % SLOTS) * SLOT_INDICES;
     g_b.pos = 0;
 }

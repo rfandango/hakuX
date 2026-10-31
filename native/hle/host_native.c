@@ -161,6 +161,19 @@ int hle_host_render_scale(void)
     return g_render_scale;
 }
 
+/* The decoder's frame pace (pb/pbdraw.c frame_pace), the app's "Frame pacing" setting. */
+static int g_frame_pace = 1;
+
+void nc_hle_set_frame_pace(int on)
+{
+    g_frame_pace = on != 0;
+}
+
+int hle_host_frame_pace(void)
+{
+    return g_frame_pace;
+}
+
 /* A custom Vulkan driver's entry point (the app loads Turnip through
  * adrenotools), or the system driver's. */
 static PFN_vkGetInstanceProcAddr g_custom_gipa;
