@@ -55,6 +55,17 @@ static bool not_adreno(const HleDriver *d)
     return !qualcomm_proprietary(d) && !mesa_turnip(d);
 }
 
+/* The present CPU wait works around Qualcomm's driver, whose present holds
+ * the queue's lock for 3-6 ms while it waits; Arm's present returns at once,
+ * so the wait only costs there. Measured on a Mali-G52 (Arm's r34p0, Vulkan
+ * 1.1, 2026-10-30): with the wait the presenter spent 620-730 ms/s of CPU
+ * waiting for its passes, without it 0.3 ms/s, the picture the same (Sega GT
+ * 2002, Beyond Good & Evil). */
+static bool not_turnip_not_arm(const HleDriver *d)
+{
+    return !mesa_turnip(d) && !arm_proprietary(d);
+}
+
 /* PowerVR (vendor 0x1010) before driver 0x00582558 (ARMSX2's and PPSSPP's bound) */
 static bool powervr_old(const HleDriver *d)
 {
@@ -69,6 +80,23 @@ static bool mali_g615(const HleDriver *d)
 static bool mali_g57(const HleDriver *d)
 {
     return mali(d) && strstr(d->props.deviceName, "Mali-G57") != NULL;
+}
+
+/* A Mali-G52 under Arm's own driver (the r34p0 build of an Anbernic RG Vita,
+ * Unisoc T618, showed the quirks below; PanVK and other drivers for the same
+ * GPU are not it). */
+static bool mali_g52_arm(const HleDriver *d)
+{
+    return arm_proprietary(d) && strstr(d->props.deviceName, "Mali-G52") != NULL;
+}
+
+/* Timestamp queries that never resolve: ARMSX2's Mali-G615, and the G52's
+ * r34p0 measured the same way (a 60 s profile armed both query pools, the
+ * pass histogram logged every second, and not one pass or whole-buffer GPU
+ * time came back). Without the quirk the profiler silently produces nothing. */
+static bool no_timestamps_on(const HleDriver *d)
+{
+    return mali_g615(d) || mali_g52_arm(d);
 }
 
 /* Seen on (driver, version, what showed it). */
@@ -102,19 +130,30 @@ static const HleQuirk k_quirks[] = {
     { HLE_QUIRK_FRESH_CLEAR, "fresh_clear", not_adreno },
     /* ARMSX2 (VKSwapChain.cpp) after PPSSPP: older PowerVR swapchain widths */
     { HLE_QUIRK_SWAP_W32, "swap_w32", powervr_old },
-    /* ARMSX2: "Mali-G615's timestamp queries never resolve" */
-    { HLE_QUIRK_NO_TIMESTAMPS, "no_timestamps", mali_g615 },
+    /* ARMSX2: "Mali-G615's timestamp queries never resolve"; the Mali-G52's
+     * r34p0 too (no_timestamps_on) */
+    { HLE_QUIRK_NO_TIMESTAMPS, "no_timestamps", no_timestamps_on },
     /* Qualcomm's driver: a present waiting on the pass's semaphore waited
      * 3-6 ms a refresh in the driver, the queue's lock held (Halo 2).
-     * Turnip's makes a sync file and returns (Mesa vk_android.c); the other
-     * drivers are untested, so they keep the wait. */
-    { HLE_QUIRK_PRESENT_CPU_WAIT, "present_cpu_wait", not_turnip },
+     * Turnip's makes a sync file and returns (Mesa vk_android.c), and Arm's
+     * returns too (not_turnip_not_arm, measured); the other drivers are
+     * untested, so they keep the wait. */
+    { HLE_QUIRK_PRESENT_CPU_WAIT, "present_cpu_wait", not_turnip_not_arm },
     /* Mali-G57 MC2, Arm's r54p1 (an Infinix X6858 user's diag log,
      * 2026-10-26): Mortal Kombat Shaolin Monks' meshes exploded; its vertices
      * are 18 bytes, two floats at offset 10, and the diag build counted 7.8
      * million misaligned attribute fetches in 230 s, nothing else wrong.
      * The driver has no VK_EXT_legacy_vertex_attributes. */
     { HLE_QUIRK_VB_ALIGN, "vb_align", mali_g57 },
+    /* Mali-G52 MP2, Arm's r34p0 (an Anbernic RG Vita, Unisoc T618, Vulkan
+     * 1.1, 2026-10-30): the host wait on the timeline semaphore returned
+     * VK_ERROR_DEVICE_LOST mid-game ("vkWaitSemaphores", hle_tl_wait), across
+     * titles and at random moments, while the GPU had run everything up to
+     * the call. The counter query never failed, so the waits poll it
+     * (hle_tl_sem_wait): no loss in ~40 minutes of play after, where before
+     * a session lost the device several times. Seen on this build only, so
+     * on for this GPU only; HAKUX_HLE_QUIRKS=+no_sem_wait tries it elsewhere. */
+    { HLE_QUIRK_NO_SEM_WAIT, "no_sem_wait", mali_g52_arm },
 };
 
 static uint32_t g_defaults;

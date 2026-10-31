@@ -67,8 +67,8 @@ enum {
     /* Older PowerVR drivers corrupt the output unless the swapchain is a
      * multiple of 32 pixels wide: its width is rounded down to one. */
     HLE_QUIRK_SWAP_W32 = 1u << 9,
-    /* Timestamp queries never resolve (Mali-G615): the GPU time profile
-     * (debug) is off. */
+    /* Timestamp queries never resolve (Mali-G615, and the Mali-G52 under
+     * Arm's r34p0): the GPU time profile (debug) is off. */
     HLE_QUIRK_NO_TIMESTAMPS = 1u << 10,
     /* A present with a semaphore to wait on waits for it on the CPU, the
      * queue held (Qualcomm's: Android's present asks the driver for a fence
@@ -82,6 +82,13 @@ enum {
      * (Mali-G57): such a binding's vertices are copied to the arena with each
      * attribute moved to an offset its components divide (pb/pbdraw.c). */
     HLE_QUIRK_VB_ALIGN = 1u << 12,
+    /* The host wait on a timeline semaphore (vkWaitSemaphores) returns
+     * VK_ERROR_DEVICE_LOST and takes the session down, while the counter
+     * query (vkGetSemaphoreCounterValue) keeps working: the waits poll the
+     * counter in userspace instead (hle_tl_sem_wait, vk/timeline.c). On for
+     * the Mali-G52 under Arm's driver, whose r34p0 build lost the device
+     * this way mid-game, across titles. */
+    HLE_QUIRK_NO_SEM_WAIT = 1u << 13,
 };
 
 extern uint32_t g_hle_quirks;

@@ -13,6 +13,9 @@
 int hle_tl_init(void (*on_complete)(uint64_t completed));
 VkSemaphore hle_tl_sem(void);
 void hle_tl_signaled(uint64_t value);
+/* Wait for a timeline semaphore's value: the driver's host wait, or with
+ * no_sem_wait a poll of the counter in userspace (quirks.c). */
+VkResult hle_tl_sem_wait(VkSemaphore sem, uint64_t value, uint64_t timeout_ns);
 /* Before each submit: the GPU left idle a moment when the app asked
  * (hle_tl_gap, back.h). */
 void hle_tl_gap_serve(void);

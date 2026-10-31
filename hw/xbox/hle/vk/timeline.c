@@ -11,6 +11,7 @@
 #include "hw/xbox/hle/tex/xg_swizzle.h"
 #include "hw/xbox/hle/vk/back_int.h"
 #include "hw/xbox/hle/vk/guest_ram.h"
+#include "hw/xbox/hle/vk/quirks.h"
 
 #ifdef __ANDROID__
 #include "hw/xbox/hle/prop.h"
@@ -241,10 +242,7 @@ static void *watch_thread(void *opaque)
             continue;
         }
         uint64_t want = done + 1;
-        VkSemaphoreWaitInfo wi = {
-            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
-            .semaphoreCount = 1, .pSemaphores = &g_tl.sem, .pValues = &want };
-        VkResult r = T.vkWaitSemaphores(g_hvk.dev, &wi, 100 * 1000 * 1000ull);
+        VkResult r = hle_tl_sem_wait(g_tl.sem, want, 100 * 1000 * 1000ull);
         if (r == VK_TIMEOUT) {
             if (++g_tl.timeouts % 10 == 0) {
                 hle_log("hakuX-hle-back", "GPU has not reached %llu for %llu s",
@@ -266,6 +264,37 @@ static void *watch_thread(void *opaque)
         }
     }
     return NULL;
+}
+
+/* Waiting for a timeline value: the driver's host wait, or with no_sem_wait
+ * a poll of the counter (the wait's path returned VK_ERROR_DEVICE_LOST on
+ * Arm's r34p0 Bifrost driver while the counter query kept working; quirks.c).
+ * The poll's half-millisecond steps cost the waiter at most that in latency;
+ * the GPU work it waits for is milliseconds. */
+VkResult hle_tl_sem_wait(VkSemaphore sem, uint64_t value, uint64_t timeout_ns)
+{
+    if (likely(!hle_quirk(HLE_QUIRK_NO_SEM_WAIT))) {
+        VkSemaphoreWaitInfo wi = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+                                   .semaphoreCount = 1, .pSemaphores = &sem,
+                                   .pValues = &value };
+        return T.vkWaitSemaphores(g_hvk.dev, &wi, timeout_ns);
+    }
+    const int64_t end = hle_now_ns() + (int64_t)timeout_ns;
+    struct timespec nap = { 0, 500 * 1000 };
+    for (;;) {
+        uint64_t v = 0;
+        VkResult r = T.vkGetSemaphoreCounterValue(g_hvk.dev, sem, &v);
+        if (r != VK_SUCCESS) {
+            return r;
+        }
+        if (v >= value) {
+            return VK_SUCCESS;
+        }
+        if (hle_now_ns() >= end) {
+            return VK_TIMEOUT;
+        }
+        nanosleep(&nap, NULL);
+    }
 }
 
 int hle_tl_init(void (*on_complete)(uint64_t))
@@ -378,10 +407,7 @@ void hle_tl_wait(uint64_t value)
     }
     uint32_t pa = hle_hitch_enter(HLE_ACT_GPU);
     while (hle_tl_completed() < value) {
-        VkSemaphoreWaitInfo wi = {
-            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
-            .semaphoreCount = 1, .pSemaphores = &g_tl.sem, .pValues = &value };
-        const VkResult r = T.vkWaitSemaphores(g_hvk.dev, &wi, 100 * 1000 * 1000ull);
+        const VkResult r = hle_tl_sem_wait(g_tl.sem, value, 100 * 1000 * 1000ull);
         if (r != VK_SUCCESS && r != VK_TIMEOUT) {
             hle_vk_lose(r, "vkWaitSemaphores");    /* completed: all (hle_tl_lose) */
         }
