@@ -51,6 +51,13 @@ class AppPrefs(context: Context) {
     get() = sp.getBoolean(NativeCoreActivity.PREF_UNCAP, false)
     set(value) = sp.edit { putBoolean(NativeCoreActivity.PREF_UNCAP, value) }
 
+  /** The decoder waits at each frame's flip for the previous frame's GPU work:
+   * the game itself slows to the render pace instead of simulating about a
+   * second ahead of the screen (read at game start). */
+  var framePace: Boolean
+    get() = sp.getBoolean(NativeCoreActivity.PREF_FRAME_PACE, true)
+    set(value) = sp.edit { putBoolean(NativeCoreActivity.PREF_FRAME_PACE, value) }
+
   /** Shaders compiled off the render thread, draws needing one skipped meanwhile (read at game start). */
   var asyncShaders: Boolean
     get() = sp.getBoolean(NativeCoreActivity.PREF_ASYNC_SHADERS, true)

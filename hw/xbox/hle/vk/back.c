@@ -834,11 +834,12 @@ static struct {
 
 void hle_back_frame_pace(void)
 {
+    /* the app's "Frame pacing" setting; the prop overrides when set (the
+     * trigger API's first poll is a baseline, so the value is read each
+     * flip instead) */
     char v[PROP_VALUE_MAX];
-    hle_prop_get("debug.hakux.pace", v);    /* every flip: the trigger API's first
-                                             * poll is a baseline, a value set
-                                             * before the run never enabled */
-    g_pace.on = v[0] != '0';                /* on by default */
+    hle_prop_get("debug.hakux.pace", v);
+    g_pace.on = v[0] ? v[0] != '0' : hle_host_frame_pace();
     if (g_pace.on) {
         __atomic_store_n(&g_pace.req, 1, __ATOMIC_RELEASE);
     }
