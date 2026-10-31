@@ -82,6 +82,12 @@ enum {
      * (Mali-G57): such a binding's vertices are copied to the arena with each
      * attribute moved to an offset its components divide (pb/pbdraw.c). */
     HLE_QUIRK_VB_ALIGN = 1u << 12,
+    /* A pixel shader that writes gl_FragDepth from vW (W-buffering) hangs
+     * the fragment job until the kernel hard-stops it (Mali-G57, Arm's r40p0:
+     * VK_ERROR_DEVICE_LOST, "Job Hard-Stopped", GPU fault 0x4002 on job slot
+     * 0): W-buffered draws test and store the rasterizer's z instead
+     * (vk/draw.c), as HAKUX_HLE_DBGFLAGS bit 8 does. Read per draw. */
+    HLE_QUIRK_NO_WBUF = 1u << 13,
 };
 
 extern uint32_t g_hle_quirks;
