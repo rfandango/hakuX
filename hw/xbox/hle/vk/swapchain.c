@@ -40,7 +40,6 @@
 
 #define T (g_ps.t)
 #define PS_FRAMES 3             /* the presenter's submits in flight */
-#define PS_IMAGES 8             /* swapchain images at most */
 #define PS_RAMP 1024            /* a frame's share of the ramp buffer (768 used) */
 
 enum { P_BILINEAR, P_AREA, P_SGSR, P_FXAA, P_COUNT };
@@ -80,9 +79,9 @@ static struct {
     VkExtent2D ext, wsize;      /* the images' (the panel's orientation), the window's */
     float rot[4];               /* the window's clip space into the images' (k_vs) */
     uint32_t nimg, idx;
-    VkImage img[PS_IMAGES];
-    VkImageView view[PS_IMAGES];
-    VkSemaphore drawn[PS_IMAGES];   /* its pass done: what its present waits for */
+    VkImage *img;               /* nimg each */
+    VkImageView *view;
+    VkSemaphore *drawn;         /* its pass done: what its present waits for */
     bool stale;                 /* out of date: made again at the next begin */
     bool follows;               /* its transform is the panel's: SUBOPTIMAL means it turned */
     /* the frame shown */
@@ -482,6 +481,12 @@ static void drop_images(void)
         T.vkDestroyImageView(g_hvk.dev, g_ps.view[i], NULL);
         T.vkDestroySemaphore(g_hvk.dev, g_ps.drawn[i], NULL);
     }
+    g_free(g_ps.img);
+    g_free(g_ps.view);
+    g_free(g_ps.drawn);
+    g_ps.img = NULL;
+    g_ps.view = NULL;
+    g_ps.drawn = NULL;
     g_ps.nimg = 0;
 }
 
@@ -529,11 +534,12 @@ static bool make_swapchain(uint32_t w, uint32_t h)
             }
         }
     }
+    /* Android may make more images than asked for (10 for 6 on a Dimensity
+     * 8300), so the arrays are sized from what the swapchain reports. */
     uint32_t n = MAX(caps.minImageCount, 3u);
     if (caps.maxImageCount) {
         n = MIN(n, caps.maxImageCount);
     }
-    n = MIN(n, (uint32_t)PS_IMAGES);
     /* Pre-rotated: the images in the panel's own orientation (its transform
      * now), the picture turned into them as it's drawn. An image in the
      * window's orientation the compositor turns itself, with the GPU at every
@@ -590,8 +596,22 @@ static bool make_swapchain(uint32_t w, uint32_t h)
         hle_log("hakuX-hle-back", "present: vkCreateSwapchainKHR %ux%u: %d", w, h, r);
         return false;
     }
-    uint32_t ni = PS_IMAGES;
-    T.vkGetSwapchainImagesKHR(g_hvk.dev, sc, &ni, g_ps.img);
+    uint32_t ni = 0;
+    VkResult ri = T.vkGetSwapchainImagesKHR(g_hvk.dev, sc, &ni, NULL);
+    VkImage *imgs = ri == VK_SUCCESS && ni ? g_new0(VkImage, ni) : NULL;
+    if (imgs) {
+        ri = T.vkGetSwapchainImagesKHR(g_hvk.dev, sc, &ni, imgs);
+    }
+    if (!imgs || ri != VK_SUCCESS) {
+        hle_log("hakuX-hle-back", "present: the swapchain's %u images: %d", ni, ri);
+        g_free(imgs);
+        T.vkDestroySwapchainKHR(g_hvk.dev, sc, NULL);
+        g_ps.sc = VK_NULL_HANDLE;
+        return false;
+    }
+    g_ps.img = imgs;
+    g_ps.view = g_new0(VkImageView, ni);
+    g_ps.drawn = g_new0(VkSemaphore, ni);
     for (uint32_t i = 0; i < ni; i++) {
         VkImageViewCreateInfo vci = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = g_ps.img[i],
@@ -716,6 +736,11 @@ bool hle_present_begin(struct ANativeWindow *win, uint32_t *w, uint32_t *h)
             hle_vk_check(r, "vkAcquireNextImageKHR");
         }
         return false;                   /* timed out: the next refresh tries again */
+    }
+    if (g_ps.idx >= g_ps.nimg) {
+        hle_log("hakuX-hle-back", "present: acquired image %u of %u", g_ps.idx, g_ps.nimg);
+        g_ps.stale = true;
+        return false;
     }
     if (r == VK_SUBOPTIMAL_KHR && g_ps.follows) {
         g_ps.stale = true;              /* the panel turned: this image, then another swapchain */
