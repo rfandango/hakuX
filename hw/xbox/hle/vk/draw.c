@@ -3763,7 +3763,8 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
      * depth meets the programs' (Splinter Cell: FF world, program
      * characters); their pixel stage scale is 1 / wfar (c->wscale). */
     bool wff = !prog && !rhw && c->wscale > 0.0f;
-    bool wbuf = (prog || rhw || wff) && ds && s->rs[RS_ZENABLE] == 2 && !(dbgf & 8);
+    bool wbuf = (prog || rhw || wff) && ds && s->rs[RS_ZENABLE] == 2 && !(dbgf & 8) &&
+                !hle_quirk(HLE_QUIRK_NO_WBUF);
     /* NV2A ZCLAMP_EN CLAMP: depth past the near and far planes is clamped to
      * them instead of clipping the primitive (MechAssault 2's sky, drawn past
      * the far plane, was black): the rasterizer's depth clamp */

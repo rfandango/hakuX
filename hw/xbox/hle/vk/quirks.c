@@ -145,6 +145,14 @@ static const HleQuirk k_quirks[] = {
      * million misaligned attribute fetches in 230 s, nothing else wrong.
      * The driver has no VK_EXT_legacy_vertex_attributes. */
     { HLE_QUIRK_VB_ALIGN, "vb_align", mali_g57 },
+    /* Mali-G57 MC4, Arm's r40p0 (Anbernic RG556, Unisoc T820, GammaOS;
+     * 2026-10-31): Morrowind lost the device 0.2 s into its loading screen,
+     * every time, the kernel log "JS: Job Hard-Stopped (took more than 10
+     * ticks)" and "GPU fault 0x4002 from job slot 0" (fragment). Its fixed-
+     * function draws are W-buffered (ZENABLE 2); HAKUX_HLE_DBGFLAGS=8 alone
+     * (W-buffering off) ran it at 60 fps, 4, 16 and 1|2|32 still hung, and
+     * caps -bindless,-bda,-ahb,-vk13 and -cbc changed nothing. */
+    { HLE_QUIRK_NO_WBUF, "no_wbuf", mali_g57 },
     /* Mali-G52 MP2, Arm's r34p0 (an Anbernic RG Vita, Unisoc T618, Vulkan
      * 1.1, 2026-10-30): the host wait on the timeline semaphore returned
      * VK_ERROR_DEVICE_LOST mid-game ("vkWaitSemaphores", hle_tl_wait), across
