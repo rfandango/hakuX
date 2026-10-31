@@ -161,7 +161,7 @@ int hle_host_render_scale(void)
     return g_render_scale;
 }
 
-/* The decoder's frame pace (pb/pbdraw.c frame_pace), the app's "Frame pacing" setting. */
+/* The decoder's frame pace (pb/pbdraw.c g_pace), the app's "Frame pacing" setting. */
 static int g_frame_pace = 1;
 
 void nc_hle_set_frame_pace(int on)

@@ -181,7 +181,6 @@ static struct {
     unsigned nzr;
     uint32_t next_id;
     uint64_t clears, swaps;             /* swaps: FLIP_INCREMENT_WRITE's */
-    uint64_t pace_value;                /* the last swap's submission value (frame_pace) */
     uint32_t swap_ids;                  /* every swap's id (those and PCRTC_START's) */
     uint64_t swaps_seen;                /* swaps at the last PCRTC_START */
     uint64_t pcrtc_presents;
@@ -1395,28 +1394,55 @@ static void front_stale(const PbObj *o)
 
 static void shown_part(const PbObj *o, uint32_t ax, uint32_t ay, uint32_t *w, uint32_t *h);
 
-/* The frame pace: at each swap, the decoder waits for the previous swap's
- * submission to complete before it goes on, so at most one frame of GPU work
- * is in flight. Without it the guest's push ring holds however far the
- * renderer is behind (Sega GT 2002 on a Mali-G52: ~25 frames, the flip
- * reaching the display 1030-1130 ms later) and the pad is read by a
- * simulation the screen shows a second later. Parked here, the decoder lets
- * the ring fill, and the guest, stalling on ring space in its own frame
- * loop, throttles itself to the render pace (measured: swap to display 2-19
- * ms, the same frame rate). The swap's own submission is the boundary waited
- * for, made by the render thread in order with the draws; the wait is the
- * timeline's, which any thread may take. The app's "Frame pacing" setting,
- * on by default; debug.hakux.pace (1 / 0) overrides it, read at each swap
- * so an A/B needs no restart. */
-static void frame_pace(uint64_t value)
+/* The frame pace (pbmode.c's decode loop stalls on it): without it the
+ * guest's push ring holds however far the renderer is behind (Sega GT 2002
+ * on a Mali-G52: ~25 frames, the flip reaching the display 1030-1130 ms
+ * later) and the pad is read by a simulation the screen shows a second
+ * later. After a swap the decoder stops, as at a FLIP_STALL, until the GPU
+ * has finished the swap `depth` before it; the ring fills, and the guest,
+ * stalling on ring space in its own frame loop, throttles itself to the
+ * render pace. Two back by default: one frame queued behind the one the
+ * GPU runs, so it never runs dry at the swap. The wait is a timeline note
+ * that kicks the decoder, which meanwhile serves the guest's stores and
+ * render-target reads (it is stalled, not blocked). The app's "Frame
+ * pacing" setting, on by default; debug.hakux.pace (0 off, 1-3 swaps back)
+ * overrides it, read at each swap so an A/B needs no restart. */
+static struct {
+    uint64_t swap[4];                   /* the last swaps' values, by g_pd.swaps */
+    uint64_t want;                      /* the value the decoder stalls for */
+    uint32_t seq, reached;              /* stalls, and the last the GPU reached (atomic) */
+} g_pace;
+
+static void pace_landed(uint32_t seq, bool landed)
+{
+    __atomic_store_n(&g_pace.reached, seq, __ATOMIC_RELEASE);
+    hle_pb_kick();
+}
+
+bool hle_pbd_pace_reached(void)
+{
+    return __atomic_load_n(&g_pace.reached, __ATOMIC_ACQUIRE) == g_pace.seq ||
+           hle_tl_completed() >= g_pace.want;
+}
+
+bool hle_pbd_pace(void)
 {
     char v[PROP_VALUE_MAX];
     hle_prop_get("debug.hakux.pace", v);
-    const bool on = v[0] ? v[0] != '0' : hle_host_frame_pace();
-    if (on && g_pd.pace_value && hle_tl_completed() < g_pd.pace_value) {
-        hle_tl_wait(g_pd.pace_value);
+    int depth = v[0] ? atoi(v) : hle_host_frame_pace() ? 2 : 0;
+    depth = MIN(depth, 3);
+    if (depth <= 0 || g_pd.swaps <= (uint64_t)depth) {
+        return false;
     }
-    g_pd.pace_value = value;
+    g_pace.want = g_pace.swap[(g_pd.swaps - depth) % ARRAY_SIZE(g_pace.swap)];
+    if (hle_tl_completed() >= g_pace.want) {
+        return false;
+    }
+    /* no room for the note: no kick would come, so no stall */
+    if (!hle_tl_land_note(g_pace.want, pace_landed, ++g_pace.seq)) {
+        return false;
+    }
+    return !hle_pbd_pace_reached();
 }
 
 /* FLIP_INCREMENT_WRITE: the frame in the colour target is done; it goes to
@@ -1466,6 +1492,7 @@ static void swap(void)
     c->swap_id = ++g_pd.swap_ids;
     shown_part(fo, ax, ay, &c->src_w, &c->src_h);
     g_pd.swaps++;
+    g_pace.swap[g_pd.swaps % ARRAY_SIZE(g_pace.swap)] = value;      /* (hle_pbd_pace) */
     g_pd.epoch++;
     g_pd.kick_ns = hle_now_ns();
     g_pd.vis_unsent = false;                /* a swap submits */
@@ -1483,7 +1510,6 @@ static void swap(void)
     }
     g_pd.swap_wseq = g_pd.wseq;
     __atomic_store_n(&g_pd.ahead_pa, 0, __ATOMIC_RELEASE);
-    frame_pace(value);                      /* last: the wait, with the swap on its way */
 }
 
 void hle_pbd_trap(void)
