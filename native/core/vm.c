@@ -7,12 +7,26 @@
 #include <dlfcn.h>
 
 #include <errno.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
 static uint8_t *g_na;   /* per physical page: no guest access (nc_vm_noaccess), made on first use */
+
+/* Taken by whatever changes a guest view's protection or the flags it
+ * follows (wp, g_na, rmap): protecting, unprotecting, mapping and closing
+ * run on several threads (the decoder's test_and_clear and rearm, the
+ * APU's and devices' set_dirty, the vCPU's stores by VA and its mappings), and
+ * each is a flag store and an mprotect apart. Unprotect's mprotect between
+ * protect's flag and its mprotect, or after protect's mprotect and before
+ * its own flag, left a page read-only with no flag: the guest's next store
+ * there a fault nobody handles (Sega GT 2002 on the RG Vita, 8 s in). A
+ * guest store's fault opening its own view (dirty.c) needs no lock: it
+ * only ever sets NC_WP_WRITTEN, which faults again harmlessly. Never held
+ * across a guest access, so a fault handler may take it. */
+static pthread_mutex_t g_prot_lock = PTHREAD_MUTEX_INITIALIZER;
 
 #ifndef MFD_CLOEXEC
 #define MFD_CLOEXEC 1u
@@ -96,8 +110,10 @@ bool nc_vm_map(NcVm *vm, uint32_t va, uint32_t pa, uint32_t len)
         return false;
     }
     void *want = vm->base + va;
+    pthread_mutex_lock(&g_prot_lock);
     void *m = mmap(want, len, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, vm->ram_fd, pa);
     if (m != want) {
+        pthread_mutex_unlock(&g_prot_lock);
         nc_log("hakuX-native", "vm: map va=%08x pa=%08x len=%x failed: %s", va, pa, len,
                strerror(errno));
         return false;
@@ -124,6 +140,7 @@ bool nc_vm_map(NcVm *vm, uint32_t va, uint32_t pa, uint32_t len)
             mprotect(vm->base + va + off, NC_PAGE, PROT_READ); /* still tracked */
         }
     }
+    pthread_mutex_unlock(&g_prot_lock);
     return true;
 }
 
@@ -167,6 +184,7 @@ void nc_vm_protect_pages(NcVm *vm, uint32_t pa, uint32_t n, bool ro)
     }
     const uint32_t page = pa / NC_PAGE;
     const int prot = ro ? PROT_READ : PROT_READ | PROT_WRITE;
+    pthread_mutex_lock(&g_prot_lock);
     /* The flag is set before the pages are protected and cleared after
      * they're writable again: a guest store that faults on another thread
      * meanwhile always finds its page marked (dirty.c takes the fault as a
@@ -201,6 +219,7 @@ void nc_vm_protect_pages(NcVm *vm, uint32_t pa, uint32_t n, bool ro)
             __atomic_store_n(&vm->wp[page + i], 0, __ATOMIC_RELEASE);
         }
     }
+    pthread_mutex_unlock(&g_prot_lock);
 }
 
 void nc_vm_noaccess(NcVm *vm, uint32_t pa, uint32_t n, bool on)
@@ -219,12 +238,14 @@ void nc_vm_noaccess(NcVm *vm, uint32_t pa, uint32_t n, bool on)
             free(na);
         }
     }
+    pthread_mutex_lock(&g_prot_lock);
     if (on) {
         /* marked first: a fault meanwhile finds its page marked */
         for (uint32_t i = 0; i < n; i++) {
             __atomic_store_n(&g_na[page + i], 1, __ATOMIC_RELEASE);
         }
         prot_views(vm, page, n, PROT_NONE);
+        pthread_mutex_unlock(&g_prot_lock);
         return;
     }
     /* back to what write tracking wants, in runs of the same */
@@ -240,6 +261,7 @@ void nc_vm_noaccess(NcVm *vm, uint32_t pa, uint32_t n, bool on)
     for (uint32_t i = 0; i < n; i++) {
         __atomic_store_n(&g_na[page + i], 0, __ATOMIC_RELEASE);
     }
+    pthread_mutex_unlock(&g_prot_lock);
 }
 
 bool nc_vm_noaccess_has(NcVm *vm, uint32_t pa)
@@ -252,11 +274,32 @@ void nc_vm_protect_page(NcVm *vm, uint32_t pa, bool ro)
     nc_vm_protect_pages(vm, pa & ~(NC_PAGE - 1), 1, ro);
 }
 
+bool nc_vm_open_untracked(NcVm *vm, uint32_t pa, void *at)
+{
+    bool ok = true;
+    pthread_mutex_lock(&g_prot_lock);
+    /* the view still the page's: one unmapped or mapped elsewhere meanwhile
+     * (the page table changes only under this lock) is left as it is, and
+     * the access's next fault is taken afresh */
+    const uint64_t va = nc_vm_guest_of(vm, at);
+    const bool same = va != UINT64_MAX &&
+                      nc_vm_phys(vm, (uint32_t)va) / NC_PAGE == pa / NC_PAGE;
+    if (same && !__atomic_load_n(&vm->wp[pa / NC_PAGE], __ATOMIC_ACQUIRE) &&
+        !nc_vm_noaccess_has(vm, pa)) {
+        void *page = (void *)((uintptr_t)at & ~(uintptr_t)(NC_PAGE - 1));
+        ok = mprotect(page, NC_PAGE, PROT_READ | PROT_WRITE) == 0;
+    }
+    pthread_mutex_unlock(&g_prot_lock);
+    return ok;
+}
+
 bool nc_vm_unmap(NcVm *vm, uint32_t va, uint32_t len)
 {
     void *want = vm->base + va;
+    pthread_mutex_lock(&g_prot_lock);   /* (prot_views reads rmap) */
     if (mmap(want, len, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED | MAP_NORESERVE, -1,
              0) != want) {
+        pthread_mutex_unlock(&g_prot_lock);
         return false;
     }
     for (uint32_t off = 0; off < len; off += NC_PAGE) {
@@ -266,6 +309,7 @@ bool nc_vm_unmap(NcVm *vm, uint32_t va, uint32_t len)
         }
         vm->pte[(va + off) / NC_PAGE] = 0;
     }
+    pthread_mutex_unlock(&g_prot_lock);
     return true;
 }
 

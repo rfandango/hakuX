@@ -473,14 +473,24 @@ bool nc_hle_dirty_fault(const siginfo_t *info, void *ucontext)
     }
     const uint8_t wp = __atomic_load_n(&g_vm->wp[pa / NC_PAGE], __ATOMIC_ACQUIRE);
     if (!wp) {
-        /* protected, but not by write tracking: someone else's (the JIT's
-         * code pages), or tracking lost the page (a crash follows) */
+        /* Not tracked, so writable in every view: another thread unprotected
+         * the page between the fault and here (the access runs again as it
+         * is), or a view kept a protection tracking lost (logged: before
+         * nc_vm_map and the trackers took one lock, Sega GT 2002 crashed so
+         * at guest 0083ad74). Nothing else write-protects guest RAM: FEX's
+         * code-page tracking is its Linux front end's, which isn't here.
+         * A protection fault only: anything else (a SIGBUS the unaligned
+         * handler declined) would only fault again, so it is reported. */
         static unsigned s_logged;
-        if (s_logged++ < 8) {
-            nc_log("hakuX-native-watch", "write fault at guest %08x (pa %08x), a page tracking "
-                   "doesn't hold protected", (uint32_t)guest, pa);
+        if (info->si_signo != SIGSEGV || info->si_code != SEGV_ACCERR ||
+            !nc_vm_open_untracked(g_vm, pa, info->si_addr)) {
+            return false;
         }
-        return false;
+        if (s_logged++ < 8) {
+            nc_log("hakuX-native-watch", "fault at guest %08x (pa %08x), a page tracking doesn't "
+                   "hold: opened", (uint32_t)guest, pa);
+        }
+        return true;
     }
     if (wp == NC_WP_WRITTEN) {
         open_view(pa, info->si_addr);   /* written through another view already */
