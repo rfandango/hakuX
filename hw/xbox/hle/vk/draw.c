@@ -850,36 +850,69 @@ static void white_init(VkCommandBuffer cb)
 
 /* ---- textures ------------------------------------------------------------------ */
 
-/* Lookup by id (many per draw): a per-id hint, checked on use, and misses
- * remembered until a texture is created (g_tex_gen). */
-#define TEX_IDS 8193
-static uint16_t g_tex_hint[TEX_IDS];
-static uint32_t g_tex_miss[TEX_IDS], g_tex_gen = 1;
+/* Lookup by id (many per draw): an open-addressed index of the live ones,
+ * id -> slot + 1 (linear probing, removal by backward shift). It was a hint
+ * per id below 8193 and misses remembered until a texture was created:
+ * ids past that (a long session's: Sega GT 2002 defines ~100 textures a
+ * second) and each surface sampled as a texture after any creation scanned
+ * all HLE_MAX_TEX slots, several times a draw (~4% of the render thread
+ * mid-race, growing). */
+#define TEX_MAP 4096                    /* a power of two, twice HLE_MAX_TEX */
+static uint16_t g_tex_map[TEX_MAP];
+
+static unsigned tex_map_home(uint32_t id)
+{
+    return (id * 2654435761u) >> (32 - 12);
+}
+
+static void tex_map_put(const HleVkTex *t)
+{
+    unsigned i = tex_map_home(t->id);
+    while (g_tex_map[i]) {
+        i = (i + 1) & (TEX_MAP - 1);
+    }
+    g_tex_map[i] = (uint16_t)(t - g_dr.tex + 1);
+}
+
+static void tex_map_del(const HleVkTex *t)
+{
+    const uint16_t v = (uint16_t)(t - g_dr.tex + 1);
+    unsigned i = tex_map_home(t->id);
+    while (g_tex_map[i] && g_tex_map[i] != v) {
+        i = (i + 1) & (TEX_MAP - 1);
+    }
+    if (!g_tex_map[i]) {
+        return;
+    }
+    /* the entries after it in its run that may not stay behind a gap move up */
+    for (unsigned k = i;;) {
+        g_tex_map[i] = 0;
+        for (;;) {
+            k = (k + 1) & (TEX_MAP - 1);
+            if (!g_tex_map[k]) {
+                return;
+            }
+            const unsigned h = tex_map_home(g_dr.tex[g_tex_map[k] - 1].id);
+            /* home cyclically in (i, k]: it stays */
+            if (i <= k ? (h <= i || h > k) : (h <= i && h > k)) {
+                break;
+            }
+        }
+        g_tex_map[i] = g_tex_map[k];
+        i = k;
+    }
+}
 
 static HleVkTex *tex_find(uint32_t id)
 {
     if (!id) {
         return NULL;
     }
-    if (id < TEX_IDS) {
-        unsigned h = g_tex_hint[id];
-        if (h && g_dr.tex[h - 1].id == id) {
-            return &g_dr.tex[h - 1];
+    for (unsigned i = tex_map_home(id); g_tex_map[i]; i = (i + 1) & (TEX_MAP - 1)) {
+        HleVkTex *t = &g_dr.tex[g_tex_map[i] - 1];
+        if (t->id == id) {
+            return t;
         }
-        if (g_tex_miss[id] == g_tex_gen) {
-            return NULL;
-        }
-    }
-    for (unsigned i = 0; i < HLE_MAX_TEX; i++) {
-        if (g_dr.tex[i].id == id) {
-            if (id < TEX_IDS) {
-                g_tex_hint[id] = i + 1;
-            }
-            return &g_dr.tex[i];
-        }
-    }
-    if (id < TEX_IDS) {
-        g_tex_miss[id] = g_tex_gen;
     }
     return NULL;
 }
@@ -941,6 +974,9 @@ static void tex_free(HleVkTex *t)
         g_retire[g_nretire++] = (typeof(g_retire[0])){
             .img = t->img, .view = t->view, .cube_view = t->cube_view, .mem = t->mem,
             .slot = t->slot, .after = HLE_SURF_PARKED };
+    }
+    if (t->id) {
+        tex_map_del(t);
     }
     memset(t, 0, sizeof(*t));
 }
@@ -1004,13 +1040,14 @@ void hle_draw_cmd_tex(const HleCmdTex *c, VkCommandBuffer cb)
         *t = (HleVkTex){ .id = c->id, .xfmt = c->xfmt, .w = c->w, .h = c->h, .d = cd,
                          .levels = c->levels, .faces = c->faces, .fmt = tf.fmt,
                          .vol = cd > 1 };
-        g_tex_gen++;                    /* remembered misses may now hit */
+        tex_map_put(t);
         if (!make_image(t, &tf, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)) {
             static unsigned s_fail;
             if (s_fail++ < 8) {
                 hle_log("hakuX-hle-back", "texture %u (%ux%u fmt 0x%x): image not created "
                         "(sampled white)", c->id, c->w, c->h, c->xfmt);
             }
+            tex_map_del(t);
             t->id = 0;
             return;
         }
@@ -1595,9 +1632,10 @@ static uint32_t sampler_index(const uint32_t *tss, uint32_t lod_down)
                    (uint64_t)(tss[TSS_ADDRESSW] & 7) << 15 | (uint64_t)base << 18 |
                    (uint64_t)tss[TSS_BORDERCOLOR] << 32;
     uint64_t key2 = tss[TSS_MIPMAPLODBIAS] | (uint64_t)lod_down << 32;
-    /* one per stage a draw: the index last found for the key's hash, before the scan */
-    static uint16_t hot[64];
-    unsigned h = (unsigned)(((key ^ key2 * 0x9E3779B97F4A7C15ull) * 0xFF51AFD7ED558CCDull) >> 58);
+    /* one per stage a draw: the index last found for the key's hash, before the scan
+     * (64 of them collided often enough to be ~2% of the render thread) */
+    static uint16_t hot[1024];
+    unsigned h = (unsigned)(((key ^ key2 * 0x9E3779B97F4A7C15ull) * 0xFF51AFD7ED558CCDull) >> 54);
     uint32_t i = hot[h];
     if (i < g_dr.nsmp && g_dr.smp[i].key == key && g_dr.smp[i].key2 == key2) {
         return i;
