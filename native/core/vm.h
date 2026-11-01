@@ -62,6 +62,14 @@ void nc_vm_protect_pages(NcVm *vm, uint32_t pa, uint32_t n, bool ro);
  * wants (off). The host's view (vm->phys) keeps its access. */
 void nc_vm_noaccess(NcVm *vm, uint32_t pa, uint32_t n, bool on);
 bool nc_vm_noaccess_has(NcVm *vm, uint32_t pa);
+/* A guest access's fault at host address at, on physical page pa that write
+ * tracking doesn't hold (wp 0) and that isn't closed: the view opened, as an
+ * untracked page is writable everywhere (a fault taken just before another
+ * thread unprotected the page finds it so: the access runs again). Under the
+ * protection lock, so a tracker meanwhile isn't undone; a page tracked or
+ * closed by then, or a view unmapped or mapped to another page, is left to
+ * the access's next fault. False if mprotect fails. */
+bool nc_vm_open_untracked(NcVm *vm, uint32_t pa, void *at);
 
 /* Before host code writes guest memory through a system call (read/pread
  * into a guest buffer: a protected page fails the call instead of faulting):
