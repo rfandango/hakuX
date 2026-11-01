@@ -38,6 +38,7 @@ profile-out-*/
 /android/app/src/main/jniLibs/arm64-v8a/libfile_redirect_hook.so
 /android/app/src/main/jniLibs/arm64-v8a/libgsl_alloc_hook.so
 /android/app/src/main/jniLibs/arm64-v8a/libhook_impl.so
+/android/app/src/main/jniLibs/arm64-v8a/libkgsl_context_hook.so
 
 # local agent instructions (not versioned)
 /CLAUDE.md
