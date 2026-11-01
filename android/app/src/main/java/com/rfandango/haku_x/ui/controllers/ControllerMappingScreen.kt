@@ -58,6 +58,7 @@ import com.rfandango.haku_x.ui.common.SwitchItem
 import kotlinx.coroutines.delay
 
 private const val TEST_IDLE_MS = 4000L
+private var startingEventTime: Long? = null
 
 /** The Duke's inputs, as the screen names them. */
 private val INPUT_NAMES = mapOf(
@@ -82,7 +83,15 @@ private val INPUT_NAMES = mapOf(
 private fun captured(e: android.view.InputEvent, input: XInput, rest: FloatArray): Binding? {
   if (e is KeyEvent) {
     if (input.stick || e.action != KeyEvent.ACTION_DOWN || e.repeatCount != 0) return null
-    return Binding.Key(e.keyCode)
+      val currentEventTime = e.eventTime
+      if(startingEventTime == null) {
+          startingEventTime = currentEventTime
+      }
+      val startTime = startingEventTime
+      val ignoreKeyPress = startTime == null || (currentEventTime - startTime) < 100L
+      if(!ignoreKeyPress) {
+          return Binding.Key(e.keyCode)
+      }
   }
   if (e !is MotionEvent || e.actionMasked != MotionEvent.ACTION_MOVE) return null
   var best = -1
@@ -94,7 +103,7 @@ private fun captured(e: android.view.InputEvent, input: XInput, rest: FloatArray
       best = a
     }
   }
-  if (best < 0 || kotlin.math.abs(delta) < 0.01f) return null
+  if (best < 0 || kotlin.math.abs(delta) < 0.6f) return null
   return Binding.Axis(best, if (delta < 0) -1 else 1)
 }
 
@@ -247,6 +256,7 @@ fun ControllerMappingScreen(deviceId: Int, onBack: () -> Unit) {
             modifier = Modifier.clickable {
               rest = pad.axes.copyOf()
               testing = false
+              startingEventTime = null
               capturing = input
             },
           )
