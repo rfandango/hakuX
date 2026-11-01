@@ -284,6 +284,54 @@ static uint64_t RtlRaiseException(NcKernel *k, NcFrame *f, const uint32_t *a)
     return 0;
 }
 
+/* Called when a guest memory access faults in translated code; f holds the
+ * guest state at the faulting instruction. When the Xbox kernel's page-fault
+ * handler can't satisfy an access, it raises STATUS_ACCESS_VIOLATION and lets
+ * the thread's SEH handlers deal with it. This does the same.
+ * ExceptionInformation[0] is 1 for a write and 0 for a read, and [1] is the
+ * address.
+ *
+ * Some titles' file streams depend on this: they only reserve their buffers,
+ * and their exception handler commits and fills each page the first time the
+ * game reads it.
+ *
+ * Returns false if there is no current thread, the thread has no SEH
+ * handler, there is no mapped stack below ESP to run the dispatch on, or the
+ * dispatch can't be set up. The caller then reports the fault as a crash. */
+#define STATUS_ACCESS_VIOLATION 0xC0000005u
+
+bool nc_seh_access_violation(NcKernel *k, NcFrame *f, uint32_t va, bool write)
+{
+    NcThread *t = k->current;
+    const uint32_t esp = nc_frame_gpr(f, NC_ESP), eip = nc_frame_eip(f);
+    const uint32_t lo = (esp - LV_SIZE) & ~15u;
+    if (!t || chain_head(k) == CHAIN_END || nc_vm_phys(k->vm, lo) == UINT32_MAX ||
+        nc_vm_phys(k->vm, esp - 1) == UINT32_MAX) {
+        return false;
+    }
+    NcSeh *l = push_level(k, f, t, esp);
+    if (!l) {
+        return false;
+    }
+    l->rec = l->base + LV_REC;
+    uint8_t *r = nc_vm_host(k->vm, l->rec);
+    memset(r, 0, ER_SIZE);
+    nc_wr32(r + ER_CODE, STATUS_ACCESS_VIOLATION);
+    nc_wr32(r + ER_ADDRESS, eip);
+    nc_wr32(r + ER_NPARAMS, 2);
+    nc_wr32(r + ER_INFO, write ? 1u : 0u);
+    nc_wr32(r + ER_INFO + 4, va);
+    capture(k, f, l->ctx, eip, esp);
+    l->reg = chain_head(k);
+    static unsigned s_logged;
+    if (s_logged++ < 32) {
+        nc_log("hakuX-native", "seh: t%u access violation at %08x, %s %08x: to the title's handlers", t->id, eip,
+               write ? "writing" : "reading", va);
+    }
+    step(k, f, t);
+    return true;
+}
+
 /* RtlUnwind(TargetFrame, TargetIp, ExceptionRecord, ReturnValue): calls the
  * handlers above TargetFrame to unwind and unlinks them, then returns. */
 static uint64_t RtlUnwind(NcKernel *k, NcFrame *f, const uint32_t *a)

@@ -450,7 +450,8 @@ bool nc_core_fault(NcCore *c, int sig, siginfo_t *info, void *ucontext)
         nc_log("hakuX-native-frontier", "guest fault at %08x (wrapped address), eip %08x", (uint32_t)va,
                nc_frame_eip(f));
     }
-    if (!nc_kernel_page_fault(&c->kernel, f, (uint32_t)va, nc_cpu_fault_is_write(ucontext))) {
+    if (!nc_kernel_page_fault(&c->kernel, f, (uint32_t)va, nc_cpu_fault_is_write(ucontext)) &&
+        !nc_seh_access_violation(&c->kernel, f, (uint32_t)va, nc_cpu_fault_is_write(ucontext))) {
         return fault_report(c, pc, va, "the title doesn't handle it");
     }
     nc_cpu_fault_resume(c->cpu, ucontext);
