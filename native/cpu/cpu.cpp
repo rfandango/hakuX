@@ -540,6 +540,64 @@ extern "C" bool nc_cpu_fault_is_write(const void* ucontext) {
   return Esr && (Esr->esr >> 6) & 1; // ISS.WnR of a data abort
 }
 
+// Fixes up ECX and EDI (and ESI for MOVS) when a REP MOVS or REP STOS faults
+// partway.
+//
+// On x86, a fault in the middle of a REP string instruction leaves ECX, ESI
+// and EDI at the element that faulted. If a handler maps the page and
+// continues, the copy picks up from there.
+//
+// FEX runs the whole instruction as one MemCpy or MemSet loop instead. The
+// loop tracks its progress in TMP2 (x1, the host address of the next
+// destination element) and writes ECX, ESI and EDI back only when it
+// finishes. At a fault the frame still holds their values from the start of
+// the instruction, so resuming would restart the copy from the beginning.
+//
+// Titles' file streams can depend on this: some commit 64 KiB windows as a
+// REP MOVSD reads through them, and decommit the window behind. A copy
+// restarted from the beginning faulted on that decommitted window again and
+// again.
+//
+// Only forward copies (DF clear) are handled: the backward loops offset TMP2
+// by a chunk, so x1 doesn't map back to an element as simply.
+static void RepProgress(NcCpu* cpu, FEXCore::Core::CPUState& S, const ucontext_t* uc, uint32_t EFlags) {
+  if (EFlags & (1u << 10)) {
+    return;
+  }
+  const auto* Membase = static_cast<const uint8_t*>(cpu->Sys.Cfg.membase);
+  const auto* Insn = Membase + static_cast<uint32_t>(S.rip);
+  bool Rep = false, Op16 = false;
+  unsigned p = 0;
+  for (; p < 8; p++) {
+    const uint8_t b = Insn[p];
+    if (b == 0xF2 || b == 0xF3) {
+      Rep = true;
+    } else if (b == 0x66) {
+      Op16 = true;
+    } else if (b != 0x26 && b != 0x2E && b != 0x36 && b != 0x3E && b != 0x64 && b != 0x65) {
+      break;
+    }
+  }
+  const uint8_t Opc = Insn[p];
+  const bool Movs = Opc == 0xA4 || Opc == 0xA5;
+  if (!Rep || (!Movs && Opc != 0xAA && Opc != 0xAB)) {
+    return;
+  }
+  const uint32_t Size = (Opc & 1) ? (Op16 ? 2 : 4) : 1;
+  const uint32_t Edi = static_cast<uint32_t>(S.gregs[FEXCore::X86State::REG_RDI]);
+  const uint32_t Ecx = static_cast<uint32_t>(S.gregs[FEXCore::X86State::REG_RCX]);
+  const uint32_t Next = static_cast<uint32_t>(uc->uc_mcontext.regs[1] - reinterpret_cast<uintptr_t>(Membase));
+  const uint32_t Done = (Next - Edi) / Size;
+  if (Done == 0 || Done > Ecx) {
+    return;
+  }
+  S.gregs[FEXCore::X86State::REG_RDI] = Edi + Done * Size;
+  S.gregs[FEXCore::X86State::REG_RCX] = Ecx - Done;
+  if (Movs) {
+    S.gregs[FEXCore::X86State::REG_RSI] = static_cast<uint32_t>(S.gregs[FEXCore::X86State::REG_RSI]) + Done * Size;
+  }
+}
+
 // As FEX's front ends do before they deliver a guest signal: the guest PC from the
 // host PC, the statically allocated registers and the flags from the host context.
 extern "C" NcFrame* nc_cpu_fault_frame(NcCpu* cpu, void* ucontext) {
@@ -564,6 +622,7 @@ extern "C" NcFrame* nc_cpu_fault_frame(NcCpu* cpu, void* ucontext) {
   const uint32_t EFlags = cpu->CTX->ReconstructCompactedEFLAGS(
     Thread, true, reinterpret_cast<const uint64_t*>(uc->uc_mcontext.regs), uc->uc_mcontext.pstate);
   cpu->CTX->SetFlagsFromCompactedEFLAGS(Thread, EFlags);
+  RepProgress(cpu, S, uc, EFlags);
   return reinterpret_cast<NcFrame*>(Thread->CurrentFrame);
 }
 
