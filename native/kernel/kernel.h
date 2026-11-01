@@ -407,6 +407,13 @@ void nc_kernel_apu_spin(NcKernel *k, NcFrame *f);
 /* seh.c: RtlRaiseException and RtlUnwind, and their stubs. */
 void nc_seh_register(NcKernel *k);
 void nc_seh_stub(NcKernel *k, NcFrame *f, unsigned ordinal);
+/* A guest access to va faulted in translated code (f is the guest state
+ * there), and the title has no page-fault handler of its own. Dispatches
+ * STATUS_ACCESS_VIOLATION to the thread's SEH handlers and returns true.
+ * Returns false if the thread has no handlers, no stack room for the
+ * dispatch, or the dispatch can't be set up; the fault then crashes the
+ * guest. */
+bool nc_seh_access_violation(NcKernel *k, NcFrame *f, uint32_t va, bool write);
 /* After the XBE is loaded: what the kernel exposes about the title. xbe_fd:
  * the XBE's host file when it isn't on the disc (else -1). */
 void nc_kernel_title_loaded(NcKernel *k, const struct NcDisc *disc, const struct NcDiscFile *xbe, int xbe_fd,
