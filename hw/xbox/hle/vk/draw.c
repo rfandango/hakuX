@@ -931,13 +931,32 @@ void hle_draw_tex_stamp(uint64_t value)
     }
 }
 
+/* Room for one more retired entry. Full: everything submitted is waited
+ * for and reaped; what the open recording retired (HLE_SURF_PARKED) stays,
+ * so a table full of those has none (the entry is then leaked, not written
+ * past the end). */
+static bool retire_room(void)
+{
+    if (g_nretire < TEX_RETIRE_MAX) {
+        return true;
+    }
+    hle_tl_wait(hle_tl_submitted());
+    hle_draw_tex_reap(hle_tl_completed());
+    if (g_nretire < TEX_RETIRE_MAX) {
+        return true;
+    }
+    static bool s_said;
+    if (!s_said) {
+        s_said = true;
+        hle_log("hakuX-hle-back", "retired textures: %u in one recording, the table's size: "
+                "later ones leaked (logged once)", TEX_RETIRE_MAX);
+    }
+    return false;
+}
+
 static void tex_free(HleVkTex *t)
 {
-    if (t->img) {
-        if (g_nretire == TEX_RETIRE_MAX) {
-            hle_tl_wait(hle_tl_submitted());    /* full: everything before is done */
-            hle_draw_tex_reap(hle_tl_completed());
-        }
+    if (t->img && retire_room()) {
         g_retire[g_nretire++] = (typeof(g_retire[0])){
             .img = t->img, .view = t->view, .cube_view = t->cube_view, .mem = t->mem,
             .slot = t->slot, .after = HLE_SURF_PARKED };
@@ -1119,12 +1138,10 @@ void hle_draw_forget_surf(uint32_t id)
             i++;
             continue;
         }
-        if (g_nretire == TEX_RETIRE_MAX) {
-            hle_tl_wait(hle_tl_submitted());
-            hle_draw_tex_reap(hle_tl_completed());
+        if (retire_room()) {            /* (none: the slot is leaked) */
+            g_retire[g_nretire++] = (typeof(g_retire[0])){
+                .slot = g_dr.sslot[i].slot, .after = HLE_SURF_PARKED };
         }
-        g_retire[g_nretire++] = (typeof(g_retire[0])){
-            .slot = g_dr.sslot[i].slot, .after = HLE_SURF_PARKED };
         g_dr.sslot[i] = g_dr.sslot[--g_dr.nsslot];
     }
 }
