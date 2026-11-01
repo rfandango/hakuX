@@ -56,9 +56,11 @@ import com.rfandango.haku_x.ui.common.Section
 import com.rfandango.haku_x.ui.common.SubScreen
 import com.rfandango.haku_x.ui.common.SwitchItem
 import kotlinx.coroutines.delay
+import kotlin.concurrent.fixedRateTimer
 
 private const val TEST_IDLE_MS = 4000L
-private var startingEventTime: Long? = null
+private var updatedAxis = false
+private val keyBindTimerLock = Any()
 
 /** The Duke's inputs, as the screen names them. */
 private val INPUT_NAMES = mapOf(
@@ -83,15 +85,7 @@ private val INPUT_NAMES = mapOf(
 private fun captured(e: android.view.InputEvent, input: XInput, rest: FloatArray): Binding? {
   if (e is KeyEvent) {
     if (input.stick || e.action != KeyEvent.ACTION_DOWN || e.repeatCount != 0) return null
-      val currentEventTime = e.eventTime
-      if(startingEventTime == null) {
-          startingEventTime = currentEventTime
-      }
-      val startTime = startingEventTime
-      val ignoreKeyPress = startTime == null || (currentEventTime - startTime) < 100L
-      if(!ignoreKeyPress) {
-          return Binding.Key(e.keyCode)
-      }
+     return Binding.Key(e.keyCode)
   }
   if (e !is MotionEvent || e.actionMasked != MotionEvent.ACTION_MOVE) return null
   var best = -1
@@ -176,8 +170,26 @@ fun ControllerMappingScreen(deviceId: Int, onBack: () -> Unit) {
         when {
           input != null -> {
             captured(e, input, rest)?.let { b ->
-              store(profile.copy(bind = profile.bind + (input to listOf(b))))
-              capturing = null
+              if(b is Binding.Axis) {
+                synchronized(keyBindTimerLock){
+                  updatedAxis = true;
+                }
+                store(profile.copy(bind = profile.bind + (input to listOf(b))))
+                capturing = null
+              }
+              else if (b is Binding.Key){
+                // Wait 100MS before actually apply the key press to allow correct axis movement if axis has a button on it too
+                val timerLength = 100L
+                fixedRateTimer(name = "key-bind-timer", initialDelay = timerLength, period = timerLength) {
+                  this.cancel() // Cancels the timer instantly so it won't repeat
+                  synchronized(keyBindTimerLock) {
+                    if (!updatedAxis) {
+                      store(profile.copy(bind = profile.bind + (input to listOf(b))))
+                      capturing = null
+                      }
+                    }
+                  }
+                }
             }
             true      /* while capturing, the controller's input is the capture's */
           }
@@ -256,7 +268,9 @@ fun ControllerMappingScreen(deviceId: Int, onBack: () -> Unit) {
             modifier = Modifier.clickable {
               rest = pad.axes.copyOf()
               testing = false
-              startingEventTime = null
+              synchronized(keyBindTimerLock) {
+                updatedAxis = false
+              }
               capturing = input
             },
           )
