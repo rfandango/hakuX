@@ -56,8 +56,11 @@ import com.rfandango.haku_x.ui.common.Section
 import com.rfandango.haku_x.ui.common.SubScreen
 import com.rfandango.haku_x.ui.common.SwitchItem
 import kotlinx.coroutines.delay
+import kotlin.concurrent.fixedRateTimer
 
 private const val TEST_IDLE_MS = 4000L
+private var updatedAxis = false
+private val keyBindTimerLock = Any()
 
 /** The Duke's inputs, as the screen names them. */
 private val INPUT_NAMES = mapOf(
@@ -167,8 +170,28 @@ fun ControllerMappingScreen(deviceId: Int, onBack: () -> Unit) {
         when {
           input != null -> {
             captured(e, input, rest)?.let { b ->
-              store(profile.copy(bind = profile.bind + (input to listOf(b))))
-              capturing = null
+              fun storeProfile() {
+                store(profile.copy(bind = profile.bind + (input to listOf(b))))
+                capturing = null
+              }
+              if(b is Binding.Axis) {
+                synchronized(keyBindTimerLock){
+                  updatedAxis = true;
+                }
+                storeProfile()
+              }
+              else if (b is Binding.Key){
+                // Wait 100MS before actually apply the key press to allow correct axis movement if axis has a button on it too
+                val timerLength = 100L
+                fixedRateTimer(name = "key-bind-timer", initialDelay = timerLength, period = timerLength) {
+                  this.cancel() // Cancels the timer instantly so it won't repeat
+                  synchronized(keyBindTimerLock) {
+                    if (!updatedAxis) {
+                      storeProfile()
+                    }
+                  }
+                }
+              }
             }
             true      /* while capturing, the controller's input is the capture's */
           }
@@ -247,6 +270,9 @@ fun ControllerMappingScreen(deviceId: Int, onBack: () -> Unit) {
             modifier = Modifier.clickable {
               rest = pad.axes.copyOf()
               testing = false
+              synchronized(keyBindTimerLock) {
+                updatedAxis = false
+              }
               capturing = input
             },
           )
