@@ -85,7 +85,7 @@ private val INPUT_NAMES = mapOf(
 private fun captured(e: android.view.InputEvent, input: XInput, rest: FloatArray): Binding? {
   if (e is KeyEvent) {
     if (input.stick || e.action != KeyEvent.ACTION_DOWN || e.repeatCount != 0) return null
-     return Binding.Key(e.keyCode)
+    return Binding.Key(e.keyCode)
   }
   if (e !is MotionEvent || e.actionMasked != MotionEvent.ACTION_MOVE) return null
   var best = -1
@@ -170,12 +170,15 @@ fun ControllerMappingScreen(deviceId: Int, onBack: () -> Unit) {
         when {
           input != null -> {
             captured(e, input, rest)?.let { b ->
+              fun storeProfile() {
+                store(profile.copy(bind = profile.bind + (input to listOf(b))))
+                capturing = null
+              }
               if(b is Binding.Axis) {
                 synchronized(keyBindTimerLock){
                   updatedAxis = true;
                 }
-                store(profile.copy(bind = profile.bind + (input to listOf(b))))
-                capturing = null
+                storeProfile()
               }
               else if (b is Binding.Key){
                 // Wait 100MS before actually apply the key press to allow correct axis movement if axis has a button on it too
@@ -184,12 +187,11 @@ fun ControllerMappingScreen(deviceId: Int, onBack: () -> Unit) {
                   this.cancel() // Cancels the timer instantly so it won't repeat
                   synchronized(keyBindTimerLock) {
                     if (!updatedAxis) {
-                      store(profile.copy(bind = profile.bind + (input to listOf(b))))
-                      capturing = null
-                      }
+                      storeProfile()
                     }
                   }
                 }
+              }
             }
             true      /* while capturing, the controller's input is the capture's */
           }
