@@ -2,6 +2,8 @@
  * Host test of native/kernel/xc_crypto.c against published vectors:
  * FIPS 180-1 (SHA-1), RFC 2202 (HMAC-SHA1), FIPS 46 worked example (DES),
  * the classic RC4 vector, and modexp against a 128-bit reference.
+ * Also checks that a signature from nc_xc_sign verifies with the synthetic
+ * XePublicKeyData.
  *
  *   gcc -O1 -I<repo> tests/native/xc/xc_test.c native/kernel/xc_crypto.c -o xc_test && ./xc_test
  */
@@ -118,6 +120,32 @@ int main(void)
         printf("%s modexp 64-bit #%d\n", got == want ? "PASS" : "FAIL", i);
         x = x * 6364136223846793005ull + 1442695040888963407ull;
     }
+    /* Run the signature through the public-key operation as XcPKEncPublic
+     * does. Read big-endian, the result must be 00 01 FF..FF 00 followed by
+     * the digest. */
+    uint8_t pub[NC_XC_PUBKEY_SIZE], sig[NC_XC_SIG_SIZE], digest[20];
+    for (int i = 0; i < 20; i++) {
+        digest[i] = (uint8_t)(0xA0 + i);
+    }
+    nc_xc_public_key(pub);
+    nc_xc_sign(digest, sig);
+    const unsigned kn = 0x108 / 4;
+    uint32_t sx[0x108 / 4] = {0}, se[0x108 / 4] = {0}, sm[0x108 / 4], sr[0x108 / 4];
+    memcpy(sx, sig, NC_XC_SIG_SIZE);
+    memcpy(&se[0], pub + 0x10, 4);
+    memcpy(sm, pub + 0x14, sizeof(sm));
+    nc_modexp(sr, sx, se, sm, kn);
+    uint8_t be[NC_XC_SIG_SIZE];
+    for (unsigned i = 0; i < NC_XC_SIG_SIZE; i++) {
+        be[i] = ((const uint8_t *)sr)[NC_XC_SIG_SIZE - 1 - i];
+    }
+    int blk = be[0] == 0 && be[1] == 1 && be[NC_XC_SIG_SIZE - 21] == 0 &&
+              memcmp(be + NC_XC_SIG_SIZE - 20, digest, 20) == 0;
+    for (unsigned i = 2; i < NC_XC_SIG_SIZE - 21; i++) {
+        blk &= be[i] == 0xFF;
+    }
+    g_fail += !blk;
+    printf("%s console key signature\n", blk ? "PASS" : "FAIL");
     printf("%s\n", g_fail ? "FAILED" : "all passed");
     return g_fail != 0;
 }
