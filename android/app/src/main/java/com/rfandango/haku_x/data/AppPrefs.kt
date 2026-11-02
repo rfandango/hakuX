@@ -144,6 +144,17 @@ class AppPrefs(context: Context) {
     get() = sp.getString(KEY_NETWORK, NET_OFF) ?: NET_OFF
     set(value) = sp.edit { putString(KEY_NETWORK, value) }
 
+  /** Voice chat: player 1's controller has an Xbox Live Communicator (the phone's microphone, or the
+   *  headset's), when the microphone may be used. Read at the next game start. */
+  var voiceChat: Boolean
+    get() = sp.getBoolean(KEY_VOICE_CHAT, false)
+    set(value) = sp.edit { putBoolean(KEY_VOICE_CHAT, value) }
+
+  /** Voice chat's noise gate: how quiet a sound still counts as talking (MIC_*). */
+  var micSensitivity: String
+    get() = sp.getString(KEY_MIC_SENSITIVITY, MIC_MEDIUM) ?: MIC_MEDIUM
+    set(value) = sp.edit { putString(KEY_MIC_SENSITIVITY, value) }
+
   /** LAN: consoles reached directly as well (another subnet, a VPN): "ip[:port], ...". */
   var lanPeers: String
     get() = sp.getString(KEY_LAN_PEERS, "") ?: ""
@@ -256,6 +267,20 @@ class AppPrefs(context: Context) {
     const val AV_STANDARD = "standard"
     const val AV_SVIDEO = "svideo"
     private const val KEY_NETWORK = "console_network"
+    private const val KEY_VOICE_CHAT = "voice_chat"
+    private const val KEY_MIC_SENSITIVITY = "voice_mic_sensitivity"
+    const val MIC_LOW = "low"
+    const val MIC_MEDIUM = "medium"
+    const val MIC_HIGH = "high"
+    const val MIC_ALWAYS = "always"
+
+    /** The core's micgate= for a sensitivity: the noise gate's threshold in dBFS, or "off". */
+    fun micGate(sensitivity: String) = when (sensitivity) {
+      MIC_LOW -> "-30"
+      MIC_HIGH -> "-46"
+      MIC_ALWAYS -> "off"
+      else -> "-38"
+    }
     private const val KEY_LAN_PEERS = "network_lan_peers"
     private const val KEY_KAI_ENGINE = "network_kai_engine"
     private const val KEY_INSIGNIA_DNS = "network_insignia_dns"

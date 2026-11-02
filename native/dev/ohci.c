@@ -105,7 +105,15 @@
 #define CC_NOERROR           0
 #define CC_STALL             4
 #define CC_DEVICENOTRESPONDING 5
+#define CC_DATAOVERRUN       8
 #define CC_DATAUNDERRUN      9
+
+/* Isochronous transfer descriptor (32 bytes): word 0 the starting frame, DI,
+ * FrameCount - 1 and CC; 1 BufferPage0; 2 NextTD; 3 BufferEnd; 4-7 eight
+ * Offset/PSW halfwords. */
+#define ITD_SF(x)  ((x) & 0xffffu)
+#define ITD_FC(x)  (((x) >> 24) & 7)
+#define PSW_CC_SHIFT 12
 
 typedef struct Ohci {
     NcVm *vm;
@@ -434,6 +442,82 @@ static bool service_td(Ohci *o, uint32_t ed_pa, uint32_t ed[4])
     return !(ed[2] & ED_H);
 }
 
+/* A packet of an isochronous TD: its first byte from Offset[n] (the page of
+ * BufferPage0 or, bit 12 set, of BufferEnd); it ends before the next one's
+ * first byte, the last at BufferEnd. */
+static uint32_t itd_addr(const uint32_t td[8], unsigned n)
+{
+    const uint16_t off = ((const uint16_t *)&td[4])[n];
+    return ((off & 0x1000) ? (td[3] & ~0xfffu) : (td[1] & ~0xfffu)) | (off & 0xfffu);
+}
+
+/* Service the head isochronous TD of an ED: the packet of this frame, if the
+ * TD has one (OpenHCI 4.3.2; as QEMU's OHCI, which the Communicator's driver
+ * runs on in xemu). One packet per frame; returns false (the ED is done for
+ * this frame). */
+static bool service_itd(Ohci *o, uint32_t ed_pa, uint32_t ed[4])
+{
+    const uint32_t td_pa = ed[2] & ~0x1fu & PTR_MASK;
+    uint32_t td[8];
+    if (!rd_words(o, td_pa, td, 8)) {
+        ed[2] |= ED_H;
+        wr_words(o, ed_pa + 8, &ed[2], 1);
+        return false;
+    }
+    const int16_t rel = (int16_t)(o->frame_number - ITD_SF(td[0]));
+    const unsigned fc = ITD_FC(td[0]);
+    if (rel < 0) {
+        return false;                   /* its first packet is for a later frame */
+    }
+    uint32_t cc = CC_NOERROR;
+    if ((unsigned)rel > fc) {
+        cc = CC_DATAOVERRUN;            /* its frames went by: retired as it is */
+    } else {
+        const uint32_t first = itd_addr(td, (unsigned)rel);
+        const uint32_t last = (unsigned)rel < fc ? itd_addr(td, (unsigned)rel + 1) - 1 : td[3];
+        const uint32_t len = last + 1 == first ? 0 : td_len(first, last);
+        static uint8_t buf[1024];
+        const bool in = ED_D(ed[0]) == 2;
+        NcUsbDev *d = find_device(o, (uint8_t)ED_FA(ed[0]));
+        uint16_t psw = (uint16_t)(CC_DEVICENOTRESPONDING << PSW_CC_SHIFT);
+        if (d && d->data && len <= sizeof(buf)) {
+            if (in) {
+                int r = d->data(d, true, (int)ED_EN(ed[0]), buf, (int)len);
+                r = r < 0 ? 0 : MIN(r, (int)len); /* nothing to send: an empty packet */
+                if (r) {
+                    td_copy(o, first, last, buf, (uint32_t)r, true);
+                }
+                psw = (uint16_t)((CC_NOERROR << PSW_CC_SHIFT) | (uint32_t)r);
+            } else {
+                if (len) {
+                    td_copy(o, first, last, buf, len, false);
+                }
+                d->data(d, false, (int)ED_EN(ed[0]), buf, (int)len);
+                psw = (uint16_t)(CC_NOERROR << PSW_CC_SHIFT);
+            }
+        }
+        ((uint16_t *)&td[4])[rel] = psw;
+        o->tds++;
+        if ((unsigned)rel < fc) {
+            wr_words(o, td_pa + 16, &td[4], 4);
+            return false;
+        }
+    }
+
+    /* Retire: off the ED, onto the done queue. */
+    td[0] = (td[0] & ~(0xfu << TD_CC_SHIFT)) | (cc << TD_CC_SHIFT);
+    ed[2] = (td[2] & PTR_MASK) | (ed[2] & (ED_H | ED_C));
+    td[2] = o->done;
+    o->done = td_pa;
+    const int di = (int)TD_DI(td[0]);
+    if (di < o->done_count) {
+        o->done_count = di;
+    }
+    wr_words(o, td_pa, td, 8);
+    wr_words(o, ed_pa + 8, &ed[2], 1);
+    return false;
+}
+
 /* Walk an ED list; returns whether any ED had TDs queued. */
 static bool service_list(Ohci *o, uint32_t head, bool periodic)
 {
@@ -444,7 +528,13 @@ static bool service_list(Ohci *o, uint32_t head, bool periodic)
         if (!rd_words(o, pa, ed, 4)) {
             break;
         }
-        if (!(ed[0] & (ED_K | ED_F))) {
+        if (periodic && (ed[0] & (ED_K | ED_F)) == ED_F) {
+            /* isochronous (the Communicator's audio): this frame's packet */
+            if (!(ed[2] & ED_H) && (ed[2] & PTR_MASK) != (ed[1] & PTR_MASK)) {
+                active = true;
+                service_itd(o, pa, ed);
+            }
+        } else if (!(ed[0] & (ED_K | ED_F))) {
             unsigned tds = 0;
             while (!(ed[2] & ED_H) && (ed[2] & PTR_MASK) != (ed[1] & PTR_MASK) && tds < 64) {
                 active = true;
@@ -697,9 +787,18 @@ void nc_dev_ohci_init(struct NcVm *vm)
     const bool front_hub = fh && atoi(fh) != 0;
     g_front_hub = front_hub;
     NcUsbDev *front = front_hub && players ? nc_usb_hub_new(4) : NULL;
+    /* NC_VOICE_MASK (the app's voice=): the players with an Xbox Live
+     * Communicator in their controller's expansion slot A (hub port 2, as
+     * xemu's), for voice chat. */
+    const char *vmask = getenv("NC_VOICE_MASK");
+    const unsigned voice = vmask ? (unsigned)strtoul(vmask, NULL, 16) & 0xF : 0;
     for (unsigned p = 0; p < 4; p++) {
         g_pad_hub[p] = nc_usb_hub_new(3);
         nc_usb_hub_attach(g_pad_hub[p], 1, nc_xid_gamepad_new(p));
+        if ((voice >> p) & 1) {
+            nc_usb_hub_attach(g_pad_hub[p], 2, nc_xblc_new(p));
+            nc_log("hakuX-native-usb", "ohci: player %u's controller has a Communicator", p + 1);
+        }
         if (!((mask >> p) & 1)) {
             continue;
         }

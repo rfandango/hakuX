@@ -66,6 +66,13 @@ void nc_usb_reset(NcUsbDev *d);
 /* d or a device below it with this address. */
 NcUsbDev *nc_usb_find(NcUsbDev *d, uint8_t addr);
 
+/* xid.c: when player 0-3's buttons last went down or up (CLOCK_MONOTONIC ns, 0: never): the
+ * Communicator's noise gate doesn't open for the click. */
+uint64_t nc_xid_last_press_ns(unsigned player);
+
+/* xblc.c: the Xbox Live Communicator (voice chat) for player 0-3. */
+NcUsbDev *nc_xblc_new(unsigned player);
+
 /* usb_hub.c: a hub with nports downstream ports (1-based). */
 NcUsbDev *nc_usb_hub_new(unsigned nports);
 void nc_usb_hub_attach(NcUsbDev *hub, unsigned port, NcUsbDev *child);
