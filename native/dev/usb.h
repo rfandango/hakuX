@@ -66,6 +66,9 @@ void nc_usb_reset(NcUsbDev *d);
 /* d or a device below it with this address. */
 NcUsbDev *nc_usb_find(NcUsbDev *d, uint8_t addr);
 
+/* xblc.c: the Xbox Live Communicator (voice chat) for player 0-3. */
+NcUsbDev *nc_xblc_new(unsigned player);
+
 /* usb_hub.c: a hub with nports downstream ports (1-based). */
 NcUsbDev *nc_usb_hub_new(unsigned nports);
 void nc_usb_hub_attach(NcUsbDev *hub, unsigned port, NcUsbDev *child);

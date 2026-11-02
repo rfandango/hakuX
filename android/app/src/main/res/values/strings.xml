@@ -230,6 +230,8 @@
   <string name="settings_network_insignia">Xbox Live: Insignia</string>
   <string name="settings_network_insignia_dns">DNS server</string>
   <string name="settings_network_insignia_dns_default">Insignia\'s (%1$s)</string>
+  <string name="settings_network_voice">Voice chat</string>
+  <string name="settings_network_voice_desc">An Xbox Live Communicator in player 1\'s controller: talk with the device\'s microphone, or a plugged-in headset\'s, and hear the other players with the game\'s sound. For Xbox Live through Insignia and the games that talk over system link.</string>
   <string name="settings_network_insignia_dns_desc">Change it only if your Internet provider blocks Insignia\'s: the address of a computer running insigniaDNS on this network.</string>
   <string name="settings_network_lan">LAN: consoles on this network</string>
   <string name="settings_network_kai_mode">XLink Kai: over the Internet</string>

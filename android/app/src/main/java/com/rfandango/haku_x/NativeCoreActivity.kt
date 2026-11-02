@@ -1,5 +1,8 @@
 package com.rfandango.haku_x
 
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
+import android.Manifest
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
@@ -291,6 +294,12 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
      * connected controller plays as (later ones: syncPads). */
     plugged = Controllers.load(this).padMask(Controllers.connected())
     args += "pads=%x".format(plugged)
+    /* Voice chat: an Xbox Live Communicator in player 1's controller, its
+     * microphone the phone's (or the headset's), with the permission. */
+    if (prefs.voiceChat && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+      PackageManager.PERMISSION_GRANTED) {
+      args += "voice=1"
+    }
     /* The custom Vulkan driver installed in the settings (Turnip), loaded
      * by the core through adrenotools; none: the system driver. */
     GpuDriverHelper.init(this)

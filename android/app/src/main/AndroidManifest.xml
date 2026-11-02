@@ -12,6 +12,9 @@
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
   <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
   <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+  <!-- Voice chat (native/dev/xblc.c): the microphone, or the headset's, as the
+       Xbox Live Communicator's. Asked for when voice chat is turned on. -->
+  <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
   <application
     android:name=".HakuXApplication"
