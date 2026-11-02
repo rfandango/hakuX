@@ -53,6 +53,8 @@ bool nc_option(NcOptions *o, const char *arg)
         nc_io_set_device_time(atoi(v) != 0);    /* console timing (native/kernel/io.c) */
     } else if ((v = value(arg, "pads="))) {
         setenv("NC_PAD_MASK", v, 1);            /* read by the USB at boot (ohci.c) */
+    } else if ((v = value(arg, "voice="))) {
+        setenv("NC_VOICE_MASK", v, 1);          /* Communicators (voice chat), the same way */
     } else if ((v = value(arg, "video="))) {
         o->video = (int64_t)strtoul(v, NULL, 16);
     } else if ((v = value(arg, "avpack="))) {

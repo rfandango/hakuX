@@ -144,6 +144,12 @@ class AppPrefs(context: Context) {
     get() = sp.getString(KEY_NETWORK, NET_OFF) ?: NET_OFF
     set(value) = sp.edit { putString(KEY_NETWORK, value) }
 
+  /** Voice chat: player 1's controller has an Xbox Live Communicator (the phone's microphone, or the
+   *  headset's), when the microphone may be used. Read at the next game start. */
+  var voiceChat: Boolean
+    get() = sp.getBoolean(KEY_VOICE_CHAT, false)
+    set(value) = sp.edit { putBoolean(KEY_VOICE_CHAT, value) }
+
   /** LAN: consoles reached directly as well (another subnet, a VPN): "ip[:port], ...". */
   var lanPeers: String
     get() = sp.getString(KEY_LAN_PEERS, "") ?: ""
@@ -256,6 +262,7 @@ class AppPrefs(context: Context) {
     const val AV_STANDARD = "standard"
     const val AV_SVIDEO = "svideo"
     private const val KEY_NETWORK = "console_network"
+    private const val KEY_VOICE_CHAT = "voice_chat"
     private const val KEY_LAN_PEERS = "network_lan_peers"
     private const val KEY_KAI_ENGINE = "network_kai_engine"
     private const val KEY_INSIGNIA_DNS = "network_insignia_dns"
