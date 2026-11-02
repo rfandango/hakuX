@@ -232,6 +232,12 @@
   <string name="settings_network_insignia_dns_default">Insignia\'s (%1$s)</string>
   <string name="settings_network_voice">Voice chat</string>
   <string name="settings_network_voice_desc">An Xbox Live Communicator in player 1\'s controller: talk with the device\'s microphone, or a plugged-in headset\'s, and hear the other players with the game\'s sound. For Xbox Live through Insignia and the games that talk over system link.</string>
+  <string name="settings_network_mic">Microphone sensitivity</string>
+  <string name="settings_network_mic_desc">How quiet a sound still counts as talking: quieter sounds are muted, so the game doesn\'t show you as talking for background noise.</string>
+  <string name="settings_network_mic_low">Low (only clear speech)</string>
+  <string name="settings_network_mic_medium">Medium</string>
+  <string name="settings_network_mic_high">High (quiet voices too)</string>
+  <string name="settings_network_mic_always">Always on (no noise gate)</string>
   <string name="settings_network_insignia_dns_desc">Change it only if your Internet provider blocks Insignia\'s: the address of a computer running insigniaDNS on this network.</string>
   <string name="settings_network_lan">LAN: consoles on this network</string>
   <string name="settings_network_kai_mode">XLink Kai: over the Internet</string>

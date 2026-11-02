@@ -55,6 +55,8 @@ bool nc_option(NcOptions *o, const char *arg)
         setenv("NC_PAD_MASK", v, 1);            /* read by the USB at boot (ohci.c) */
     } else if ((v = value(arg, "voice="))) {
         setenv("NC_VOICE_MASK", v, 1);          /* Communicators (voice chat), the same way */
+    } else if ((v = value(arg, "micgate="))) {
+        setenv("NC_MIC_GATE", v, 1);            /* their microphones' noise gate: dBFS, or "off" */
     } else if ((v = value(arg, "video="))) {
         o->video = (int64_t)strtoul(v, NULL, 16);
     } else if ((v = value(arg, "avpack="))) {

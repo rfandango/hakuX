@@ -45,6 +45,8 @@ fun NetworkSettings(prefs: AppPrefs, onInsignia: () -> Unit) {
   var peersDialog by remember { mutableStateOf(false) }
   var kaiDialog by remember { mutableStateOf(false) }
   var dnsDialog by remember { mutableStateOf(false) }
+  var micDialog by remember { mutableStateOf(false) }
+  var mic by remember { mutableStateOf(prefs.micSensitivity) }
   val context = LocalContext.current
   fun micAllowed() =
     ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -98,6 +100,15 @@ fun NetworkSettings(prefs: AppPrefs, onInsignia: () -> Unit) {
       }
     },
   )
+  if (voice) {
+    ListItem(
+      headlineContent = { Text(stringResource(R.string.settings_network_mic)) },
+      supportingContent = {
+        Text(stringResource(micLabel(mic)) + ". " + stringResource(R.string.settings_network_mic_desc))
+      },
+      modifier = Modifier.clickable { micDialog = true },
+    )
+  }
   if (mode == AppPrefs.NET_LAN) {
     ListItem(
       headlineContent = { Text(stringResource(R.string.settings_network_peers)) },
@@ -126,6 +137,15 @@ fun NetworkSettings(prefs: AppPrefs, onInsignia: () -> Unit) {
       current = mode,
       onPick = { mode = it; prefs.networkMode = it; modeDialog = false },
       onDismiss = { modeDialog = false },
+    )
+  }
+  if (micDialog) {
+    ChoiceDialog(
+      title = stringResource(R.string.settings_network_mic),
+      options = MIC_LEVELS.map { it to stringResource(micLabel(it)) },
+      current = mic,
+      onPick = { mic = it; prefs.micSensitivity = it; micDialog = false },
+      onDismiss = { micDialog = false },
     )
   }
   if (peersDialog) {
@@ -185,4 +205,13 @@ private fun TextDialog(title: String, hint: String, value: String, onDone: (Stri
     confirmButton = { TextButton(onClick = { onDone(text) }) { Text(stringResource(android.R.string.ok)) } },
     dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.cancel)) } },
   )
+}
+
+private val MIC_LEVELS = listOf(AppPrefs.MIC_LOW, AppPrefs.MIC_MEDIUM, AppPrefs.MIC_HIGH, AppPrefs.MIC_ALWAYS)
+
+private fun micLabel(level: String) = when (level) {
+  AppPrefs.MIC_LOW -> R.string.settings_network_mic_low
+  AppPrefs.MIC_HIGH -> R.string.settings_network_mic_high
+  AppPrefs.MIC_ALWAYS -> R.string.settings_network_mic_always
+  else -> R.string.settings_network_mic_medium
 }

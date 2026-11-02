@@ -14,11 +14,30 @@
  * game's. The USB frame thread only moves samples through two rings; the
  * streams open on a thread of their own when the title first moves audio (the
  * microphone isn't held until a game uses it), and again at each rate it sets.
+ *
+ * A noise gate sits on the microphone (NC_MIC_GATE, dBFS; "off" for none):
+ * the titles show a player as talking for any sound at all, so the
+ * microphone sends silence unless someone speaks. A 100 Hz low cut goes
+ * first (hum and rumble). A 10 ms window counts as speech when it is above
+ * the threshold, 10 dB above the background (the quietest window of the last
+ * 2 s: speech pauses within that, while a hum, a fan or the game's own sound
+ * from the speaker doesn't) and voiced: the last 30 ms repeat at a pitch of
+ * 80-400 Hz (normalized autocorrelation of 0.6 or more). The device's sticks
+ * rub and click right by its microphone as loud as a voice, but have no
+ * pitch: on a recording from a Retroid Pocket Flip 2, stick and button noise
+ * never opened the gate, and speech, with the stick moving or not, did. Two
+ * such windows in a row open it, one keeps it open, and it stays open 400 ms
+ * after the last (the ends of words), fading in and out over a few
+ * milliseconds. It doesn't open within 150 ms of a button going down or up
+ * on the player's controller either (the click).
  */
 #include "native/dev/usb.h"
 
 #include <aaudio/AAudio.h>
+#include <math.h>
 #include <pthread.h>
+#include <stdio.h>
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -32,6 +51,7 @@
 /* Samples queued at most: the microphone's 100 ms (as xemu: older ones are
  * dropped, the voice stays live), the headphone's 200 ms. */
 #define RING_SAMPLES 8192
+#define VOICE_HIST 2048          /* 30 ms up to 48 kHz */
 
 static const uint8_t k_dev_desc[18] = {
     18, 1, 0x10, 0x01, /* USB 1.1 */
@@ -70,7 +90,169 @@ typedef struct Xblc {
     AAudioStream *in, *out;
     bool started;                /* the title has moved audio: the streams are open */
     bool logged_no_mic;
+    /* the microphone's noise gate (on_mic's thread) */
+    double gate_threshold;       /* RMS of a window that opens it (0: no gate) */
+    double win_sq, peak_db;      /* the window's sum of squares; the loudest window this second (NC_TRACE_MIC) */
+    double floor_db;             /* the background: the quietest window of the last FLOOR_BLOCKS */
+    double block_min[4];         /* each 500 ms block's quietest window, the current one last */
+    int block_n;
+    double hp_x, hp_y;           /* the low cut's last input and output */
+    double win_sum, dc;          /* the window's sum before the low cut; this second's mean (NC_TRACE_MIC) */
+    int16_t hist[VOICE_HIST];    /* the low cut's output, for the voicing */
+    unsigned hist_at;
+    int win_n, above, hold, trace_n;
+    float gain;
+    bool trace;
+    int unvoiced;                /* loud windows this second that weren't voiced (NC_TRACE_MIC) */
+    FILE *dump;                  /* NC_MIC_DUMP: the microphone's raw samples, its first 60 s */
+    long dumped;
 } Xblc;
+
+#define GATE_WINDOW_MS 10
+#define GATE_HOLD_MS   400
+#define GATE_ATTACK_MS 5
+#define GATE_RELEASE_MS 30
+#define GATE_MARGIN_DB 10        /* above the background */
+#define FLOOR_BLOCK_WINDOWS 50   /* 500 ms; 4 blocks: 2 s */
+#define LOW_CUT_HZ 100
+#define CLICK_MS 150             /* after a button, not opened */
+#define VOICE_MS 30              /* the voicing's span */
+#define VOICED 0.6               /* its threshold */
+
+/* How periodic the last VOICE_MS are at a pitch of 80-400 Hz: the highest
+ * autocorrelation over those lags, normalized by the energy and the overlap
+ * (1: a pure tone; noise, clicks: low). */
+static double voicing(const Xblc *x, int rate)
+{
+    static double f[VOICE_HIST];
+    const int n = rate * VOICE_MS / 1000, lo = rate / 400, hi = rate / 80;
+    if (n > VOICE_HIST || hi >= n) {
+        return 1;
+    }
+    double mean = 0;
+    for (int i = 0; i < n; i++) {
+        f[i] = x->hist[(x->hist_at + VOICE_HIST - n + i) % VOICE_HIST];
+        mean += f[i];
+    }
+    mean /= n;
+    double e = 0;
+    for (int i = 0; i < n; i++) {
+        f[i] -= mean;
+        e += f[i] * f[i];
+    }
+    if (e <= 0) {
+        return 0;
+    }
+    double best = 0;
+    for (int lag = lo; lag < hi; lag++) {
+        double ac = 0;
+        for (int i = 0; i + lag < n; i++) {
+            ac += f[i] * f[i + lag];
+        }
+        ac = ac / e * n / (n - lag);
+        best = ac > best ? ac : best;
+    }
+    return best;
+}
+
+/* The noise gate, in place on the microphone's samples at its rate. */
+static void gate(Xblc *x, int16_t *s, int n, int rate)
+{
+    if (x->dump && rate > 0) {
+        fwrite(s, sizeof(int16_t), (size_t)n, x->dump);
+        x->dumped += n;
+        if (x->dumped >= 60L * rate) {
+            fclose(x->dump);
+            x->dump = NULL;
+            nc_log("hakuX-native-usb", "communicator %u: microphone recording done (%d Hz)", x->player + 1, rate);
+        }
+    }
+    if (x->gate_threshold <= 0 || rate <= 0) {
+        return;
+    }
+    const int win = rate * GATE_WINDOW_MS / 1000;
+    const float up = 1.0f / (rate * GATE_ATTACK_MS / 1000), down = 1.0f / (rate * GATE_RELEASE_MS / 1000);
+    const double r = exp(-2 * M_PI * LOW_CUT_HZ / rate);
+    for (int i = 0; i < n; i++) {
+        /* one-pole high-pass */
+        const double in = s[i];
+        x->hp_y = r * (x->hp_y + in - x->hp_x);
+        x->hp_x = in;
+        x->win_sum += in;
+        const double v = x->hp_y;
+        x->win_sq += v * v;
+        x->hist[x->hist_at] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+        x->hist_at = (x->hist_at + 1) % VOICE_HIST;
+        if (++x->win_n >= win) {
+            const double rms = sqrt(x->win_sq / x->win_n);
+            const double db = rms > 0 ? 20 * log10(rms / 32768.0) : -96;
+            double *cur = &x->block_min[3];
+            *cur = db < *cur ? db : *cur;
+            x->floor_db = x->block_min[0];
+            for (int b = 1; b < 4; b++) {
+                x->floor_db = x->block_min[b] < x->floor_db ? x->block_min[b] : x->floor_db;
+            }
+            if (++x->block_n >= FLOOR_BLOCK_WINDOWS) {
+                memmove(x->block_min, x->block_min + 1, 3 * sizeof(double));
+                x->block_min[3] = 0;
+                x->block_n = 0;
+            }
+            const bool loud = rms >= x->gate_threshold && db >= x->floor_db + GATE_MARGIN_DB;
+            const double voiced = loud ? voicing(x, rate) : 0;
+            x->above = loud && voiced >= VOICED ? x->above + 1 : 0;
+            if (x->trace && loud && voiced < VOICED) {
+                x->unvoiced++;
+            }
+            /* two windows in a row to open, one to keep it open */
+            if (x->hold > 0 && x->above) {
+                x->hold = rate * GATE_HOLD_MS / 1000;
+            } else if (x->hold <= 0 && x->above >= 2) {
+                struct timespec ts;
+                clock_gettime(CLOCK_MONOTONIC, &ts);
+                const uint64_t now = (uint64_t)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec;
+                const uint64_t press = nc_xid_last_press_ns(x->player);
+                const double since = press ? (now - press) / 1e6 : 1e9;
+                if (since < CLICK_MS) {
+                    x->above = 0;
+                    if (x->trace) {
+                        nc_log("hakuX-native-usb", "communicator %u: %.0f dBFS %.0f ms after a button: not opened",
+                               x->player + 1, db, since);
+                    }
+                } else {
+                    x->hold = rate * GATE_HOLD_MS / 1000;
+                    if (x->trace) {
+                        nc_log("hakuX-native-usb", "communicator %u: opened at %.0f dBFS (background %.0f, voicing %.2f, button %.0f ms ago)",
+                               x->player + 1, db, x->floor_db, voiced, since < 1e8 ? since : -1);
+                    }
+                }
+            }
+            if (x->trace) {
+                x->peak_db = db > x->peak_db ? db : x->peak_db;
+                x->dc += x->win_sum / x->win_n;
+                if (++x->trace_n >= 1000 / GATE_WINDOW_MS) {
+                    nc_log("hakuX-native-usb", "communicator %u: microphone peak %.0f dBFS, background %.0f, offset %.0f, %d loud windows unvoiced, gate %s",
+                           x->player + 1, x->peak_db, x->floor_db, x->dc / x->trace_n, x->unvoiced,
+                           x->hold > 0 ? "open" : "closed");
+                    x->trace_n = 0;
+                    x->unvoiced = 0;
+                    x->peak_db = -96;
+                    x->dc = 0;
+                }
+            }
+            x->win_sq = 0;
+            x->win_sum = 0;
+            x->win_n = 0;
+        }
+        if (x->hold > 0) {
+            x->hold--;
+            x->gain = x->gain + up < 1 ? x->gain + up : 1;
+        } else {
+            x->gain = x->gain - down > 0 ? x->gain - down : 0;
+        }
+        const double g = v * x->gain;
+        s[i] = (int16_t)(g > 32767 ? 32767 : g < -32768 ? -32768 : g);
+    }
+}
 
 static void ring_put(Ring *r, int16_t v)
 {
@@ -124,6 +306,7 @@ static aaudio_data_callback_result_t on_mic(AAudioStream *s, void *user, void *d
 {
     Xblc *x = user;
     pthread_mutex_lock(&x->lock);
+    gate(x, data, frames, x->mic_rate > 0 ? x->mic_rate : x->rate);
     resample_put(&x->mic, data, frames, x->mic_rate, x->rate, &x->mic_pos, &x->mic_last);
     pthread_mutex_unlock(&x->lock);
     return AAUDIO_CALLBACK_RESULT_CONTINUE;
@@ -301,6 +484,23 @@ NcUsbDev *nc_xblc_new(unsigned player)
     pthread_mutex_init(&x->lock, NULL);
     pthread_mutex_init(&x->streams, NULL);
     x->rate = 16000;                /* the Communicator's until the title sets one */
+    /* the noise gate's threshold in dBFS (-38 when unset; "off": none) */
+    const char *g = getenv("NC_MIC_GATE");
+    if (!g || strcmp(g, "off")) {
+        const double db = g ? atof(g) : -38;
+        x->gate_threshold = db < 0 ? 32768.0 * pow(10, db / 20) : 0;
+    }
+    x->trace = getenv("NC_TRACE_MIC") != NULL;
+    const char *dump = getenv("NC_MIC_DUMP");
+    if (dump && player == 0) {
+        x->dump = fopen(dump, "wb");
+    }
+    x->peak_db = -96;
+    for (int b = 0; b < 4; b++) {
+        x->block_min[b] = 0;    /* nothing heard yet: no background */
+    }
+    x->floor_db = -96;
+    nc_log("hakuX-native-usb", "communicator %u: noise gate %s", player + 1, x->gate_threshold > 0 ? (g ? g : "-38") : "off");
     x->mic.max = x->rate / 10;
     x->phone.max = x->rate / 5;
     x->dev.name = "communicator";

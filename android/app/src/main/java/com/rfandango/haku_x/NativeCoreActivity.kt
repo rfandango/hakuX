@@ -299,6 +299,7 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
     if (prefs.voiceChat && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
       PackageManager.PERMISSION_GRANTED) {
       args += "voice=1"
+      args += "micgate=" + AppPrefs.micGate(prefs.micSensitivity)
     }
     /* The custom Vulkan driver installed in the settings (Turnip), loaded
      * by the core through adrenotools; none: the system driver. */
