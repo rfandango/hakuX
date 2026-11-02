@@ -229,13 +229,54 @@ static bool xmv_wait_on(void)
     return strcmp(v, "0") != 0;
 }
 
-/* The XMV stream waits in [va, va + len): how many were patched. */
+/* Crimson Skies (the disc and both title updates) copies a 512x512 DXT1
+ * image into its texture with the image's 8-byte header {1, size} in front:
+ *
+ *     mov ecx, 0x8002              ; 0x20008 bytes, the texture holds 0x20000
+ *     mov esi, <header>
+ *     push ebp
+ *     rep movsd
+ *
+ * The last 8 bytes land past the texture. On the console what follows takes
+ * them; here, in the boot the title restarts into after the profile is
+ * picked, the USB driver's HCCA did: interrupt table slot 1 became a pointer
+ * to nowhere, the OHCI walked it and retired a TD the driver never queued,
+ * and its done-queue handler crashed (0x290B08). The copy stops at the
+ * texture's end; what it holds is as before. Only where the header's size
+ * shows the copy 8 bytes too long. */
+static const uint8_t k_hdr_copy[] = {0xB9, 0x02, 0x80, 0x00, 0x00, 0xBE}; /* mov ecx, 0x8002 ; mov esi, imm32 */
+#define HDR_COPY_LEN (sizeof(k_hdr_copy) + 4 + 3) /* ... push ebp ; rep movsd */
+
+static unsigned overrun_copy_fixups(NcKernel *k, uint32_t va, uint32_t len, const char *name)
+{
+    unsigned patched = 0;
+    const uint8_t *base = nc_vm_host(k->vm, va), *end = base + len, *p = base;
+    while ((p = memmem(p, (size_t)(end - p), k_hdr_copy, sizeof(k_hdr_copy))) != NULL) {
+        const uint32_t m = va + (uint32_t)(p - base);
+        if (end - p >= (ptrdiff_t)HDR_COPY_LEN && p[10] == 0x55 && p[11] == 0xF3 && p[12] == 0xA5) {
+            uint32_t src;
+            memcpy(&src, p + sizeof(k_hdr_copy), 4);
+            if (nc_vm_phys(k->vm, src) != UINT32_MAX && nc_vm_phys(k->vm, src + 7) != UINT32_MAX &&
+                nc_vm_rd32(k->vm, src) == 1 && nc_vm_rd32(k->vm, src + 4) == 0x20000) {
+                ((uint8_t *)nc_vm_host(k->vm, m))[1] = 0x00; /* mov ecx, 0x8000 */
+                patched++;
+                nc_log("hakuX-native", "fixups: the image copy at %08x (%s) stops at its texture's end "
+                       "(8 bytes past it were the USB controller's)", m, name);
+            }
+        }
+        p += sizeof(k_hdr_copy);
+    }
+    return patched;
+}
+
+/* The fixups in [va, va + len) (the overrunning image copy, XMV's stream
+ * waits): how many were patched. */
 static unsigned section_fixups(NcKernel *k, uint32_t va, uint32_t len, const char *name)
 {
+    unsigned patched = overrun_copy_fixups(k, va, len, name);
     if (!xmv_wait_on()) {
-        return 0;                       /* debug.hakux.xmvwait=0: XMV as it is (A/B) */
+        return patched;                 /* debug.hakux.xmvwait=0: XMV as it is (A/B) */
     }
-    unsigned patched = 0;
     const uint8_t *base = nc_vm_host(k->vm, va), *end = base + len, *p = base;
     while ((p = memmem(p, (size_t)(end - p), k_xmv_wait, sizeof(k_xmv_wait))) != NULL) {
         const uint32_t m = va + (uint32_t)(p - base);
