@@ -246,7 +246,7 @@ object ModRun {
       lines += "cheat\t${if (choices.cheat(c.name)) 1 else 0}\t${if (c.once) 1 else 0}\t${c.name}"
       for (l in c.code) lines += "code\t$l"
     }
-    val file = File(context.filesDir, "native/mods.txt")
+    val file = File(DataRoot.native(context), "mods.txt")
     file.parentFile?.mkdirs()
     file.writeText(lines.joinToString("\n", postfix = "\n"))
     Log.i(TAG, "$gameKey: ${on.size} of ${game.mods.size} mods on, ${game.cheats.size} cheats")

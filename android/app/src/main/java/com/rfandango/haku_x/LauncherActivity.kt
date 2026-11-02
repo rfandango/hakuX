@@ -1,5 +1,6 @@
 package com.rfandango.haku_x
 
+import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
@@ -14,6 +15,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.SideEffect
 import com.rfandango.haku_x.data.AppPrefs
+import com.rfandango.haku_x.data.DataRoot
 import com.rfandango.haku_x.data.Game
 import com.rfandango.haku_x.data.PreviousVersion
 import com.rfandango.haku_x.data.SaveStateStore
@@ -86,16 +88,20 @@ class LauncherActivity : ComponentActivity() {
           onLaunchDashboard = {
             Log.i(TAG, "launch: the dashboard")
             /* not remembered as the last game: no disc */
-            startActivity(Intent(this, NativeCoreActivity::class.java)
-              .putExtra(NativeCoreActivity.EXTRA_DVD_URI, Dashboard.URI))
-            finish()
+            whenDataReady {
+              startActivity(Intent(this, NativeCoreActivity::class.java)
+                .putExtra(NativeCoreActivity.EXTRA_DVD_URI, Dashboard.URI))
+              finish()
+            }
           },
           onLaunchSetup = { uri: Uri ->
             Log.i(TAG, "launch: $uri (Insignia's setup)")
             /* not a library game: not remembered as the last one */
-            startActivity(Intent(this, NativeCoreActivity::class.java)
-              .putExtra(NativeCoreActivity.EXTRA_DVD_URI, uri.toString()))
-            finish()
+            whenDataReady {
+              startActivity(Intent(this, NativeCoreActivity::class.java)
+                .putExtra(NativeCoreActivity.EXTRA_DVD_URI, uri.toString()))
+              finish()
+            }
           },
           openInsignia = openInsignia,
         )
@@ -117,7 +123,7 @@ class LauncherActivity : ComponentActivity() {
     title: String?,
     launchedExternally: Boolean,
     state: String? = null,
-  ) {
+  ) = whenDataReady(onCancel = { if (launchedExternally) finish() }) {
     AppPrefs(this).rememberLaunch(uri, relativePath, title)
     startActivity(Intent(this, NativeCoreActivity::class.java).apply {
       putExtra(NativeCoreActivity.EXTRA_DVD_URI, uri.toString())
@@ -128,6 +134,25 @@ class LauncherActivity : ComponentActivity() {
       if (launchedExternally) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
     })
     finish()
+  }
+
+  /**
+   * go, once the data folder picked can be reached. Not reached (all files access taken back, its SD
+   * card out), the player says: try again (the default), or run from the app's own storage, whose
+   * saves aren't the ones in the folder, a choice made on purpose (ARMSX2 dataRootUnavailable).
+   */
+  private fun whenDataReady(onCancel: () -> Unit = {}, go: () -> Unit) {
+    val lost = DataRoot.custom(this)?.takeIf { DataRoot.unavailable(this) } ?: return go()
+    AlertDialog.Builder(this)
+      .setTitle(R.string.data_unavailable_title)
+      .setMessage(getString(R.string.data_unavailable_text, lost.absolutePath))
+      .setPositiveButton(R.string.data_unavailable_retry) { _, _ -> whenDataReady(onCancel, go) }
+      .setNegativeButton(R.string.data_unavailable_internal) { _, _ ->
+        DataRoot.useInternal(this)
+        go()
+      }
+      .setOnCancelListener { onCancel() }
+      .show()
   }
 
   /* A frontend's launch while the library is open (singleTop). */

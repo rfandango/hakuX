@@ -2,6 +2,7 @@ package com.rfandango.haku_x.data.hdd
 
 import android.content.Context
 import android.graphics.Bitmap
+import com.rfandango.haku_x.data.DataRoot
 import com.rfandango.haku_x.data.XprImage
 import java.io.File
 import java.nio.ByteBuffer
@@ -15,7 +16,7 @@ import java.nio.ByteOrder
  * cache drives (X, Y, Z) and the savestates.
  */
 class HddStore(context: Context) {
-  val native = File(context.filesDir, "native")
+  val native = DataRoot.native(context)
   val root = File(native, "hdd")
   private val states = File(native, "states")
 
