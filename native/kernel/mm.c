@@ -10,6 +10,7 @@
 #include "native/kernel/kernel.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 #define MEM_COMMIT   0x1000u
@@ -249,6 +250,27 @@ static void decommit(NcKernel *k, uint32_t va, uint32_t size)
     }
 }
 
+/* debug: NC_MM_WATCH="lo-hi" (hex VAs) logs every virtual allocation and free
+ * that touches that range, with the caller's frames. */
+static void watch(NcKernel *k, NcFrame *f, const char *what, uint32_t base, uint32_t size, uint32_t type,
+                  uint32_t status)
+{
+    static int armed = -1;
+    static uint32_t lo, hi;
+    if (armed < 0) {
+        const char *e = getenv("NC_MM_WATCH");
+        char *end;
+        armed = e && (lo = (uint32_t)strtoul(e, &end, 16), *end == '-') && (hi = (uint32_t)strtoul(end + 1, NULL, 16)) > lo;
+    }
+    if (!armed || base >= hi || base + size <= lo) {
+        return;
+    }
+    char frames[96];
+    nc_kernel_frame_chain(k, f, frames, sizeof(frames));
+    nc_log("hakuX-native-mm", "watch: %s %08x+%x type %x -> %08x | caller %08x frames%s", what, base, size, type,
+           status, caller_of(k, f), frames);
+}
+
 /* NtAllocateVirtualMemory(BaseAddress, ZeroBits, RegionSize, AllocationType, Protect) */
 static uint64_t NtAllocateVirtualMemory(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
@@ -296,6 +318,7 @@ static uint64_t NtAllocateVirtualMemory(NcKernel *k, NcFrame *f, const uint32_t 
     }
     nc_vm_wr32(k->vm, a[0], base);
     nc_vm_wr32(k->vm, a[2], size);
+    watch(k, f, "allocate", base, size, type, 0);
     /* Only the big ones: a title's heap commits and decommits pages by the
      * thousand a second while it loads (the counts are in the stats line). */
     if ((type & MEM_COMMIT) && size >= 0x40000) {
@@ -352,7 +375,46 @@ static uint64_t NtFreeVirtualMemory(NcKernel *k, NcFrame *f, const uint32_t *a)
     }
     nc_vm_wr32(k->vm, a[0], base);
     nc_vm_wr32(k->vm, a[1], size);
+    watch(k, f, a[2] & MEM_RELEASE ? "release" : "decommit", base, size, a[2], 0);
     return NC_STATUS_SUCCESS;
+}
+
+/* Titles patch their own code between two NtProtectVirtualMemory calls (Rainbow
+ * Six 3: Black Arrow points the CRT's malloc, realloc and free at Unreal's
+ * allocator, protect, memcpy, protect, on pages whose protection stays
+ * PAGE_READWRITE). Nothing else tells the translator, so a function translated
+ * before the write kept running the old code: Black Arrow's malloc still took
+ * blocks from the process heap while free handed them to Unreal's, and a mission
+ * load crashed in its allocator. So each protect of image pages remembers a
+ * checksum of them, and a later protect of the same range that finds other
+ * bytes drops their translations. JSRF re-protects unchanged pages every frame:
+ * those keep theirs. */
+static void protect_code_check(NcKernel *k, uint32_t base, uint32_t size)
+{
+    enum { N = 32, MAX_SPAN = 0x100000 };
+    static struct { uint32_t base, size, sum; } s_seen[N];
+    static unsigned s_next;
+    if (size > MAX_SPAN) {
+        return;
+    }
+    const uint8_t *p = nc_vm_host(k->vm, base);
+    uint32_t sum = 2166136261u; /* FNV-1a */
+    for (uint32_t i = 0; i < size; i++) {
+        sum = (sum ^ p[i]) * 16777619u;
+    }
+    for (unsigned i = 0; i < N; i++) {
+        if (s_seen[i].size && s_seen[i].base == base && s_seen[i].size == size) {
+            if (s_seen[i].sum != sum) {
+                nc_log("hakuX-native-mm", "protect %08x+%x: the title rewrote its code there: translated again", base,
+                       size);
+                nc_cpu_invalidate(k->cpu, base, size);
+                s_seen[i].sum = sum;
+            }
+            return;
+        }
+    }
+    s_seen[s_next] = (typeof(s_seen[0])){base, size, sum};
+    s_next = (s_next + 1) % N;
 }
 
 /* NtProtectVirtualMemory(BaseAddress, RegionSize, NewProtect, OldProtect). Guest
@@ -377,6 +439,9 @@ static uint64_t NtProtectVirtualMemory(NcKernel *k, NcFrame *f, const uint32_t *
     const uint32_t old = r ? r->protect : PAGE_READWRITE;
     if (r && base == r->base && size == r->size) {
         r->protect = a[2];
+    }
+    if (r && r->image) {
+        protect_code_check(k, base, size);
     }
     nc_vm_wr32(k->vm, a[0], base);
     nc_vm_wr32(k->vm, a[1], size);
