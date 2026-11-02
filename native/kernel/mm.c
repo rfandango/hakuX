@@ -10,6 +10,7 @@
 #include "native/kernel/kernel.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 #define MEM_COMMIT   0x1000u
@@ -249,6 +250,27 @@ static void decommit(NcKernel *k, uint32_t va, uint32_t size)
     }
 }
 
+/* debug: NC_MM_WATCH="lo-hi" (hex VAs) logs every virtual allocation and free
+ * that touches that range, with the caller's frames. */
+static void watch(NcKernel *k, NcFrame *f, const char *what, uint32_t base, uint32_t size, uint32_t type,
+                  uint32_t status)
+{
+    static int armed = -1;
+    static uint32_t lo, hi;
+    if (armed < 0) {
+        const char *e = getenv("NC_MM_WATCH");
+        char *end;
+        armed = e && (lo = (uint32_t)strtoul(e, &end, 16), *end == '-') && (hi = (uint32_t)strtoul(end + 1, NULL, 16)) > lo;
+    }
+    if (!armed || base >= hi || base + size <= lo) {
+        return;
+    }
+    char frames[96];
+    nc_kernel_frame_chain(k, f, frames, sizeof(frames));
+    nc_log("hakuX-native-mm", "watch: %s %08x+%x type %x -> %08x | caller %08x frames%s", what, base, size, type,
+           status, caller_of(k, f), frames);
+}
+
 /* NtAllocateVirtualMemory(BaseAddress, ZeroBits, RegionSize, AllocationType, Protect) */
 static uint64_t NtAllocateVirtualMemory(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
@@ -296,6 +318,7 @@ static uint64_t NtAllocateVirtualMemory(NcKernel *k, NcFrame *f, const uint32_t 
     }
     nc_vm_wr32(k->vm, a[0], base);
     nc_vm_wr32(k->vm, a[2], size);
+    watch(k, f, "allocate", base, size, type, 0);
     /* Only the big ones: a title's heap commits and decommits pages by the
      * thousand a second while it loads (the counts are in the stats line). */
     if ((type & MEM_COMMIT) && size >= 0x40000) {
@@ -352,6 +375,7 @@ static uint64_t NtFreeVirtualMemory(NcKernel *k, NcFrame *f, const uint32_t *a)
     }
     nc_vm_wr32(k->vm, a[0], base);
     nc_vm_wr32(k->vm, a[1], size);
+    watch(k, f, a[2] & MEM_RELEASE ? "release" : "decommit", base, size, a[2], 0);
     return NC_STATUS_SUCCESS;
 }
 
