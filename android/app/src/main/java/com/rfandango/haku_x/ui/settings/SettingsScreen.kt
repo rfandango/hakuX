@@ -3,7 +3,10 @@ package com.rfandango.haku_x.ui.settings
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import android.text.format.DateFormat
 import android.text.format.DateUtils
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -16,6 +19,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -31,11 +35,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.window.DialogProperties
 import com.rfandango.haku_x.BuildConfig
 import com.rfandango.haku_x.GpuDriverHelper
 import com.rfandango.haku_x.NativeCoreActivity
 import com.rfandango.haku_x.R
 import com.rfandango.haku_x.data.AppPrefs
+import com.rfandango.haku_x.data.DataRoot
 import com.rfandango.haku_x.data.Logs
 import com.rfandango.haku_x.data.PreviousVersion
 import com.rfandango.haku_x.data.Storage
@@ -45,6 +51,8 @@ import com.rfandango.haku_x.ui.common.ChoiceDialog
 import com.rfandango.haku_x.ui.common.ConfirmDialog
 import com.rfandango.haku_x.ui.common.DeleteButton
 import com.rfandango.haku_x.ui.common.Hint
+import com.rfandango.haku_x.ui.common.ProgressBlock
+import com.rfandango.haku_x.ui.common.fractionOf
 import com.rfandango.haku_x.ui.common.Section
 import com.rfandango.haku_x.ui.common.SubScreen
 import com.rfandango.haku_x.ui.common.SwitchItem
@@ -55,6 +63,7 @@ import com.rfandango.haku_x.ui.update.UpdateDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.Calendar
 import java.util.GregorianCalendar
 
@@ -111,6 +120,33 @@ fun SettingsScreen(
   val theme by AppTheme.mode.collectAsState()
   var themeDialog by remember { mutableStateOf(false) }
   val dark = appInDarkTheme()
+  val snackbar = remember { SnackbarHostState() }
+  /* The core's data folder (data/DataRoot.kt): null the app's own storage. */
+  var dataFolder by remember { mutableStateOf(DataRoot.custom(context)) }
+  var dataUnavailable by remember { mutableStateOf(DataRoot.unavailable(context)) }
+  var dataDialog by remember { mutableStateOf(false) }
+  var accessDialog by remember { mutableStateOf(false) }
+  var dataTarget by remember { mutableStateOf<DataTarget?>(null) }      /* the move asked to confirm */
+  var dataMove by remember { mutableStateOf<Pair<Float?, String>?>(null) }    /* the move under way */
+
+  val pickDataFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
+    if (uri != null) {
+      val dir = DataRoot.pathOf(uri)
+      if (dir == null || !DataRoot.writable(dir)) {
+        snackbar.notify(scope, context.getString(R.string.settings_data_folder_bad))
+      } else if (DataRoot.nested(dir, DataRoot.native(context))) {
+        snackbar.notify(scope, context.getString(R.string.settings_data_folder_nested))
+      } else {
+        dataTarget = DataTarget(dir, DataRoot.hasData(dir))
+      }
+    }
+  }
+  val allFilesAccess = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+    if (DataRoot.allFilesAccess(context)) pickDataFolder.launch(null)
+  }
+  val storagePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+    if (granted) pickDataFolder.launch(null)
+  }
 
   val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
     val old = replacing
@@ -124,7 +160,6 @@ fun SettingsScreen(
       }
     }
   }
-  val snackbar = remember { SnackbarHostState() }
   /* The folder the logs' ZIP goes to (data/Logs.kt). */
   val pickLogsFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
     if (uri != null) {
@@ -218,6 +253,17 @@ fun SettingsScreen(
         headlineContent = { Text(stringResource(R.string.hdd_title)) },
         supportingContent = { Text(stringResource(R.string.hdd_settings_desc)) },
         modifier = Modifier.clickable(onClick = onHardDisk),
+      )
+      ListItem(
+        headlineContent = { Text(stringResource(R.string.settings_data_folder)) },
+        supportingContent = {
+          val label = dataFolderLabel(context, dataFolder)
+          Text(
+            if (dataUnavailable) stringResource(R.string.settings_data_folder_unavailable, label)
+            else stringResource(R.string.settings_data_folder_desc, label)
+          )
+        },
+        modifier = Modifier.clickable(enabled = dataMove == null) { dataDialog = true },
       )
       if (previous) {
         ListItem(
@@ -462,6 +508,96 @@ fun SettingsScreen(
       onDismiss = { themeDialog = false },
     )
   }
+  if (dataDialog) {
+    val sd = remember { DataRoot.sdCard(context) }
+    ChoiceDialog(
+      title = stringResource(R.string.settings_data_folder),
+      options = listOfNotNull(
+        DATA_INTERNAL to stringResource(R.string.settings_data_folder_internal),
+        sd?.let { DATA_SD to stringResource(R.string.settings_data_folder_sd) },
+        DATA_PICK to stringResource(R.string.settings_data_folder_pick),
+      ),
+      current = when {
+        dataFolder == null -> DATA_INTERNAL
+        dataFolder == sd -> DATA_SD
+        else -> DATA_PICK
+      },
+      onPick = {
+        dataDialog = false
+        when (it) {
+          DATA_INTERNAL -> dataTarget = DataTarget(null, DataRoot.hasData(DataRoot.internal(context)))
+          DATA_SD -> sd?.let { d -> dataTarget = DataTarget(d, DataRoot.hasData(d)) }
+          else -> when {
+            DataRoot.allFilesAccess(context) -> pickDataFolder.launch(null)
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> accessDialog = true
+            else -> storagePermission.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+          }
+        }
+      },
+      onDismiss = { dataDialog = false },
+    )
+  }
+  if (accessDialog) {
+    ConfirmDialog(
+      title = stringResource(R.string.settings_data_folder_access_title),
+      text = stringResource(R.string.settings_data_folder_access_text),
+      confirm = stringResource(R.string.settings_data_folder_access_open),
+      onConfirm = {
+        accessDialog = false
+        allFilesAccess.launch(
+          Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:${context.packageName}"))
+        )
+      },
+      onDismiss = { accessDialog = false },
+    )
+  }
+  dataTarget?.let { t ->
+    val label = dataFolderLabel(context, t.dir)
+    /* nothing copied: a hard disk there already, or the folder now can't be reached (DataRoot.move) */
+    val switchOnly = t.hasData || dataUnavailable
+    ConfirmDialog(
+      title = stringResource(R.string.settings_data_folder_move_title),
+      text = when {
+        t.hasData -> stringResource(R.string.settings_data_folder_use_text, label)
+        dataUnavailable -> stringResource(R.string.settings_data_folder_switch_text, label)
+        else -> stringResource(R.string.settings_data_folder_move_text, label)
+      },
+      confirm = stringResource(
+        if (switchOnly) R.string.settings_data_folder_use_confirm else R.string.settings_data_folder_move_confirm
+      ),
+      onConfirm = {
+        dataTarget = null
+        dataMove = null to ""
+        scope.launch {
+          val result = withContext(Dispatchers.IO) {
+            runCatching {
+              DataRoot.move(context, t.dir) { d, total, what -> dataMove = fractionOf(d, total) to what }
+            }
+          }
+          dataMove = null
+          dataFolder = DataRoot.custom(context)
+          dataUnavailable = DataRoot.unavailable(context)
+          snackbar.notify(
+            scope,
+            result.fold(
+              { context.getString(R.string.settings_data_folder_done, label) },
+              { context.getString(R.string.settings_data_folder_failed, it.message ?: it.javaClass.simpleName) },
+            ),
+          )
+        }
+      },
+      onDismiss = { dataTarget = null },
+    )
+  }
+  dataMove?.let { (fraction, what) ->
+    AlertDialog(
+      onDismissRequest = {},
+      properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+      title = { Text(stringResource(R.string.settings_data_folder_moving)) },
+      text = { ProgressBlock(fraction, what) },
+      confirmButton = {},
+    )
+  }
   removing?.let { f ->
     ConfirmDialog(
       title = stringResource(R.string.settings_games_folder_remove),
@@ -476,6 +612,19 @@ fun SettingsScreen(
       onDismiss = { removing = null },
     )
   }
+}
+
+/** A data folder move asked for: dir null the app's own storage; hasData, it holds a hard disk already. */
+private class DataTarget(val dir: File?, val hasData: Boolean)
+
+private const val DATA_INTERNAL = "internal"
+private const val DATA_SD = "sd"
+private const val DATA_PICK = "pick"
+
+private fun dataFolderLabel(context: Context, dir: File?): String = when (dir) {
+  null -> context.getString(R.string.settings_data_folder_internal)
+  DataRoot.sdCard(context) -> context.getString(R.string.settings_data_folder_sd)
+  else -> dir.absolutePath
 }
 
 /** The app's themes: the phone's, light, dark. */

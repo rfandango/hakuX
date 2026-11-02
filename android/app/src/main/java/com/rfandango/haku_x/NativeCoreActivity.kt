@@ -34,6 +34,7 @@ import androidx.documentfile.provider.DocumentFile
 import com.rfandango.haku_x.data.AppPrefs
 import com.rfandango.haku_x.data.CheatInfo
 import com.rfandango.haku_x.data.Controllers
+import com.rfandango.haku_x.data.DataRoot
 import com.rfandango.haku_x.data.GameOverrides
 import com.rfandango.haku_x.data.Logs
 import com.rfandango.haku_x.data.ModCatalog
@@ -194,7 +195,7 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
   }
 
   /** The emulated hard disk's folder (the core's <hdd>). */
-  private fun hddDir() = File(filesDir, "native/hdd")
+  private fun hddDir() = File(DataRoot.native(this), "hdd")
 
   /** The game from its start again, in a new core process (RelaunchActivity, no frame held). */
   private fun restartGame() {
@@ -220,6 +221,8 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
   override fun getLibraries(): Array<String> = arrayOf("SDL3", "hakuxcore")
 
   override fun getArguments(): Array<String> {
+    /* the core makes its hard disk folders with mkdir, which a phone storage folder can refuse */
+    DataRoot.prepare(hddDir().parentFile!!)
     val args = mutableListOf(discArg, hddDir().absolutePath)
     /* the dashboard: C:\xboxdash.xbe with no disc (discArg "none") */
     if (dashboard) args += "dash"

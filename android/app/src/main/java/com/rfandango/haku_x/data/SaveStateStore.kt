@@ -16,7 +16,7 @@ import java.security.MessageDigest
  * made for the game.
  */
 class SaveStateStore(context: Context, gameKey: String, discUri: String? = null) {
-  private val root = File(context.filesDir, "native/states")
+  private val root = File(DataRoot.native(context), "states")
   private val dir = File(root, folder(gameKey))
 
   init {
