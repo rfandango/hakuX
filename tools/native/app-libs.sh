@@ -11,9 +11,9 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 build=${1:-$here/build/native/core}
 ndk=${ANDROID_NDK:-/c/Users/USER/AppData/Local/Android/Sdk/ndk/29.0.14206865}
 # The NDK's strip, from the host's prebuilt directory: the Windows one this
-# script was written on, or the Linux one a Linux build machine has.
+# script was written on, or the Linux or macOS one a build machine has.
 strip=
-for h in linux-x86_64 windows-x86_64; do
+for h in linux-x86_64 windows-x86_64 darwin-x86_64; do
   for s in llvm-strip llvm-strip.exe; do
     if [ -x "$ndk/toolchains/llvm/prebuilt/$h/bin/$s" ]; then
       strip="$ndk/toolchains/llvm/prebuilt/$h/bin/$s"
