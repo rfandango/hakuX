@@ -2,7 +2,8 @@ name: Build
 
 on:
   push:
-    branches: [master, linux-arm64-desktop]
+    branches: [master]
+    tags: ['v*']
   pull_request:
 
 jobs:
@@ -74,10 +75,20 @@ jobs:
       - name: Package AppImage
         run: |
           chmod +x tools/release/package_linux.sh
-          tools/release/package_linux.sh build dist "${GITHUB_REF_NAME}"
+          VERSION=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+          tools/release/package_linux.sh build dist "$VERSION"
 
-      - name: Upload AppImage
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: kantaiX-linux-aarch64
           path: dist/kantaiX-*.AppImage
+
+      - name: Create GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" dist/kantaiX-*.AppImage \
+            --title "kantaiX ${{ github.ref_name }}" \
+            --notes "Linux arm64 AppImage. Download, \`chmod +x\`, and run."
