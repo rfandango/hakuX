@@ -4,7 +4,8 @@
  * the consoles on a local network form one Ethernet segment (system link).
  *
  * Broadcast and multicast frames (system link's discovery) go to the
- * network's broadcast address, to every peer named in the options and to
+ * networks' broadcast addresses (Wi-Fi's, a Wi-Fi Direct group's: lanbcast
+ * names up to NC_NET_BCASTS), to every peer named in the options and to
  * the consoles heard from outside the local network (a VPN's: one console
  * naming the other is enough); a frame to a MAC seen before goes straight to
  * the address it came from, one not seen yet is flooded as a broadcast is.
@@ -12,6 +13,11 @@
  * delivered) so that they hear of us while the game sends nothing. Frames the
  * console sent itself (its broadcasts come back) are dropped. Every console
  * uses the same port.
+ *
+ * A console reached over two networks at once (Wi-Fi and a Wi-Fi Direct
+ * group) sends each broadcast over both: the second copy, within DUP_MS, is
+ * dropped, and the console's address changes network only once the one in
+ * use has been silent for MOVE_S.
  */
 #include "native/net/net.h"
 #include "native/core/nc.h"
@@ -21,6 +27,7 @@
 #include <ifaddrs.h>
 #include <netinet/in.h>
 #include <poll.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <time.h>
@@ -30,23 +37,55 @@
 #define MAC_TTL_S 300
 #define HELLO_S 10
 #define HELLO_TYPE 0x88B5               /* IEEE 802 local experimental */
+#define DUP_MS 100
+#define DUPS 256               /* the frames received in DUP_MS, from up to 8 consoles */
+#define MOVE_S 3
 
 typedef struct Station {
     uint8_t mac[6];
     struct sockaddr_in at;
     time_t seen;
+    time_t at_seen;                     /* the last frame from at */
     bool remote;                        /* outside the local network: flooded to */
 } Station;
 
 static struct {
     int fd;
-    struct sockaddr_in bcast;
+    struct sockaddr_in bcast[NC_NET_BCASTS];
+    unsigned nbcast;
     uint8_t own[6];                     /* the console's MAC (its frames' source) */
     bool own_known;
     Station st[MACS];
     time_t hello;                       /* the last hello sent */
-    uint64_t flooded, unicast, dropped_own;
+    uint64_t flooded, unicast, dropped_own, dropped_dup;
+    struct { uint64_t hash, ms; } dup[DUPS];   /* frames received lately */
+    unsigned dup_next;
 } g_lan = { .fd = -1 };
+
+static uint64_t now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
+}
+
+/* Whether this frame came in already, within DUP_MS (over the other network). */
+static bool duplicate(const uint8_t *frame, size_t len)
+{
+    uint64_t h = 1469598103934665603ull;    /* FNV-1a */
+    for (size_t i = 0; i < len; i++) {
+        h = (h ^ frame[i]) * 1099511628211ull;
+    }
+    const uint64_t now = now_ms();
+    for (unsigned i = 0; i < DUPS; i++) {
+        if (g_lan.dup[i].hash == h && now - g_lan.dup[i].ms < DUP_MS) {
+            return true;
+        }
+    }
+    g_lan.dup[g_lan.dup_next] = (typeof(g_lan.dup[0])){ h, now };
+    g_lan.dup_next = (g_lan.dup_next + 1) % DUPS;
+    return false;
+}
 
 static bool lan_init(void)
 {
@@ -68,12 +107,17 @@ static bool lan_init(void)
         g_lan.fd = -1;
         return false;
     }
-    g_lan.bcast = (struct sockaddr_in){ .sin_family = AF_INET, .sin_port = htons(c->lan_port),
-                                        .sin_addr.s_addr = c->lan_bcast ? c->lan_bcast : INADDR_BROADCAST };
-    char b[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &g_lan.bcast.sin_addr, b, sizeof(b));
-    nc_log("hakuX-native-net", "lan: UDP port %u, broadcast to %s (/%d), %u peers named", c->lan_port, b,
-           __builtin_popcount(ntohl(c->lan_mask)), c->npeers);
+    g_lan.nbcast = c->nbcast ? c->nbcast : 1;
+    char list[NC_NET_BCASTS * 24] = "";
+    for (unsigned i = 0; i < g_lan.nbcast; i++) {
+        g_lan.bcast[i] = (struct sockaddr_in){ .sin_family = AF_INET, .sin_port = htons(c->lan_port),
+                                               .sin_addr.s_addr = c->nbcast ? c->lan_bcast[i] : INADDR_BROADCAST };
+        char b[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &g_lan.bcast[i].sin_addr, b, sizeof(b));
+        snprintf(list + strlen(list), sizeof(list) - strlen(list), "%s%s (/%d)", i ? ", " : "", b,
+                 __builtin_popcount(ntohl(c->lan_mask[i])));
+    }
+    nc_log("hakuX-native-net", "lan: UDP port %u, broadcast to %s, %u peers named", c->lan_port, list, c->npeers);
     return true;
 }
 
@@ -110,7 +154,9 @@ static void to_peers(const uint8_t *frame, size_t len)
 
 static void flood(const uint8_t *frame, size_t len)
 {
-    send_to(&g_lan.bcast, frame, len);
+    for (unsigned i = 0; i < g_lan.nbcast; i++) {
+        send_to(&g_lan.bcast[i], frame, len);
+    }
     to_peers(frame, len);
     const time_t now = time(NULL);
     for (unsigned i = 0; i < MACS; i++) {
@@ -189,21 +235,36 @@ static void learn(const uint8_t *mac, const struct sockaddr_in *from)
         return;                         /* not a station's address */
     }
     const NcNetConfig *c = nc_net_config();
-    const bool remote = c->lan_mask && (from->sin_addr.s_addr & c->lan_mask) != (c->lan_bcast & c->lan_mask);
+    /* outside every local network known (their prefixes) */
+    bool remote = false;
+    for (unsigned i = 0; i < c->nbcast; i++) {
+        if (!c->lan_mask[i]) {
+            remote = false;
+            break;
+        }
+        remote = (from->sin_addr.s_addr & c->lan_mask[i]) != (c->lan_bcast[i] & c->lan_mask[i]);
+        if (!remote) {
+            break;
+        }
+    }
     const time_t now = time(NULL);
     Station *free_slot = NULL, *oldest = &g_lan.st[0];
     for (unsigned i = 0; i < MACS; i++) {
         Station *s = &g_lan.st[i];
         if (s->seen && !memcmp(s->mac, mac, 6)) {
-            if (s->at.sin_addr.s_addr != from->sin_addr.s_addr || s->at.sin_port != from->sin_port) {
+            s->seen = now;
+            const bool same = s->at.sin_addr.s_addr == from->sin_addr.s_addr && s->at.sin_port == from->sin_port;
+            if (same) {
+                s->at_seen = now;
+            } else if (now - s->at_seen >= MOVE_S) {
                 char a[INET_ADDRSTRLEN];
                 inet_ntop(AF_INET, &from->sin_addr, a, sizeof(a));
                 nc_log("hakuX-native-net", "lan: %02x:%02x:%02x:%02x:%02x:%02x now at %s:%u", mac[0], mac[1], mac[2],
                        mac[3], mac[4], mac[5], a, ntohs(from->sin_port));
+                s->at = *from;
+                s->at_seen = now;
+                s->remote = remote;
             }
-            s->at = *from;
-            s->seen = now;
-            s->remote = remote;
             return;
         }
         if (!s->seen && !free_slot) {
@@ -217,6 +278,7 @@ static void learn(const uint8_t *mac, const struct sockaddr_in *from)
     memcpy(s->mac, mac, 6);
     s->at = *from;
     s->seen = now;
+    s->at_seen = now;
     s->remote = remote;
     char a[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &from->sin_addr, a, sizeof(a));
@@ -288,6 +350,10 @@ static void lan_poll(struct pollfd *fds, int n)
         if (g_lan.own_known && !memcmp(buf + 6, g_lan.own, 6)) {
             g_lan.dropped_own++;            /* our own broadcast, back */
             twin(&from);
+            continue;
+        }
+        if (duplicate(buf, (size_t)r)) {
+            g_lan.dropped_dup++;
             continue;
         }
         learn(buf + 6, &from);

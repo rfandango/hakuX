@@ -4,7 +4,9 @@
  * Xbox Live through Insignia with no host privileges.
  *
  * The console's network is 10.0.2.0/24: the gateway is 10.0.2.2 and DHCP
- * leases from 10.0.2.15. The DNS server DHCP gives is the configured one
+ * leases an address from the console's MAC (10.0.2.16-215), so consoles on
+ * one system link network (net=all) don't share one; the stack starts with
+ * the console's first frame, which carries the MAC. The DNS server DHCP gives is the configured one
  * itself (dns=, Insignia's by default), outside that network: the queries
  * leave as any UDP does, so libslirp never looks for the host's resolver
  * (Android has no /etc/resolv.conf) and the console needs no settings. One
@@ -23,6 +25,7 @@
 
 #include <arpa/inet.h>
 #include <poll.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 
@@ -120,7 +123,13 @@ static const SlirpCb g_cb = {
 
 /* ------------------------------------------------------------ backend */
 
-static bool nat_init(void)
+bool nc_net_nat_address(const uint8_t mac[6])
+{
+    return mac[0] == 0x52 && mac[1] == 0x55;   /* libslirp's: 52:55 and the address */
+}
+
+/* The stack, for the console with this MAC (its frames' source). */
+static bool nat_start(const uint8_t mac[6])
 {
     const NcNetConfig *c = nc_net_config();
     struct in_addr dns = { .s_addr = c->dns[0] };
@@ -138,7 +147,11 @@ static bool nat_init(void)
     inet_pton(AF_INET, "10.0.2.0", &cfg.vnetwork);
     inet_pton(AF_INET, "255.255.255.0", &cfg.vnetmask);
     inet_pton(AF_INET, "10.0.2.2", &cfg.vhost);
-    inet_pton(AF_INET, "10.0.2.15", &cfg.vdhcp_start);
+    /* the console's own address: libslirp leases from vdhcp_start */
+    const uint32_t h = ((uint32_t)mac[3] * 31u + mac[4]) * 31u + mac[5];
+    char start[16];
+    snprintf(start, sizeof(start), "10.0.2.%u", 16 + h % 200);
+    inet_pton(AF_INET, start, &cfg.vdhcp_start);
     g_nat.slirp = slirp_new(&cfg, &g_cb, NULL);
     if (!g_nat.slirp) {
         nc_log("hakuX-native-net", "nat: libslirp didn't start");
@@ -146,12 +159,21 @@ static bool nat_init(void)
     }
     char b[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &dns, b, sizeof(b));
-    nc_log("hakuX-native-net", "nat: libslirp %s, 10.0.2.0/24, DNS %s", slirp_version_string(), b);
+    nc_log("hakuX-native-net", "nat: libslirp %s, 10.0.2.0/24, the console's address %s, DNS %s",
+           slirp_version_string(), start, b);
     return true;
+}
+
+static bool nat_init(void)
+{
+    return true;                        /* the stack starts with the console's first frame */
 }
 
 static void nat_input(const uint8_t *frame, size_t len)
 {
+    if (!g_nat.slirp && (len < 14 || !nat_start(frame + 6))) {
+        return;
+    }
     slirp_input(g_nat.slirp, frame, (int)len);
 }
 
@@ -182,6 +204,9 @@ static int get_revents(int idx, void *opaque)
 
 static int nat_fill(struct pollfd *fds, int max, int *timeout_ms)
 {
+    if (!g_nat.slirp) {
+        return 0;
+    }
     g_nat.fds = fds;
     g_nat.maxfds = max;
     g_nat.nfds = 0;
@@ -201,6 +226,9 @@ static int nat_fill(struct pollfd *fds, int max, int *timeout_ms)
 
 static void nat_poll(struct pollfd *fds, int n)
 {
+    if (!g_nat.slirp) {
+        return;
+    }
     g_nat.fds = fds;
     g_nat.nfds = n;
     slirp_pollfds_poll(g_nat.slirp, 0, get_revents, NULL);
