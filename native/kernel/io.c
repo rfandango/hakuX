@@ -1427,6 +1427,38 @@ static bool runs_resident(NcKernel *k, const IoRun *run, unsigned nrun)
     return true;
 }
 
+/* A run read again through a host buffer and the RAM view (vm->phys), as the
+ * reader thread writes: the guest's view of a page may still refuse a system
+ * call's write (ReadFile fails with ERROR_NOACCESS where a store would only
+ * fault), and the title saw its disc error. */
+static bool read_run_again(NcKernel *k, const NcFile *nf, uint64_t o, uint32_t va, uint32_t len)
+{
+    uint8_t *tmp = malloc(len);
+    bool ok = tmp && (nf->kind == F_DISC ? nc_disc_read_file(k->disc, &nf->disc, o, tmp, len)
+                                         : pread(nf->fd, tmp, len, (off_t)o) == (ssize_t)len);
+    for (uint32_t done = 0; ok && done < len;) {
+        const uint32_t a2 = va + done, room = NC_PAGE - (a2 & (NC_PAGE - 1));
+        const uint32_t chunk = len - done < room ? len - done : room;
+        const uint32_t pa = nc_vm_phys(k->vm, a2);
+        if (pa != UINT32_MAX && (uint64_t)pa + chunk <= k->vm->ram_size) {
+            const uint64_t gpu = nc_vm_dma.fence ? nc_vm_dma.fence(pa, chunk) : 0;
+            if (gpu && nc_vm_dma.wait) {
+                nc_vm_dma.wait(gpu);
+            }
+            memcpy(k->vm->phys + pa, tmp + done, chunk);
+            if (nc_vm_dma.wrote) {
+                nc_vm_dma.wrote(pa, chunk);
+            }
+        } else {
+            nc_vm_will_write(a2, chunk);
+            memcpy(nc_vm_host(k->vm, a2), tmp + done, chunk);
+        }
+        done += chunk;
+    }
+    free(tmp);
+    return ok;
+}
+
 /* NtReadFile's work for a buffer of runs (len bytes in all): a[] as
  * NtReadFile takes it, its Buffer and Length aside. */
 static uint64_t read_runs(NcKernel *k, const uint32_t *a, IoRun *run, unsigned nrun, uint32_t len)
@@ -1506,6 +1538,9 @@ static uint64_t read_runs(NcKernel *k, const uint32_t *a, IoRun *run, unsigned n
             nc_vm_will_write(run[i].va, run[i].len); /* pread into a protected page fails rather than faults */
             ok = nf->kind == F_DISC ? nc_disc_read_file(k->disc, &nf->disc, o, h, run[i].len)
                                     : pread(nf->fd, h, run[i].len, (off_t)o) == (ssize_t)run[i].len;
+            if (!ok) {
+                ok = read_run_again(k, nf, o, run[i].va, run[i].len);
+            }
             o += run[i].len;
         }
         if (!ok) {

@@ -340,6 +340,15 @@ void nc_ps_yield(NcKernel *k)
 {
     if (k->current) {
         k->current->slice_expired = true;   /* behind the threads it gives way to */
+        /* and a step of its wait boost, as NT's NtYieldExecution takes it
+         * (KiComputeNewPriority): each yield gave it a new quantum, so its
+         * quantum never ended and the boost stayed. NFL Fever 2004's loader
+         * yields until a worker of its own priority, ready, runs: boosted a
+         * step above, it got the CPU back every time, 2.3 million yields a
+         * second, and the game's load never ended. */
+        if (k->current->boost) {
+            k->current->boost--;
+        }
     }
     k->resched = true;
 }

@@ -10,6 +10,7 @@
 #include "native/kernel/kernel.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 #define MEM_COMMIT   0x1000u
@@ -196,9 +197,25 @@ static uint32_t find_free(uint32_t size, bool top_down)
     return 0;
 }
 
+static void decommit(NcKernel *k, uint32_t va, uint32_t size);
+
+/* All of it or none: a commit that runs out of physical memory gives back the
+ * pages it got. BloodRayne 2 asks for 64 MiB, then half of it, and so on until
+ * one fits: the first one's 54 MiB stayed committed, every smaller one failed
+ * to its 16 KiB, and the title went on without its heap. */
 static bool commit(NcKernel *k, uint32_t va, uint32_t size, bool zero)
 {
-    for (uint32_t p = va; p < va + size;) {
+    uint32_t want = 0;
+    for (uint32_t p = va; p < va + size; p += NC_PAGE) {
+        want += nc_vm_phys(k->vm, p) == UINT32_MAX ? NC_PAGE : 0;
+    }
+    if (want > nc_vm_free_bytes(k->vm)) {
+        return false;
+    }
+    struct { uint32_t va, len; } *got = NULL;
+    unsigned ngot = 0, cap = 0;
+    bool ok = true;
+    for (uint32_t p = va; ok && p < va + size;) {
         if (nc_vm_phys(k->vm, p) != UINT32_MAX) {
             p += NC_PAGE;
             continue;
@@ -212,16 +229,38 @@ static bool commit(NcKernel *k, uint32_t va, uint32_t size, bool zero)
         while (piece >= NC_PAGE && (pa = nc_vm_alloc_phys(k->vm, piece, 0, k->vm->ram_size)) == UINT32_MAX) {
             piece = piece > NC_PAGE ? nc_align_up(piece / 2, NC_PAGE) : 0;
         }
-        if (pa == UINT32_MAX || !nc_vm_map(k->vm, p, pa, piece)) {
-            return false;
+        if (pa == UINT32_MAX) {
+            ok = false;
+            break;
         }
+        if (!nc_vm_map(k->vm, p, pa, piece)) {
+            nc_vm_free_phys(k->vm, pa, piece);
+            ok = false;
+            break;
+        }
+        if (ngot == cap) {
+            cap = cap ? cap * 2 : 16;
+            void *n = realloc(got, sizeof(*got) * cap);
+            if (!n) {
+                decommit(k, p, piece);
+                ok = false;
+                break;
+            }
+            got = n;
+        }
+        got[ngot].va = p;
+        got[ngot++].len = piece;
         if (zero) {
             memset(k->vm->ram + pa, 0, piece);
         }
         k->vm_commits += piece / NC_PAGE;
         p += piece;
     }
-    return true;
+    for (unsigned i = 0; !ok && i < ngot; i++) {
+        decommit(k, got[i].va, got[i].len);
+    }
+    free(got);
+    return ok;
 }
 
 /* One unmap (a syscall) per run of committed pages, then their physical
@@ -260,6 +299,7 @@ static uint64_t NtAllocateVirtualMemory(NcKernel *k, NcFrame *f, const uint32_t 
     }
 
     /* A commit at no address reserves the range too (VirtualAlloc(NULL, n, MEM_COMMIT)). */
+    bool reserved = false;
     if (type & MEM_RESERVE || !base) {
         if (base) {
             uint32_t end = nc_align_up(base + size, NC_PAGE);
@@ -278,6 +318,7 @@ static uint64_t NtAllocateVirtualMemory(NcKernel *k, NcFrame *f, const uint32_t 
         if (!add_region(base, size, a[4], false)) {
             return NC_STATUS_NO_MEMORY;
         }
+        reserved = true;
     } else {
         uint32_t end = nc_align_up(base + size, NC_PAGE);
         base &= ~(NC_PAGE - 1);
@@ -290,8 +331,11 @@ static uint64_t NtAllocateVirtualMemory(NcKernel *k, NcFrame *f, const uint32_t 
         }
     }
     if ((type & MEM_COMMIT) && !commit(k, base, size, !(type & MEM_NOZERO))) {
-        nc_log("hakuX-native-mm", "commit %08x+%x: out of physical memory", base, size);
-        log_holders(k, "out of memory");
+        nc_log("hakuX-native-mm", "commit %08x+%x: out of physical memory (%u KiB free)", base, size,
+               nc_vm_free_bytes(k->vm) >> 10);
+        if (reserved) {
+            g_nregions--;   /* the reservation this call made goes with it */
+        }
         return NC_STATUS_NO_MEMORY;
     }
     nc_vm_wr32(k->vm, a[0], base);

@@ -11,10 +11,12 @@
 #include "native/core/xdvdfs.h"
 
 #include <ctype.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 static const char k_magic[] = "MICROSOFT*XBOX*MEDIA";
@@ -33,6 +35,44 @@ static bool pread_all(int fd, void *buf, size_t len, uint64_t off)
         p += n;
         len -= (size_t)n;
         off += (uint64_t)n;
+    }
+    return true;
+}
+
+/* The image's bytes. A read that fails is tried again (a drive spinning up,
+ * a scanner holding the file): a failed read is the title's disc error. Past
+ * the image's end come zeros, as the disc has there: an image tool trimming
+ * an XISO may cut it inside its last file's last sector, or before data a
+ * title reads anyway. */
+static bool image_read(int fd, void *buf, size_t len, uint64_t off)
+{
+    uint8_t *p = buf;
+    for (unsigned tries = 0; len;) {
+        const ssize_t n = pread(fd, p, len, (off_t)off);
+        if (n > 0) {
+            p += n;
+            len -= (size_t)n;
+            off += (uint64_t)n;
+            tries = 0;
+            continue;
+        }
+        if (n == 0) {
+            static bool told;
+            if (!told) {
+                told = true;
+                nc_log("hakuX-native", "disc: a read past the image's end at +0x%llx (a trimmed image): zeros",
+                       (unsigned long long)off);
+            }
+            memset(p, 0, len);
+            return true;
+        }
+        if (++tries > 4) {
+            nc_log("hakuX-native", "disc: reading %zu bytes at +0x%llx failed: %s", len, (unsigned long long)off,
+                   strerror(errno));
+            return false;
+        }
+        const struct timespec ts = {0, 20000000};
+        nanosleep(&ts, NULL);
     }
     return true;
 }
@@ -127,8 +167,8 @@ static bool disc_find(const NcDisc *d, const char *path, NcDiscFile *out)
         if (!dir) {
             return false;
         }
-        bool ok = pread_all(d->fd, dir, cur.size,
-                            d->part_off + (uint64_t)cur.sector * NC_XDVDFS_SECTOR) &&
+        bool ok = image_read(d->fd, dir, cur.size,
+                             d->part_off + (uint64_t)cur.sector * NC_XDVDFS_SECTOR) &&
                   dir_search(dir, cur.size, 0, p, (size_t)(end - p), &cur, 0);
         free(dir);
         if (!ok) {
@@ -402,7 +442,7 @@ bool nc_disc_find_orig(const NcDisc *d, const char *path, NcDiscFile *out)
 bool nc_disc_read_orig(const NcDisc *d, const NcDiscFile *f, uint64_t off, void *buf, size_t len)
 {
     return f->sector < NC_DISC_OVERLAY && off + len <= f->size &&
-           pread_all(d->fd, buf, len, d->part_off + (uint64_t)f->sector * NC_XDVDFS_SECTOR + off);
+           image_read(d->fd, buf, len, d->part_off + (uint64_t)f->sector * NC_XDVDFS_SECTOR + off);
 }
 
 bool nc_disc_read_file(const NcDisc *d, const NcDiscFile *f, uint64_t off, void *buf, size_t len)
@@ -412,7 +452,7 @@ bool nc_disc_read_file(const NcDisc *d, const NcDiscFile *f, uint64_t off, void 
     }
     return f->sector >= NC_DISC_OVERLAY
                ? ov_read(d, f, off, buf, len)
-               : pread_all(d->fd, buf, len, d->part_off + (uint64_t)f->sector * NC_XDVDFS_SECTOR + off);
+               : image_read(d->fd, buf, len, d->part_off + (uint64_t)f->sector * NC_XDVDFS_SECTOR + off);
 }
 
 bool nc_disc_read(const NcDisc *d, const NcDiscFile *f, uint64_t off, void *buf, size_t len)
