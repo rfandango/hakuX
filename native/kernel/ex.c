@@ -1023,6 +1023,13 @@ void nc_kernel_title_loaded(NcKernel *k, const NcDisc *disc, const NcDiscFile *x
         *(uint16_t *)nc_vm_host(k->vm, s + 2) = (uint16_t)len;
         nc_vm_wr32(k->vm, s + 4, buf);
     }
+    /* The AV pack the kernel read from the SMC at boot: XGetAVPack returns
+     * it, and titles (Halo 2) drop 480p/720p/1080i unless it's component.
+     * Left 0, every title saw a SCART cable. */
+    s = data_va(k, "HalBootSMCVideoMode");
+    if (s) {
+        nc_vm_wr32(k->vm, s, av_pack_smc());
+    }
     /* An XBE on the hard disk: D: is the folder it was launched from, as the
      * launch path's directory part becomes D: on the Xbox (the dashboard's:
      * C:'s root). A disc's stays the disc's root, and so does a title
