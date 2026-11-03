@@ -568,7 +568,9 @@ static uint32_t contig_alloc(NcKernel *k, uint32_t size, uint32_t lo, uint32_t h
         if (n <= 4 || !(n & (n - 1))) {
             char runs[400];
             nc_vm_free_runs(k->vm, runs, sizeof(runs));
-            nc_log("hakuX-native", "mm: contiguous allocation of %u KiB failed (#%u; free %u KiB:%s)", size >> 10, n,
+            /* Free memory outside the request bounds cannot satisfy it. */
+            nc_log("hakuX-native", "mm: contiguous allocation of %u KiB failed (#%u; from %08x, %08x-%08x, align %x; "
+                   "free %u KiB:%s)", size >> 10, n, ra, lo, hi ? hi : k->vm->ram_size, align,
                    nc_vm_free_bytes(k->vm) >> 10, runs);
             log_splitters(k);
             log_phys_map(k);
