@@ -512,8 +512,9 @@ int hle_vk_init(void)
               q_eds3.extendedDynamicState3LogicOpEnable;
     c->descriptor_buffer = has_ext(ext, ne, VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME);
     c->maint5 = has_ext(ext, ne, "VK_KHR_maintenance5");
-    /* local read is dynamic rendering's: 1.3 devices only */
-    c->local_read = v13 && e_lr && q_lr.dynamicRenderingLocalRead;
+    /* local read is dynamic rendering's: core on 1.3, KHR_dynamic_rendering
+     * below it (malisx2 offers both extensions on its 1.1 Mali-G52) */
+    c->local_read = c->dyn_render && e_lr && q_lr.dynamicRenderingLocalRead;
     c->fbfetch = c->local_read && !getenv("HAKUX_HLE_NO_FBFETCH");
     c->exec_props = has_ext(ext, ne, VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
     c->aniso = q.features.samplerAnisotropy;
