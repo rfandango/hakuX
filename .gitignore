@@ -1,4 +1,5 @@
 /build/
+/build-arm64/
 /.cache/
 /.vscode/
 /.idea/
@@ -47,6 +48,9 @@ profile-out-*/
 /tools/*
 !/tools/native/
 !/tools/mods/
+!/tools/fetch_deps.sh
+!/tools/release/
+!/tools/build_local.sh
 
 # Shared build/device lock between sessions (not versioned)
 /.device.lock
