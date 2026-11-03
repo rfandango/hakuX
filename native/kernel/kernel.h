@@ -281,9 +281,8 @@ struct NcKernel {
 };
 
 bool nc_kernel_init(NcKernel *k, NcVm *vm);
-/* Before nc_kernel_init: the boot is for a savestate whose process object is
- * at kprocess (0: none), and the kernel pool's first range goes where the
- * boot that made it put it, under that object (kernel.c POOL_BASE). */
+/* Call before nc_kernel_init to restore the pool base from a savestate's
+ * process object. Pass 0 for a fresh boot. */
 void nc_kernel_pool_for(uint32_t kprocess);
 /* The process object's address in a savestate's kernel section (0: none, or
  * the state can't be read). */
