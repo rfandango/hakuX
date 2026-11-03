@@ -161,6 +161,7 @@ typedef struct NcThread {
     uint64_t ready_seq, run_seq;
     uint64_t slice_used_ns, slice_start_ns;
     bool slice_expired;
+    unsigned boost;          /* wait-end priority boost steps remaining (ps.c NtYieldExecution) */
     NcCpuContext ctx;
 } NcThread;
 
