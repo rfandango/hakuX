@@ -15,6 +15,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.SideEffect
 import com.rfandango.haku_x.data.AppPrefs
 import com.rfandango.haku_x.data.Game
+import com.rfandango.haku_x.data.Nearby
 import com.rfandango.haku_x.data.PreviousVersion
 import com.rfandango.haku_x.data.SaveStateStore
 import com.rfandango.haku_x.data.Storage
@@ -36,6 +37,8 @@ class LauncherActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     val prefs = AppPrefs(this)
+    // back from a game: nearby system link ends with it
+    NearbyService.stop(this)
 
     val usableFolders = prefs.gamesFolders.filter { Storage.hasReadPermission(this, it) }
     val folderReady = usableFolders.isNotEmpty()
@@ -118,7 +121,10 @@ class LauncherActivity : ComponentActivity() {
     launchedExternally: Boolean,
     state: String? = null,
   ) {
-    AppPrefs(this).rememberLaunch(uri, relativePath, title)
+    val prefs = AppPrefs(this)
+    prefs.rememberLaunch(uri, relativePath, title)
+    // nearby system link: the link forms while the game starts
+    if (prefs.networkMode == AppPrefs.NET_ON && Nearby.supported(this) && Nearby.permitted(this)) NearbyService.start(this)
     startActivity(Intent(this, NativeCoreActivity::class.java).apply {
       putExtra(NativeCoreActivity.EXTRA_DVD_URI, uri.toString())
       putExtra(EXTRA_LAUNCHED_EXTERNALLY, launchedExternally)

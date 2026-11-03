@@ -1,5 +1,9 @@
 package com.rfandango.haku_x.ui.settings
 
+import android.os.Build
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -13,20 +17,22 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.rfandango.haku_x.R
 import com.rfandango.haku_x.data.AppPrefs
+import com.rfandango.haku_x.data.Nearby
 import com.rfandango.haku_x.ui.common.ChoiceDialog
 import com.rfandango.haku_x.ui.common.Hint
 import com.rfandango.haku_x.ui.common.Section
 
 /**
- * The console's network (native/net): off; Xbox Live through Insignia (the Internet through NAT, its DNS
- * server or an insigniaDNS one); system link with the consoles on this network (LAN), others reached
- * directly too (another subnet, a VPN); or system link over the Internet through an XLink Kai engine on
- * this network. Read at the next game start.
+ * The console's network (native/net): off; on, as a real console's cable: Xbox Live through Insignia (the
+ * Internet through NAT, its DNS server or an insigniaDNS one) and system link with the consoles on this
+ * Wi-Fi, nearby ones (data/Nearby.kt) and others reached directly (another subnet, a VPN), at once; or
+ * system link over the Internet through an XLink Kai engine on this network. Read at the next game start.
  */
 @Composable
 fun NetworkSettings(prefs: AppPrefs, onInsignia: () -> Unit) {
@@ -38,6 +44,11 @@ fun NetworkSettings(prefs: AppPrefs, onInsignia: () -> Unit) {
   var peersDialog by remember { mutableStateOf(false) }
   var kaiDialog by remember { mutableStateOf(false) }
   var dnsDialog by remember { mutableStateOf(false) }
+  val context = LocalContext.current
+  var nearbyAllowed by remember { mutableStateOf(false) }
+  val askNearby = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
+    nearbyAllowed = Nearby.permissions().all { r[it] == true }
+  }
   // back from Insignia's setup, which may have chosen the connection
   LifecycleResumeEffect(Unit) {
     mode = prefs.networkMode
@@ -59,7 +70,22 @@ fun NetworkSettings(prefs: AppPrefs, onInsignia: () -> Unit) {
     },
     modifier = Modifier.clickable { modeDialog = true },
   )
-  if (mode == AppPrefs.NET_INSIGNIA) {
+  if (mode == AppPrefs.NET_ON) {
+    // nearby consoles: what they need (the permission, Bluetooth), or that they're found by themselves
+    if (Nearby.supported(context)) {
+      val allowed = Nearby.permitted(context) || nearbyAllowed
+      ListItem(
+        headlineContent = { Text(stringResource(R.string.settings_network_nearby)) },
+        supportingContent = {
+          Text(stringResource(when {
+            !allowed -> R.string.settings_network_nearby_allow
+            !Nearby.bluetoothOn(context) -> R.string.settings_network_nearby_bluetooth
+            else -> R.string.settings_network_nearby_desc
+          }))
+        },
+        modifier = if (allowed) Modifier else Modifier.clickable { askNearby.launch(nearbyAsks(context)) },
+      )
+    }
     ListItem(
       headlineContent = { Text(stringResource(R.string.settings_network_insignia_dns)) },
       supportingContent = {
@@ -69,7 +95,7 @@ fun NetworkSettings(prefs: AppPrefs, onInsignia: () -> Unit) {
       modifier = Modifier.clickable { dnsDialog = true },
     )
   }
-  if (mode == AppPrefs.NET_LAN) {
+  if (mode == AppPrefs.NET_ON) {
     ListItem(
       headlineContent = { Text(stringResource(R.string.settings_network_peers)) },
       supportingContent = {
@@ -95,7 +121,16 @@ fun NetworkSettings(prefs: AppPrefs, onInsignia: () -> Unit) {
       title = stringResource(R.string.settings_network_mode),
       options = MODES.map { it to stringResource(modeLabel(it)) },
       current = mode,
-      onPick = { mode = it; prefs.networkMode = it; modeDialog = false },
+      onPick = {
+        mode = it
+        prefs.networkMode = it
+        modeDialog = false
+        // nearby consoles' Wi-Fi Direct and Bluetooth, and the notification that says who is linked:
+        // asked for as it's turned on, what isn't allowed yet
+        if (it == AppPrefs.NET_ON && Nearby.supported(context)) {
+          nearbyAsks(context).takeIf { a -> a.isNotEmpty() }?.let { a -> askNearby.launch(a) }
+        }
+      },
       onDismiss = { modeDialog = false },
     )
   }
@@ -128,11 +163,10 @@ fun NetworkSettings(prefs: AppPrefs, onInsignia: () -> Unit) {
   }
 }
 
-private val MODES = listOf(AppPrefs.NET_OFF, AppPrefs.NET_INSIGNIA, AppPrefs.NET_LAN, AppPrefs.NET_KAI)
+private val MODES = listOf(AppPrefs.NET_OFF, AppPrefs.NET_ON, AppPrefs.NET_KAI)
 
 private fun modeLabel(value: String) = when (value) {
-  AppPrefs.NET_INSIGNIA -> R.string.settings_network_insignia
-  AppPrefs.NET_LAN -> R.string.settings_network_lan
+  AppPrefs.NET_ON -> R.string.settings_network_on
   AppPrefs.NET_KAI -> R.string.settings_network_kai_mode
   else -> R.string.settings_network_off
 }
@@ -157,3 +191,12 @@ private fun TextDialog(title: String, hint: String, value: String, onDone: (Stri
     dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.cancel)) } },
   )
 }
+
+/** What nearby consoles ask for and isn't allowed yet: Wi-Fi Direct and Bluetooth, and (Android 13) the
+ *  notification that says who is linked. */
+private fun nearbyAsks(context: android.content.Context): Array<String> =
+  (Nearby.permissions() + listOfNotNull(Manifest.permission.POST_NOTIFICATIONS
+    .takeIf { Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU }))
+    .filter { androidx.core.content.ContextCompat.checkSelfPermission(context, it) !=
+      android.content.pm.PackageManager.PERMISSION_GRANTED }
+    .toTypedArray()

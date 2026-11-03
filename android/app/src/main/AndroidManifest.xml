@@ -12,6 +12,23 @@
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
   <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
   <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+  <!-- Nearby system link (data/Nearby.kt, NearbyService): over Wi-Fi Direct,
+       with no router, found over Bluetooth LE. Nearby devices (Android 13)
+       and Bluetooth (12), the precise location before them; the service
+       keeps the link while games run. -->
+  <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+  <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
+    android:usesPermissionFlags="neverForLocation" />
+  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
+    android:maxSdkVersion="32" />
+  <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+    android:usesPermissionFlags="neverForLocation" />
+  <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+  <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+  <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
   <application
     android:name=".HakuXApplication"
@@ -58,6 +75,12 @@
       android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
       android:excludeFromRecents="true"
       android:noHistory="true"
+      android:exported="false" />
+
+    <!-- Nearby play's link, kept while games run. -->
+    <service
+      android:name=".NearbyService"
+      android:foregroundServiceType="connectedDevice"
       android:exported="false" />
 
     <!-- The system installer's answers about an update (data/Updates.kt). -->

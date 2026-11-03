@@ -137,12 +137,21 @@ class AppPrefs(context: Context) {
     set(value) = sp.edit { putString(KEY_AV_PACK, value) }
 
   /**
-   * The console's network: off, lan (system link with consoles on this network), kai (XLink Kai) or
-   * insignia (the Internet through NAT: Xbox Live via Insignia).
+   * The console's network: off (no cable), on (Xbox Live through Insignia and system link with the
+   * consoles on this Wi-Fi and nearby, at once, as a real console's cable has both), or kai (system
+   * link over the Internet through XLink Kai). The modes before (insignia, lan, nearby) read as on.
    */
   var networkMode: String
-    get() = sp.getString(KEY_NETWORK, NET_OFF) ?: NET_OFF
+    get() = when (val m = sp.getString(KEY_NETWORK, NET_OFF) ?: NET_OFF) {
+      "insignia", "lan", "nearby" -> NET_ON
+      else -> m
+    }
     set(value) = sp.edit { putString(KEY_NETWORK, value) }
+
+  /** This console's ID for nearby system link's choice of a group owner (data/Nearby.kt): random, kept. */
+  val nearbyId: Int
+    get() = sp.getInt(KEY_NEARBY_ID, 0).takeIf { it != 0 }
+      ?: (java.security.SecureRandom().nextInt() or 1).also { id -> sp.edit { putInt(KEY_NEARBY_ID, id) } }
 
   /** LAN: consoles reached directly as well (another subnet, a VPN): "ip[:port], ...". */
   var lanPeers: String
@@ -263,9 +272,9 @@ class AppPrefs(context: Context) {
     private const val KEY_INSIGNIA_SETUP_URI = "insignia_setup_uri"
     private const val KEY_INSIGNIA_RESUME = "insignia_wizard_resume"
     const val NET_OFF = "off"
-    const val NET_LAN = "lan"
+    const val NET_ON = "on"
     const val NET_KAI = "kai"
-    const val NET_INSIGNIA = "insignia"
+    private const val KEY_NEARBY_ID = "network_nearby_id"
     /** Insignia's DNS server (insignia.live/connect): the console's primary. */
     const val INSIGNIA_DNS = "46.101.64.175"
     private const val KEY_LANGUAGE = "console_language"

@@ -30,6 +30,11 @@ object Network {
     return "${(b ushr 24) and 0xFF}.${(b ushr 16) and 0xFF}.${(b ushr 8) and 0xFF}.${b and 0xFF}/$bits"
   }
 
+  /** This device's IPv4 address on its Wi-Fi or Ethernet network (not a VPN's), or null: nearby system link
+   *  tells it, so that consoles on one network find they need no Wi-Fi Direct between them. */
+  fun localAddress(context: Context): Inet4Address? =
+    context.getSystemService(ConnectivityManager::class.java)?.let { localIpv4(it) }?.address as? Inet4Address
+
   /** The first IPv4 address of a Wi-Fi or Ethernet network that isn't a VPN, the active one first. */
   @Suppress("DEPRECATION") // allNetworks, deprecated for callbacks: one look as the game starts is enough
   private fun localIpv4(cm: ConnectivityManager): LinkAddress? =
