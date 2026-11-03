@@ -12,7 +12,11 @@
  */
 #include "native/dev/apu/apu_int.h"
 
+#ifdef NC_DESKTOP
+#include <SDL3/SDL.h>
+#else
 #include <aaudio/AAudio.h>
+#endif
 
 #define OUT_RATE 48000
 #define OUT_FRAME_BYTES 4   /* a stereo sample: two 16-bit channels */
@@ -25,7 +29,9 @@ static struct {
     int samples;             /* the callback's size, in frames */
     pthread_cond_t *wake;
     pthread_mutex_t mu;      /* stream, app_paused: the activity's thread, reopen_thread */
+#ifndef NC_DESKTOP
     AAudioStream *stream;    /* NULL: none (reopen_thread drains the ring) */
+#endif
     bool started, app_paused;
     bool reopening;          /* reopen_thread runs */
     uint32_t callbacks, short_callbacks;
@@ -85,6 +91,7 @@ static void fill(uint8_t *stream, int bytes)
     pthread_cond_broadcast(g_out.wake);
 }
 
+#ifndef NC_DESKTOP
 static aaudio_data_callback_result_t on_data(AAudioStream *s, void *user, void *data, int32_t frames)
 {
     fill(data, frames * OUT_FRAME_BYTES);
@@ -247,3 +254,106 @@ void nc_audio_set_paused(bool on)
     }
     pthread_mutex_unlock(&g_out.mu);
 }
+#else /* NC_DESKTOP (Windows, Linux): SDL3's audio stream on the default device */
+
+/* SDL follows the default device itself (a headset plugged in, the default
+ * changed in Windows' settings): one stream for the run. Its callback asks
+ * for what the device will play next; the ring gives it, padded with
+ * silence as AAudio's callback was. */
+static SDL_AudioStream *g_sdl;
+static float g_volume = 1.0f;
+
+static void SDLCALL on_sdl(void *user, SDL_AudioStream *s, int additional, int total)
+{
+    static uint8_t buf[16384];
+    while (additional > 0) {
+        int n = MIN(additional, (int)sizeof(buf));
+        n -= n % OUT_FRAME_BYTES;
+        if (n <= 0) {
+            break;
+        }
+        fill(buf, n);
+        SDL_PutAudioStreamData(s, buf, n);
+        additional -= n;
+    }
+}
+
+/* No device at all: the ring drained at the device's rate, without sound. */
+static void *drain_thread(void *arg)
+{
+    static uint8_t buf[16384];
+    const int len = MIN(g_out.samples * OUT_FRAME_BYTES, (int)sizeof(buf));
+    const int64_t period_ns = (int64_t)(len / OUT_FRAME_BYTES) * 1000000000LL / OUT_RATE;
+    struct timespec t0;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    int64_t next = (int64_t)t0.tv_sec * 1000000000LL + t0.tv_nsec;
+    for (;;) {
+        next += period_ns;
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        const int64_t left = next - ((int64_t)now.tv_sec * 1000000000LL + now.tv_nsec);
+        if (left > 0) {
+            usleep((unsigned long long)(left / 1000));
+        }
+        fill(buf, len);
+    }
+    return NULL;
+}
+
+int apu_out_open(int capacity_bytes, int samples, pthread_cond_t *wake)
+{
+    g_out.buf = calloc(1, (size_t)capacity_bytes);
+    g_out.cap = (uint32_t)capacity_bytes;
+    g_out.samples = samples;
+    g_out.wake = wake;
+    g_out.started = true;
+
+    char frames[16];
+    snprintf(frames, sizeof(frames), "%d", samples);
+    SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, frames);
+    const SDL_AudioSpec spec = {SDL_AUDIO_S16LE, 2, OUT_RATE};
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO)) {
+        g_sdl = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, on_sdl, NULL);
+    }
+    if (!g_sdl) {
+        nc_log("hakuX-apu", "no output stream (SDL: %s); draining without sound", SDL_GetError());
+        pthread_t t;
+        apu_thread_start(&t, "apu.drain", drain_thread, NULL, false);
+    } else {
+        pthread_mutex_lock(&g_out.mu);
+        if (!g_out.app_paused) {
+            SDL_ResumeAudioStreamDevice(g_sdl);
+        }
+        SDL_SetAudioStreamGain(g_sdl, g_volume);
+        pthread_mutex_unlock(&g_out.mu);
+        nc_log("hakuX-apu", "output stream: %s, %d frames a callback asked",
+               SDL_GetAudioDeviceName(SDL_GetAudioStreamDevice(g_sdl)), samples);
+    }
+    return samples * OUT_FRAME_BYTES;
+}
+
+/* The output's gain (0-1, the front end's volume), before or after it opens. */
+void nc_audio_set_volume(float v)
+{
+    g_volume = v < 0 ? 0 : v > 1 ? 1 : v;
+    if (g_sdl) {
+        SDL_SetAudioStreamGain(g_sdl, g_volume);
+    }
+}
+
+/* The emulation paused (the window minimized, the front end's pause): the
+ * device stops pulling silence meanwhile, and starts again on resuming. */
+void nc_audio_set_paused(bool on)
+{
+    pthread_mutex_lock(&g_out.mu);
+    g_out.app_paused = on;
+    if (g_sdl) {
+        if (on) {
+            SDL_PauseAudioStreamDevice(g_sdl);
+        } else {
+            SDL_ResumeAudioStreamDevice(g_sdl);
+        }
+    }
+    pthread_mutex_unlock(&g_out.mu);
+}
+#endif

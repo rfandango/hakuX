@@ -22,6 +22,7 @@ static bool g_widescreen;
 static bool g_fxaa;
 static int g_upscale = NC_UPSCALE_BILINEAR;
 static bool g_shown;
+static bool g_show_fps;
 
 /* Frame rate from the HLE GPU's presented frames. */
 static uint64_t g_win_presented, g_win_start_ns, g_last_present_ns, g_seen_presented;
@@ -34,6 +35,11 @@ static struct {
     int fxaa, upscale;      /* -1: the setting's */
     bool average;
 } g_dbg = {-1, -1, true};
+
+void nc_present_set_show_fps(bool on)
+{
+    g_show_fps = on;
+}
 
 bool nc_present_init(void)
 {
@@ -188,6 +194,7 @@ bool nc_present_frame(struct ANativeWindow *win)
         place(fw, fh, ww, wh, &sx, &sy);
         __atomic_store_n(&g_shown, true, __ATOMIC_RELAXED);
     }
+    hle_present_set_osd(g_show_fps ? (g_fps > 0 ? g_fps : 0.01f) : 0);
     hle_present_end(sx, sy, fxaa, upscale, g_dbg.average, key);
     return true;
 }

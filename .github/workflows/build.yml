@@ -1,0 +1,83 @@
+name: Build
+
+on:
+  push:
+    branches: [master, linux-arm64-desktop]
+  pull_request:
+
+jobs:
+  build-linux-arm64:
+    name: Linux arm64
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive   # external/fex and its submodules
+
+      - name: Cache FEX submodule
+        uses: actions/cache@v4
+        with:
+          path: external/fex
+          key: fex-${{ hashFiles('.gitmodules') }}-${{ hashFiles('external/fex/.git') }}
+          restore-keys: fex-${{ hashFiles('.gitmodules') }}-
+
+      - name: Cache third-party deps
+        uses: actions/cache@v4
+        with:
+          path: ../deps
+          key: deps-${{ hashFiles('tools/fetch_deps.sh') }}
+
+      - name: Cache sccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/sccache
+          key: sccache-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: sccache-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            git clang lld cmake ninja-build pkg-config python3 zlib1g-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+            libxss-dev libxtst-dev libxfixes-dev \
+            libxkbcommon-dev libwayland-dev wayland-protocols \
+            libegl-dev libgl-dev libdecor-0-dev \
+            libdrm-dev libgbm-dev \
+            libasound2-dev libpulse-dev libpipewire-0.3-dev \
+            libudev-dev libdbus-1-dev libibus-1.0-dev \
+            sccache
+
+      - name: Fetch third-party sources
+        run: |
+          chmod +x tools/fetch_deps.sh
+          tools/fetch_deps.sh ../deps
+
+      - name: Configure
+        run: |
+          cmake -S native -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld" \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
+            -DNC_DEPS=../deps
+
+      - name: Build
+        run: cmake --build build --target hakux
+
+      - name: sccache stats
+        run: sccache --show-stats
+
+      - name: Package AppImage
+        run: |
+          chmod +x tools/release/package_linux.sh
+          tools/release/package_linux.sh build dist "${GITHUB_REF_NAME}"
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: kantaiX-linux-aarch64
+          path: dist/kantaiX-*.AppImage

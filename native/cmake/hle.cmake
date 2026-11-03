@@ -4,11 +4,19 @@
 #
 # Vulkan dependencies come from NC_DEPS (same revisions as the app build):
 #   volk, glslang, spirv_reflect, vma, root/subprojects/nv2a_vsh_cpu.
-set(NC_DEPS "D:/tools/native-deps" CACHE PATH "native core third-party sources")
+set(NC_DEPS "${CMAKE_CURRENT_LIST_DIR}/../../deps" CACHE PATH "native core third-party sources")
 
 add_library(nc_volk STATIC "${NC_DEPS}/volk/volk.c")
 target_include_directories(nc_volk PUBLIC "${NC_DEPS}/volk")
-target_compile_definitions(nc_volk PUBLIC VK_NO_PROTOTYPES VK_USE_PLATFORM_ANDROID_KHR)
+# Khronos' headers (tools/fetch_deps.sh) when there, else the system's
+if(EXISTS "${NC_DEPS}/Vulkan-Headers/include/vulkan/vulkan.h")
+  target_include_directories(nc_volk BEFORE PUBLIC "${NC_DEPS}/Vulkan-Headers/include")
+endif()
+if(NC_LINUX_ARM64)
+  target_compile_definitions(nc_volk PUBLIC VK_NO_PROTOTYPES)
+else()
+  target_compile_definitions(nc_volk PUBLIC VK_NO_PROTOTYPES VK_USE_PLATFORM_ANDROID_KHR)
+endif()
 
 add_library(nc_spirv_reflect STATIC "${NC_DEPS}/spirv_reflect/spirv_reflect.c")
 target_include_directories(nc_spirv_reflect PUBLIC "${NC_DEPS}/spirv_reflect")
@@ -86,8 +94,13 @@ target_include_directories(hakux_hle PUBLIC "${NC_REPO}" "${NC_DEPS}/root" "${NC
 target_include_directories(hakux_hle PRIVATE "${HAKUX_FEX_DIR}/External/xxhash")
 target_compile_definitions(hakux_hle PUBLIC CONFIG_VULKAN=1 HAKUX_HLE_GPU=1 HAKUX_NATIVE_CORE=1)
 target_compile_options(hakux_hle PRIVATE -Wno-unused-parameter -Wno-unused-function -Wno-sign-compare)
-target_link_libraries(hakux_hle PUBLIC nc_glib nc_volk nc_spirv_reflect glslang SPIRV
-                      glslang-default-resource-limits android log)
+if(NC_LINUX_ARM64)
+  target_link_libraries(hakux_hle PUBLIC nc_glib nc_volk nc_spirv_reflect glslang SPIRV
+                        glslang-default-resource-limits)
+else()
+  target_link_libraries(hakux_hle PUBLIC nc_glib nc_volk nc_spirv_reflect glslang SPIRV
+                        glslang-default-resource-limits android log)
+endif()
 
 # The MCPX APU: xemu's device (hw/xbox/mcpx/apu) ported onto the core's own
 # services (native/dev/apu/apu_base.h).
@@ -107,4 +120,8 @@ add_library(hakux_apu STATIC
 target_include_directories(hakux_apu PRIVATE "${NC_REPO}")
 target_compile_options(hakux_apu PRIVATE -Wno-unused-parameter -Wno-unused-function -Wno-sign-compare
                        -Wno-unused-variable)
-target_link_libraries(hakux_apu PUBLIC hakux_hle aaudio log)
+if(NC_LINUX_ARM64)
+  target_link_libraries(hakux_apu PUBLIC hakux_hle SDL3::SDL3)
+else()
+  target_link_libraries(hakux_apu PUBLIC hakux_hle aaudio log)
+endif()

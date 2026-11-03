@@ -45,6 +45,11 @@ void nc_core_run(NcCore *c);
  * SIGSEGV/SIGBUS handler calls this first; true means handled (return from
  * the handler), false that the fault is someone else's. */
 bool nc_core_fault(NcCore *c, int sig, siginfo_t *info, void *ucontext);
+/* fault_linux_arm64.c: install the SIGSEGV/SIGBUS handler for the core on
+ * arm64 Linux (desktop builds only). */
+#if defined(__aarch64__) && defined(__linux__) && !defined(__ANDROID__)
+void nc_core_fault_install(NcCore *c);
+#endif
 
 #ifdef __cplusplus
 }

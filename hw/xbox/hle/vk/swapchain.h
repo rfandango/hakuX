@@ -36,5 +36,13 @@ bool hle_present_frame(uint32_t *w, uint32_t *h);
  * false samples a frame larger than its place bilinearly too (comparisons).
  * key: what hle_present_unchanged compares next. */
 void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, uint64_t key);
+/* A picture of the next refresh that goes through, as the window shows it,
+ * written to path (a BMP) on the window's thread. */
+void hle_present_shot(const char *path);
+/* The CRT filter on the window's picture: 0 none, 1 soft scanlines, 2 a
+ * TV, 3 an arcade monitor (any thread; the next refresh). */
+void hle_present_set_crt(int kind);
+/* The frame rate shown in the window's corner, 0 none (any thread). */
+void hle_present_set_osd(float fps);
 
 #endif

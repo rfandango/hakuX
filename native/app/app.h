@@ -26,6 +26,8 @@ void nc_present_set_aspect(int mode);
 void nc_present_set_widescreen(bool on);
 /* FXAA over each frame before it's scaled to the window. */
 void nc_present_set_fxaa(bool on);
+/* The frame rate in the window's corner. */
+void nc_present_set_show_fps(bool on);
 /* A frame smaller than its place in the window: scaled up bilinearly, or by
  * Snapdragon Game Super Resolution (a larger one is always averaged down). */
 enum { NC_UPSCALE_BILINEAR, NC_UPSCALE_SGSR };   /* swapchain.h HLE_UPSCALE_*'s */

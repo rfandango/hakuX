@@ -36,7 +36,10 @@
 #include "hw/xbox/hle/vk/quirks.h"
 #include "hw/xbox/hle/vk/swapchain.h"
 
-#include <android/native_window.h>
+#include "hw/xbox/hle/vk/native_window.h"
+#if defined(NC_DESKTOP)
+#include <SDL3/SDL_vulkan.h>
+#endif
 
 #define T (g_ps.t)
 #define PS_FRAMES 3             /* the presenter's submits in flight */
@@ -691,9 +694,13 @@ bool hle_present_begin(struct ANativeWindow *win, uint32_t *w, uint32_t *h)
     if (win != g_ps.win && (!win || hle_now_ns() - g_ps.lost_ns > 250000000ll)) {
         drop_window();
         if (win) {
+#if defined(NC_DESKTOP)
+            if (!SDL_Vulkan_CreateSurface((SDL_Window *)win->sdl_window, g_hvk.inst, NULL, &g_ps.surf)) {
+#else
             VkAndroidSurfaceCreateInfoKHR sci = { .sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR,
                                                   .window = win };
             if (vkCreateAndroidSurfaceKHR(g_hvk.inst, &sci, NULL, &g_ps.surf) != VK_SUCCESS) {
+#endif
                 g_ps.surf = VK_NULL_HANDLE;
                 g_ps.lost_ns = hle_now_ns();
                 hle_log("hakuX-hle-back", "present: no surface for the window");
@@ -1058,3 +1065,8 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
         s_t0 = now;
     }
 }
+
+/* xbased desktop extras — stubs until the full OSD/CRT/screenshot code is ported */
+void hle_present_set_osd(float fps) { (void)fps; }
+void hle_present_set_crt(int kind)  { (void)kind; }
+void hle_present_shot(const char *path) { (void)path; }

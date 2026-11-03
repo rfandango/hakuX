@@ -26,7 +26,7 @@
 #include <cstring>
 #include <string>
 #include <sys/mman.h>
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(NC_DESKTOP)
 #include <sys/system_properties.h>
 #include "hw/xbox/hle/prop.h"
 #endif

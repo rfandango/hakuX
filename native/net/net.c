@@ -6,6 +6,7 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <stdio.h>
 #include <poll.h>
 #include <pthread.h>
 #include <stdlib.h>

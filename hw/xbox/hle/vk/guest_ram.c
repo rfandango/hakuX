@@ -3,7 +3,9 @@
  */
 #include "hw/xbox/hle/base.h"
 
+#ifdef __ANDROID__
 #include <android/hardware_buffer.h>
+#endif
 #include "hw/xbox/hle/hle.h"
 #include "hw/xbox/hle/mem/guestmem.h"
 #include "hw/xbox/hle/uma/uma.h"
@@ -16,6 +18,7 @@ bool g_hland_coherent;
 
 #define T (g_hvk.t)
 
+#ifdef __ANDROID__
 static bool import(AHardwareBuffer *ahb, bool bda)
 {
     VkAndroidHardwareBufferPropertiesANDROID props = {
@@ -77,11 +80,20 @@ static bool import(AHardwareBuffer *ahb, bool bda)
     return true;
 }
 
+#endif
+
 int hle_vk_guest_ram_init(void)
 {
+#ifdef __ANDROID__
     AHardwareBuffer *ahb = hle_uma_ahb();
     g_hram.size = hle_ram_size();
     g_hram.zero_copy = ahb && ((g_hvk.caps.bda && import(ahb, true)) || import(ahb, false));
+#else
+    /* a discrete GPU: guest RAM is copied in (the arena), not imported */
+    void *ahb = NULL;
+    g_hram.size = hle_ram_size();
+    g_hram.zero_copy = false;
+#endif
     if (!g_hram.zero_copy) {
         hle_log("hakuX-hle-back", "guest RAM not imported (%s): copy fallback",
                 ahb ? "import failed" : "RAM is not an AHB");
@@ -104,8 +116,24 @@ int hle_vk_arena_init(uint32_t size)
     T.vkGetBufferMemoryRequirements(g_hvk.dev, g_harena.buf, &req);
     VkMemoryPropertyFlags hv = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-    int mt = hle_vk_memtype(req.memoryTypeBits,
-                            hv | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0);
+    /* The decoder copies every draw's vertices and indices in. On Windows
+     * into CPU-cached memory (a discrete GPU reads it over the bus; an
+     * integrated one's is its own): device-local host-visible memory there
+     * is the GPU's VRAM through the BAR, and the copies crossing the bus
+     * held Conker's decoder to 225 fps uncapped, 317 from cached memory.
+     * HAKUX_HLE_ARENA=vram|sys|cached chooses (comparisons). */
+    const char *ae = getenv("HAKUX_HLE_ARENA");
+#ifdef NC_DESKTOP
+    if (!ae) {
+        ae = "cached";
+    }
+#endif
+    int mt = -1;
+    if (ae && !strcmp(ae, "cached")) {
+        mt = hle_vk_memtype(req.memoryTypeBits, hv | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, 0);
+    } else if (!ae || !strcmp(ae, "vram")) {
+        mt = hle_vk_memtype(req.memoryTypeBits, hv | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0);
+    }
     if (mt < 0) {
         mt = hle_vk_memtype(req.memoryTypeBits, hv, 0);
     }
@@ -118,6 +146,8 @@ int hle_vk_arena_init(uint32_t size)
     T.vkBindBufferMemory(g_hvk.dev, g_harena.buf, g_harena.mem, 0);
     T.vkMapMemory(g_hvk.dev, g_harena.mem, 0, size, 0, (void **)&g_harena.map);
     hle_arena_init(&g_harena.alloc, size);
+    hle_log("hakuX-hle-back", "upload arena: %u MiB, memtype %d flags 0x%x", size >> 20, mt,
+            g_hvk.mem.memoryTypes[mt].propertyFlags);
     return g_harena.map ? 0 : -1;
 }
 

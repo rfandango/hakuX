@@ -8,7 +8,7 @@
 #ifndef HW_XBOX_HLE_PROP_H
 #define HW_XBOX_HLE_PROP_H
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(NC_DESKTOP)
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>

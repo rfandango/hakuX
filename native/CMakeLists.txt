@@ -1,14 +1,19 @@
-# hakuX native core (QEMU-free): FEXCore fork + reimplemented Xbox kernel.
+# kantaiX native core: FEXCore fork + reimplemented Xbox kernel + SDL3 desktop UI.
 #
-# hakux_native is the core library; xboxrun runs a title from the command
-# line on the device (adb shell) for the frontier loop. Cross-compiled with
-# the NDK into build/native/core; the steps are in android/README.md.
+# Linux arm64 (NC_LINUX_ARM64): builds the kantaiX executable — the standalone
+# SDL3 dashboard UI. Android: hakux_native library + xboxrun, as in hakuX.
 cmake_minimum_required(VERSION 3.20)
 project(hakux_native C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Platform detection: arm64 Linux host outside the Android NDK → desktop build.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID AND
+   CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+  set(NC_LINUX_ARM64 ON)
+endif()
 
 # ThinLTO for Release builds of everything but FEX (its own ENABLE_LTO stays
 # off, fex.cmake): the decoder and the renderer ~2% lighter (the RP5, DOA2).
@@ -24,7 +29,14 @@ if(HAKUX_LTO AND CMAKE_BUILD_TYPE STREQUAL "Release")
 endif()
 
 get_filename_component(NC_REPO "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
-include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/fex.cmake")
+
+if(NC_LINUX_ARM64)
+  # Desktop arm64 Linux: FEX as the CPU backend, SDL3 front end, no NDK.
+  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/linux_arm64.cmake")
+else()
+  # Android (default hakuX path).
+  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/fex.cmake")
+endif()
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/hle.cmake")
 
 # libslirp (NC_DEPS/libslirp, 4.7.0, unmodified): the NAT backend's TCP/IP
@@ -52,8 +64,12 @@ target_include_directories(nc_slirp BEFORE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/
 target_include_directories(nc_slirp PUBLIC "${CMAKE_BINARY_DIR}/slirp")
 target_link_libraries(nc_slirp PRIVATE nc_glib)
 target_compile_options(nc_slirp PRIVATE -w)
+if(NC_LINUX_ARM64)
+  # Our glib shim doesn't pull signal.h transitively like the real GLib does.
+  target_compile_options(nc_slirp PRIVATE -include signal.h)
+endif()
 
-add_library(hakux_native STATIC
+set(NC_NATIVE_SOURCES
   core/log.c
   core/jmp.c
   core/vm.c
@@ -104,21 +120,40 @@ add_library(hakux_native STATIC
   cpu/cpu.cpp
   "${NC_REPO}/hw/xbox/hle/core/xbe.c"
 )
+if(NC_LINUX_ARM64)
+  # SIGSEGV/SIGBUS fault handler + the system-properties / thread compat shim
+  list(APPEND NC_NATIVE_SOURCES core/fault_linux_arm64.c compat/linux/linux.c)
+endif()
+add_library(hakux_native STATIC ${NC_NATIVE_SOURCES})
 target_include_directories(hakux_native PUBLIC "${NC_REPO}")
 # xxhash (single header, FEX's copy): the savestates' blob store (state/cache.c)
 target_include_directories(hakux_native PRIVATE "${HAKUX_FEX_DIR}/External/xxhash")
 # The HLE layer's pure modules build without QEMU in this mode.
 target_compile_definitions(hakux_native PRIVATE HLE_HOST_TEST)
-target_link_libraries(hakux_native PUBLIC nc_fex hakux_hle hakux_apu nc_slirp log z)
+if(NC_LINUX_ARM64)
+  target_link_libraries(hakux_native PUBLIC nc_fex hakux_hle hakux_apu nc_slirp pthread dl m ${NC_ZLIB_LIB})
+  if(NC_ZLIB_INCLUDE_DIRS)
+    target_include_directories(hakux_native PRIVATE ${NC_ZLIB_INCLUDE_DIRS})
+  endif()
+  nc_linux_compat(hakux_native hakux_hle)
+else()
+  target_link_libraries(hakux_native PUBLIC nc_fex hakux_hle hakux_apu nc_slirp log z)
+endif()
 target_compile_options(hakux_native PRIVATE -Wall -Wno-unused-parameter)
 
-# xboxrun's custom Vulkan driver ("vkdriver="): the app's code for it
-# (native/app/vkdriver.c, vklayer.c), through adrenotools when NC_DEPS has it
-# (cmake/app.cmake).
-add_executable(xboxrun run/xboxrun.c run/capture.c app/vkdriver.c app/vklayer.c)
-target_link_libraries(xboxrun PRIVATE hakux_native hakux_hle z log)
 target_link_libraries(hakux_hle PUBLIC hakux_native)
 target_link_libraries(nc_slirp PRIVATE hakux_native)   # nc_log
 
-# The hakuX app's native core library (native/app, cmake/app.cmake).
-include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/app.cmake")
+if(NC_LINUX_ARM64)
+  # Desktop arm64: SDL3 dashboard executable (app/desk_main.c, cmake/app_desk.cmake).
+  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/app_desk.cmake")
+  nc_linux_compat(hakux)
+else()
+  # Android: xboxrun command-line runner + Android app native library.
+  # xboxrun's custom Vulkan driver ("vkdriver="): the app's code for it
+  # (native/app/vkdriver.c, vklayer.c), through adrenotools when NC_DEPS has it
+  # (cmake/app.cmake).
+  add_executable(xboxrun run/xboxrun.c run/capture.c app/vkdriver.c app/vklayer.c)
+  target_link_libraries(xboxrun PRIVATE hakux_native hakux_hle z log)
+  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/app.cmake")
+endif()

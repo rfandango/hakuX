@@ -9,9 +9,18 @@
 #include "native/dev/dev.h"
 #include "native/core/irq.h"
 
+#include <pthread.h>
+
+#ifndef __ANDROID__
+/* Linux: no compositor's vblanks to follow; the emulated display's clock
+ * runs free (nv2a.c, as with no panel) */
+static void *vsync_thread(void *arg)
+{
+    return arg;
+}
+#else
 #include <android/choreographer.h>
 #include <android/looper.h>
-#include <pthread.h>
 
 static void on_frame(long frame_ns, void *data)
 {
@@ -38,6 +47,8 @@ static void *vsync_thread(void *arg)
     }
     return NULL;
 }
+
+#endif
 
 void nc_vsync_start(void)
 {
