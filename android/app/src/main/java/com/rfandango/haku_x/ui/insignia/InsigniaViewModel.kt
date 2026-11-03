@@ -18,7 +18,7 @@ import kotlinx.coroutines.withContext
 
 /** What Insignia's setup has done: each step's state, read from the settings and the hard disk. */
 data class InsigniaStatus(
-  /** The console's network is Insignia's (AppPrefs.NET_INSIGNIA). */
+  /** The console's network is Insignia's (AppPrefs.NET_ON). */
   val network: Boolean = false,
   /** The dashboard is on C:. */
   val dashboard: Boolean = false,
@@ -52,7 +52,7 @@ class InsigniaViewModel(app: Application) : AndroidViewModel(app) {
   val downloadJob: StateFlow<WizardJob?> = _downloadJob
 
   private fun read() = InsigniaStatus(
-    network = prefs.networkMode == AppPrefs.NET_INSIGNIA,
+    network = prefs.networkMode == AppPrefs.NET_ON,
     dashboard = Dashboard.installed(hddRoot),
     setup = Insignia.setupUri(getApplication()) != null,
     registered = prefs.insigniaRegistered,
@@ -65,7 +65,7 @@ class InsigniaViewModel(app: Application) : AndroidViewModel(app) {
   }
 
   fun useInsignia() {
-    prefs.networkMode = AppPrefs.NET_INSIGNIA
+    prefs.networkMode = AppPrefs.NET_ON
     refresh()
   }
 

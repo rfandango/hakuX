@@ -32,6 +32,7 @@ import android.widget.Toast
 import android.window.OnBackInvokedDispatcher
 import androidx.documentfile.provider.DocumentFile
 import com.rfandango.haku_x.data.AppPrefs
+import com.rfandango.haku_x.data.Nearby
 import com.rfandango.haku_x.data.CheatInfo
 import com.rfandango.haku_x.data.Controllers
 import com.rfandango.haku_x.data.GameOverrides
@@ -264,24 +265,28 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
     /* Reads take a quarter of the console's drives' time, their thread
      * waiting (the game's other threads run meanwhile, as on the console). */
     args += "devtime=${if (settings.consoleTiming) 1 else 0}"
-    /* The console's network (native/net): system link with the consoles on
-     * this network (their broadcasts reach it under the multicast lock), or
-     * through an XLink Kai engine; the Internet through NAT, Insignia's DNS
-     * server given by DHCP (Xbox Live); off, no cable. */
+    /* The console's network (native/net): on, the Internet through NAT
+     * (Xbox Live: Insignia's DNS server given by DHCP) and system link (the
+     * consoles' broadcasts reach it under the multicast lock) at once; system
+     * link through an XLink Kai engine; off, no cable. */
     val prefs = AppPrefs(this)
     when (prefs.networkMode) {
-      AppPrefs.NET_LAN -> {
-        args += "net=lan"
-        Network.broadcastAddress(this)?.let { args += "lanbcast=$it" }
-        prefs.lanPeers.replace(" ", "").takeIf { it.isNotEmpty() }?.let { args += "lanpeers=$it" }
+      /* Xbox Live through Insignia and system link at once (the core's all): the consoles on this
+       * Wi-Fi, and nearby ones on the Wi-Fi Direct group the app forms meanwhile (data/Nearby.kt),
+       * whose network is known beforehand, its owner named */
+      AppPrefs.NET_ON -> {
+        args += "net=all"
+        args += "dns=${prefs.insigniaDns.trim().ifEmpty { AppPrefs.INSIGNIA_DNS }}"
+        val nearby = Nearby.supported(this)
+        listOfNotNull(Network.broadcastAddress(this), Nearby.BROADCAST.takeIf { nearby })
+          .takeIf { it.isNotEmpty() }?.let { args += "lanbcast=" + it.joinToString(",") }
+        (prefs.lanPeers.replace(" ", "").split(",").filter { it.isNotEmpty() } +
+          listOfNotNull(Nearby.OWNER.takeIf { nearby })).takeIf { it.isNotEmpty() }
+          ?.let { args += "lanpeers=" + it.joinToString(",") }
       }
       AppPrefs.NET_KAI -> prefs.kaiEngine.trim().takeIf { it.isNotEmpty() }?.let {
         args += "net=kai"
         args += "kai=$it"
-      }
-      AppPrefs.NET_INSIGNIA -> {
-        args += "net=nat"
-        args += "dns=${prefs.insigniaDns.trim().ifEmpty { AppPrefs.INSIGNIA_DNS }}"
       }
     }
     /* The game's mods (their files and XBE patches) and cheats (mods/):
@@ -313,8 +318,14 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
       else -> "started"
     })
     super.onCreate(savedInstanceState)
-    if (AppPrefs(this).networkMode == AppPrefs.NET_LAN) {
+    if (AppPrefs(this).networkMode == AppPrefs.NET_ON) {
       multicastLock = Network.multicastLock(this)
+      // nearby consoles find each other over Bluetooth: said when it's the only way (no Wi-Fi)
+      if (Nearby.supported(this) && Network.localAddress(this) == null &&
+          (!Nearby.bluetoothOn(this) || !Nearby.permitted(this))) {
+        Toast.makeText(this, if (Nearby.permitted(this)) R.string.nearby_bluetooth_off else R.string.nearby_not_allowed,
+          Toast.LENGTH_LONG).show()
+      }
     }
     setupOnScreenController()
     setupFpsOverlay()

@@ -14,6 +14,8 @@
  *   kai  system link over the Internet through XLink Kai: frames to and from
  *        a Kai engine on the local network (a PC, a Raspberry Pi), the
  *        emulator protocol Dolphin speaks to it
+ *   all  nat and lan at once, as a real console's one network has both (all.c):
+ *        Xbox Live, and system link with the consoles on the local networks
  *
  * The network thread never touches guest memory: frames go through two
  * queues, guest to network (nc_net_send, any thread) and network to guest
@@ -30,16 +32,17 @@
 extern "C" {
 #endif
 
-typedef enum NcNetMode { NC_NET_OFF, NC_NET_NAT, NC_NET_LAN, NC_NET_KAI } NcNetMode;
+typedef enum NcNetMode { NC_NET_OFF, NC_NET_NAT, NC_NET_LAN, NC_NET_KAI, NC_NET_ALL } NcNetMode;
 
 #define NC_NET_FRAME_MAX 1536           /* an Ethernet frame, header included, no FCS */
 
 /* Options (native/core/options.c), before the boot:
- *   net=off|nat|lan|kai
+ *   net=off|nat|lan|kai|all
  *   dns=A.B.C.D[,A.B.C.D]   nat: the DNS servers DHCP gives the guest
  *   lanport=N               lan: the UDP port (all consoles the same)
- *   lanbcast=A.B.C.D[/BITS] lan: the local network's broadcast address
- *                           (and its prefix: who is outside it)
+ *   lanbcast=A.B.C.D[/BITS][,...] lan: the local networks' broadcast
+ *                           addresses (and prefixes: who is outside them),
+ *                           up to NC_NET_BCASTS (Wi-Fi and Wi-Fi Direct)
  *   lanpeers=IP[:PORT],...  lan: consoles also reached directly (another
  *                           subnet, a tunnel's far end)
  *   kai=HOST[:PORT]         kai: the XLink Kai engine (port 34523)
@@ -89,17 +92,24 @@ typedef struct NcNetBackend {
     void (*poll)(struct pollfd *fds, int n);
 } NcNetBackend;
 
-extern const NcNetBackend nc_net_nat, nc_net_lan, nc_net_kai;
+extern const NcNetBackend nc_net_nat, nc_net_lan, nc_net_kai, nc_net_all;
+
+/* nat.c: whether a frame's destination is the NAT's own (its gateway's and
+ * DNS's addresses, 52:55:...): all.c sends those to it alone. */
+bool nc_net_nat_address(const uint8_t mac[6]);
 
 /* A backend, on the network thread: a frame for the guest. */
 void nc_net_deliver(const uint8_t *frame, size_t len);
+
+#define NC_NET_BCASTS 4
 
 /* Backends' configuration (the options). */
 typedef struct NcNetConfig {
     uint32_t dns[2];                    /* network order, 0: none */
     uint16_t lan_port;
-    uint32_t lan_bcast;                 /* network order, 0: 255.255.255.255 */
-    uint32_t lan_mask;                  /* network order, 0: not known */
+    unsigned nbcast;                    /* lan's networks, 0: 255.255.255.255 */
+    uint32_t lan_bcast[NC_NET_BCASTS];  /* network order */
+    uint32_t lan_mask[NC_NET_BCASTS];   /* network order, 0: not known */
     unsigned npeers;
     uint32_t peer_ip[8];                /* network order */
     uint16_t peer_port[8];

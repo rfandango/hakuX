@@ -107,7 +107,7 @@ bool nc_net_option(const char *arg)
     if (!strncmp(arg, "net=", 4)) {
         const char *v = arg + 4;
         g_net.mode = !strcmp(v, "nat") ? NC_NET_NAT : !strcmp(v, "lan") ? NC_NET_LAN
-                     : !strcmp(v, "kai") ? NC_NET_KAI : NC_NET_OFF;
+                     : !strcmp(v, "kai") ? NC_NET_KAI : !strcmp(v, "all") ? NC_NET_ALL : NC_NET_OFF;
     } else if (!strncmp(arg, "dns=", 4)) {
         char buf[64];
         snprintf(buf, sizeof(buf), "%s", arg + 4);
@@ -123,17 +123,25 @@ bool nc_net_option(const char *arg)
             g_net.cfg.lan_port = (uint16_t)p;
         }
     } else if (!strncmp(arg, "lanbcast=", 9)) {
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%s", arg + 9);
-        char *slash = strchr(buf, '/');
-        if (slash) {
-            *slash = 0;
-            const int bits = atoi(slash + 1);
-            if (bits > 0 && bits <= 32) {
-                g_net.cfg.lan_mask = htonl(bits == 32 ? 0xFFFFFFFFu : ~(0xFFFFFFFFu >> bits));
+        char list[128];
+        snprintf(list, sizeof(list), "%s", arg + 9);
+        g_net.cfg.nbcast = 0;
+        for (char *save = NULL, *t = strtok_r(list, ",", &save); t && g_net.cfg.nbcast < NC_NET_BCASTS;
+             t = strtok_r(NULL, ",", &save)) {
+            const unsigned i = g_net.cfg.nbcast;
+            g_net.cfg.lan_mask[i] = 0;
+            char *slash = strchr(t, '/');
+            if (slash) {
+                *slash = 0;
+                const int bits = atoi(slash + 1);
+                if (bits > 0 && bits <= 32) {
+                    g_net.cfg.lan_mask[i] = htonl(bits == 32 ? 0xFFFFFFFFu : ~(0xFFFFFFFFu >> bits));
+                }
+            }
+            if (parse_ip(t, &g_net.cfg.lan_bcast[i])) {
+                g_net.cfg.nbcast++;
             }
         }
-        parse_ip(buf, &g_net.cfg.lan_bcast);
     } else if (!strncmp(arg, "lanpeers=", 9)) {
         parse_peers(arg + 9);
     } else if (!strncmp(arg, "kai=", 4)) {
@@ -374,6 +382,7 @@ void nc_net_start(void)
     const NcNetBackend *be = g_net.mode == NC_NET_NAT   ? &nc_net_nat
                              : g_net.mode == NC_NET_LAN ? &nc_net_lan
                              : g_net.mode == NC_NET_KAI ? &nc_net_kai
+                             : g_net.mode == NC_NET_ALL ? &nc_net_all
                                                         : NULL;
     if (!be) {
         nc_log("hakuX-native-net", "network off: the NIC has no link");

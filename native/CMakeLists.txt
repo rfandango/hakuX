@@ -76,6 +76,7 @@ add_library(hakux_native STATIC
   dev/nvnet.c
   net/net.c
   net/lan.c
+  net/all.c
   net/kai.c
   net/nat.c
   kernel/kernel.c
