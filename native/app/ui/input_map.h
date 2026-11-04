@@ -51,9 +51,14 @@ typedef struct ImMap {
     int device[4];              /* -2 none, -1 keyboard only, 0 auto, k: the k-th gamepad */
     SDL_Keycode hotkey[IM_HOTKEYS];
     float deadzone;
+    float stick_range;          /* stick.range: the output's scale, 1 = the stick's own */
+    bool stick_round;           /* stick.shape=round: the stick's circle kept, not the Duke's square */
     bool rumble;
 } ImMap;
 void im_resolve(ImMap *m, const Config *global, const Config *game);
+/* A stick's position (x, y: -1..1, up positive) as the title gets it,
+ * -1..1 on each axis: the dead zone, the shape and the range applied. */
+void im_stick(float x, float y, float deadzone, float range, bool round, float *ox, float *oy);
 /* Player p's state from its keyboard keys (keys: SDL_GetKeyboardState) and gamepad. */
 void im_read(const ImMap *m, int p, const bool *keys, SDL_Gamepad *pad, ImPad *out);
 

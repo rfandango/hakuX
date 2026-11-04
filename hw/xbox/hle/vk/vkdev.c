@@ -1,6 +1,9 @@
 /*
  * hakuX HLE GPU — Vulkan instance/device, floor + plus capability tiers.
  */
+#if defined(NC_DESKTOP) && !defined(_WIN32)
+#include <SDL3/SDL_vulkan.h>
+#endif
 #include "hw/xbox/hle/base.h"
 
 #include "hw/xbox/hle/hle.h"
@@ -12,7 +15,7 @@
 #include "hw/xbox/hle/vk/compat.h"
 #include "hw/xbox/hle/vk/quirks.h"
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
 #include <sys/system_properties.h>
 #include "hw/xbox/hle/prop.h"
 #endif
@@ -140,7 +143,7 @@ static char g_caps_v[96];
 static void caps_read(void)
 {
     g_caps_v[0] = 0;
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     hle_prop_get("debug.hakux.caps", g_caps_v);
 #endif
     if (!g_caps_v[0] && getenv("HAKUX_HLE_CAPS")) {
@@ -236,13 +239,31 @@ int hle_vk_init(void)
     vkEnumerateInstanceExtensionProperties(NULL, &nie, NULL);
     g_autofree VkExtensionProperties *iext = g_new(VkExtensionProperties, nie ? nie : 1);
     vkEnumerateInstanceExtensionProperties(NULL, &nie, iext);
-    const char *iexts[2];
+    const char *iexts[8];
     uint32_t nix = 0;
-    if (has_ext(iext, nie, VK_KHR_SURFACE_EXTENSION_NAME) &&
-        has_ext(iext, nie, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME)) {
-        iexts[nix++] = VK_KHR_SURFACE_EXTENSION_NAME;
-        iexts[nix++] = VK_KHR_ANDROID_SURFACE_EXTENSION_NAME;
+#if defined(NC_DESKTOP) && !defined(_WIN32)
+    /* Linux: the window system's surface extensions as SDL asks for them
+     * (X11's or Wayland's), when the instance has them all */
+    Uint32 nsdl = 0;
+    const char *const *sdl_ext = SDL_Vulkan_GetInstanceExtensions(&nsdl);
+    bool all = sdl_ext && nsdl && nsdl <= 6;
+    for (Uint32 i = 0; all && i < nsdl; i++) {
+        all = has_ext(iext, nie, sdl_ext[i]);
     }
+    for (Uint32 i = 0; all && i < nsdl; i++) {
+        iexts[nix++] = sdl_ext[i];
+    }
+#else
+#ifdef _WIN32
+#define NC_SURFACE_EXT VK_KHR_WIN32_SURFACE_EXTENSION_NAME
+#else
+#define NC_SURFACE_EXT VK_KHR_ANDROID_SURFACE_EXTENSION_NAME
+#endif
+    if (has_ext(iext, nie, VK_KHR_SURFACE_EXTENSION_NAME) && has_ext(iext, nie, NC_SURFACE_EXT)) {
+        iexts[nix++] = VK_KHR_SURFACE_EXTENSION_NAME;
+        iexts[nix++] = NC_SURFACE_EXT;
+    }
+#endif
     VkInstanceCreateInfo ici = {
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         .pApplicationInfo = &app,
@@ -253,12 +274,45 @@ int hle_vk_init(void)
         return -1;
     }
     volkLoadInstanceOnly(v->inst);
+#ifdef NC_DESKTOP
+    /* a PC may have several: a discrete GPU first, then an integrated one
+     * (HAKUX_GPU=N picks the Nth as the loader lists them) */
+    uint32_t n = 0;
+    vkEnumeratePhysicalDevices(v->inst, &n, NULL);
+    if (!n) {
+        hle_log("hakuX-hle-back", "vk: no physical device");
+        return -1;
+    }
+    {
+        VkPhysicalDevice all[16];
+        uint32_t na = n > 16 ? 16 : n;
+        vkEnumeratePhysicalDevices(v->inst, &na, all);
+        int best = -1, best_rank = -1;
+        const char *pick = getenv("HAKUX_GPU");
+        for (uint32_t i = 0; i < na; i++) {
+            VkPhysicalDeviceProperties p;
+            vkGetPhysicalDeviceProperties(all[i], &p);
+            const int rank = pick                                                ? (atoi(pick) == (int)i ? 9 : 0)
+                             : p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU   ? 4
+                             : p.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? 3
+                             : p.deviceType == VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU    ? 2
+                                                                                      : 1;
+            hle_log("hakuX-hle-back", "vk: GPU %u: %s (type %d)", i, p.deviceName, p.deviceType);
+            if (rank > best_rank) {
+                best = (int)i;
+                best_rank = rank;
+            }
+        }
+        v->phys = all[best];
+    }
+#else
     uint32_t n = 1;
     vkEnumeratePhysicalDevices(v->inst, &n, &v->phys);
     if (!n) {
         hle_log("hakuX-hle-back", "vk: no physical device");
         return -1;
     }
+#endif
     vkGetPhysicalDeviceProperties(v->phys, &v->props);
     vkGetPhysicalDeviceMemoryProperties(v->phys, &v->mem);
 
@@ -504,6 +558,7 @@ int hle_vk_init(void)
     c->bda = v13 ? q12.bufferDeviceAddress : e_bda && q_bda.bufferDeviceAddress;
     c->ahb = e_ahb;
     c->max_lod_bias = v->props.limits.maxSamplerLodBias;
+    c->max_aniso = v->props.limits.maxSamplerAnisotropy;
     /* (unused, enabled where present: on 1.3 only) */
     c->gpl = v13 && e_gpl && q_gpl.graphicsPipelineLibrary;
     c->eds3 = v13 && e_eds3 && q_eds3.extendedDynamicState3ColorBlendEnable &&

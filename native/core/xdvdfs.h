@@ -43,6 +43,11 @@ void nc_disc_close(NcDisc *d);
  * case-insensitive). */
 bool nc_disc_find(const NcDisc *d, const char *path, NcDiscFile *out);
 
+/* Each entry of a directory table (u16 left, u16 right, u32 sector, u32 size,
+ * u8 attributes, u8 name length, name): its tree in order, then any entry the
+ * tree doesn't reach. Stops when fn returns true, and returns that. */
+bool nc_disc_dir_each(const uint8_t *dir, uint32_t size, bool (*fn)(void *ctx, const uint8_t *entry), void *ctx);
+
 /* Reads len bytes at offset off of a file. */
 bool nc_disc_read(const NcDisc *d, const NcDiscFile *f, uint64_t off, void *buf, size_t len);
 /* ... as the title's file I/O sees it: the overlay's files, but not the XBE

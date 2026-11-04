@@ -153,12 +153,24 @@ static int g_render_scale = 1;
 
 void nc_hle_set_render_scale(int scale)
 {
-    g_render_scale = scale < 1 ? 1 : scale > 4 ? 4 : scale;
+    g_render_scale = scale < 1 ? 1 : scale > 8 ? 8 : scale;
 }
 
 int hle_host_render_scale(void)
 {
     return g_render_scale;
+}
+
+static int g_anisotropy;
+
+void nc_hle_set_anisotropy(int level)
+{
+    g_anisotropy = level >= 16 ? 16 : level >= 8 ? 8 : level >= 4 ? 4 : level >= 2 ? 2 : 0;
+}
+
+int hle_host_anisotropy(void)
+{
+    return g_anisotropy;
 }
 
 /* A custom Vulkan driver's entry point (the app loads Turnip through

@@ -6,6 +6,7 @@
 #include "native/app/ui/dash_int.h"
 #include "native/app/ui/input_map.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,9 +15,10 @@
 
 static void rows_video(List *l)
 {
-    static const char *const sv[] = {"1", "2", "3", "4"};
-    static const char *const sn[] = {"1x  (640x480)", "2x  (1280x960)", "3x  (1920x1440)", "4x  (2560x1920)"};
-    opt_choice(l, S_RENDER_SCALE, "scale", sv, sn, 4, "1");
+    static const char *const sv[] = {"1", "2", "3", "4", "5", "6", "7", "8"};
+    static const char *const sn[] = {"1x  (640x480)",   "2x  (1280x960)",  "3x  (1920x1440)", "4x  (2560x1920)",
+                                     "5x  (3200x2400)", "6x  (3840x2880)", "7x  (4480x3360)", "8x  (5120x3840)"};
+    opt_choice(l, S_RENDER_SCALE, "scale", sv, sn, 8, "1");
     static const char *av[] = {"auto", "4:3", "16:9", "stretch"};
     const char *an[] = {T(S_AUTO), "4:3", "16:9", T(S_STRETCH)};
     opt_choice(l, S_ASPECT, "aspect", av, an, 4, "auto");
@@ -24,12 +26,20 @@ static void rows_video(List *l)
     static const char *anv[] = {"0", "2", "4", "8", "16"};
     const char *ann[] = {T(S_OFF), "2x", "4x", "8x", "16x"};
     opt_choice(l, S_ANISO, "aniso", anv, ann, 5, "0");
-    static const char *uv[] = {"bilinear", "sgsr"};
-    const char *un[] = {T(S_BILINEAR), "Snapdragon GSR"};
+    static const char *uv[] = {"bilinear", "fsr"};
+    const char *un[] = {T(S_BILINEAR), "AMD FSR 1"};
     opt_choice(l, S_UPSCALE, "upscale", uv, un, 2, "bilinear");
     static const char *cv[] = {"0", "1", "2", "3"};
     const char *cn[] = {T(S_OFF), T(S_CRT_SOFT), T(S_CRT_TV), T(S_CRT_ARCADE)};
     opt_choice(l, S_CRT, "crt", cv, cn, 4, "0");
+}
+
+/* PAL games at 60 Hz, as a PAL console with PAL-60 on runs them, or 50 Hz */
+static void rows_pal(List *l)
+{
+    static const char *const pv[] = {"1", "0"};
+    static const char *const pn[] = {"60 Hz", "50 Hz"};
+    opt_choice(l, S_PAL_GAMES, "pal60", pv, pn, 2, "1");
 }
 
 static void rows_console(List *l)
@@ -118,11 +128,17 @@ void scr_settings(void)
         opt_bool(&l, S_FULLSCREEN, "fullscreen", true, true);
         opt_bool(&l, S_SHOW_FPS, "showfps", false, false);
         break;
-    case 1:
+    case 1: {
+        /* the console's audio setting and the speakers it plays on: stereo,
+         * or 5.1 (the Xbox's Dolby Digital: the games' six channels) */
+        static const char *av[] = {"stereo", "5.1"};
+        const char *an[] = {T(S_STEREO), T(S_SURROUND51)};
+        opt_choice(&l, S_AUDIO_OUTPUT, "audio", av, an, 2, "stereo");
         opt_int(&l, S_VOLUME, "volume", 0, 100, 5, 100, "%");
         opt_bool(&l, S_MUTE_BG, "mutebg", true, false);
         opt_bool(&l, S_UI_SOUNDS, "ui.sounds", true, false);
         break;
+    }
     case 2: {
         static const char *lv[] = {"auto", "1", "2", "3", "4", "5", "6", "7", "8", "9"};
         const char *ln[] = {T(S_AUTO), "English", "日本語", "Deutsch", "Français", "Español", "Italiano", "한국어", "中文",
@@ -132,6 +148,7 @@ void scr_settings(void)
         opt_videoflag(&l, S_P480, 0x80000);
         opt_videoflag(&l, S_P720, 0x20000);
         opt_videoflag(&l, S_I1080, 0x40000);
+        rows_pal(&l);
         static const char *pv[] = {"hdtv", "standard", "svideo", "scart", "vga"};
         static const char *pn[] = {"HDTV (component)", "Standard (composite)", "S-Video", "SCART (RGB)", "VGA"};
         opt_choice(&l, S_AVPACK, "avpack", pv, pn, 5, "hdtv");
@@ -160,6 +177,7 @@ void scr_settings(void)
         opt_bool(&l, S_COVERS_ONLINE, "covers", true, false);
         opt_bool(&l, S_ANIMATED_BG, "ui.anim", true, false);
         opt_bool(&l, S_UI_SOUNDS, "ui.sounds", true, false);
+        opt_bool(&l, S_CHECK_UPDATES, "update.check", true, false);
         const char *dirs[16];
         const int nd = cfg_all(&D.global, "gamedir", dirs, 16);
         for (int i = 0; i < nd; i++) {
@@ -193,6 +211,23 @@ void scr_settings(void)
             }
         }
         opt_int(&l, S_DEADZONE, "deadzone", 0, 50, 5, 10, "%");
+        {
+            /* the sticks' range and shape, set on their own screen while
+             * they're watched; left and right step the range here too */
+            const char *shape = cfg_get(&D.global, "stick.shape");
+            const bool round = shape && !strcmp(shape, "round");
+            const int range = cfg_int(&D.global, "stick.range", 100);
+            char val[96];
+            snprintf(val, sizeof(val), "%d%%  ·  %s", range, T(round ? S_SHAPE_ROUND : S_SHAPE_SQUARE));
+            int delta = 0;
+            if (list_row(&l, T(S_STICK_RANGE), val, &delta)) {
+                dash_push(SCR_STICKS);
+            }
+            if (delta) {
+                const int r = range + delta * 5;
+                cfg_set_int(&D.global, "stick.range", r < 50 ? 50 : r > 150 ? 150 : r);
+            }
+        }
         opt_bool(&l, S_RUMBLE, "rumble", true, false);
         break;
     case 5:
@@ -254,6 +289,7 @@ void scr_game_settings(void)
                         "Português"};
     opt_choice(&l, S_CONSOLE_LANG, "lang", lv, ln, 10, "auto");
     opt_videoflag(&l, S_WIDESCREEN, 0x10000);
+    rows_pal(&l);
     opt_bool(&l, S_ASYNC_SHADERS, "asyncpipe", true, false);
     if (list_row(&l, T(S_RESET_GAME), NULL, NULL)) {
         dash_ask(T(S_RESET_GAME), reset_game);
@@ -635,6 +671,170 @@ void scr_controls(void)
         dash_pop();
     }
     draw_hints(T(S_REMAP), T(S_BACK), T(S_DELETE), NULL);
+}
+
+/* ------------------------------------------------------------ the sticks */
+
+/* The farthest each stick went, per direction: the stick's own position
+ * (x, y: -1..1, up positive), so the outline follows the settings as they
+ * change. */
+#define STICK_DIRS 72
+static float g_reach[2][STICK_DIRS][2];
+static double g_sticks_seen;
+
+static void stick_box(int s, SDL_Gamepad *pad, float bx, float by, float S, float dz, float range, bool round)
+{
+    const float cx = bx + S / 2, cy = by + S / 2, h = S / 2;
+    ui_text(cx, by - 30, T(s ? S_IN_RSTICK : S_IN_LSTICK), 20, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_CENTER);
+    ui_round(bx - 12, by - 12, S + 24, S + 24, 12, UI_PANEL);
+    /* the range the games expect: the Duke's, the whole square */
+    ui_rect(bx, by, S, S, ui_alpha(UI_GREEN, 0.07f));
+    ui_round_outline(bx, by, S, S, 2, 2, UI_GREEN);
+    ui_line(cx, by, cx, by + S, 1, ui_alpha(UI_GREEN, 0.18f));
+    ui_line(bx, cy, bx + S, cy, 1, ui_alpha(UI_GREEN, 0.18f));
+    if (dz > 0) {
+        ui_ring(cx, cy, dz * h, dz * h, 0, 1.5f, ui_alpha(UI_GREY, 0.5f));
+    }
+    float x = 0, y = 0;
+    if (pad) {
+        x = SDL_GetGamepadAxis(pad, s ? SDL_GAMEPAD_AXIS_RIGHTX : SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
+        y = -SDL_GetGamepadAxis(pad, s ? SDL_GAMEPAD_AXIS_RIGHTY : SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
+        x = x < -1 ? -1 : x;
+        y = y < -1 ? -1 : y;
+        const float r = sqrtf(x * x + y * y);
+        if (r > dz) {
+            int d = (int)lroundf(atan2f(y, x) / (2 * (float)M_PI) * STICK_DIRS);
+            d = (d % STICK_DIRS + STICK_DIRS) % STICK_DIRS;
+            float *k = g_reach[s][d];
+            if (r > sqrtf(k[0] * k[0] + k[1] * k[1])) {
+                k[0] = x;
+                k[1] = y;
+            }
+        }
+    }
+    /* the range the stick reached, as the game gets it: filled, outlined.
+     * Directions a quick turn skipped (up to 30 degrees) take the line
+     * between their neighbours. */
+    float out[STICK_DIRS][2];
+    bool got[STICK_DIRS];
+    int ngot = 0;
+    for (int i = 0; i < STICK_DIRS; i++) {
+        const float *k = g_reach[s][i];
+        got[i] = k[0] != 0 || k[1] != 0;
+        if (got[i]) {
+            im_stick(k[0], k[1], dz, range, round, &out[i][0], &out[i][1]);
+            ngot++;
+        }
+    }
+    bool fill[STICK_DIRS] = {false};
+    for (int i = 0; i < STICK_DIRS && ngot > 1; i++) {
+        if (!got[i] || got[(i + 1) % STICK_DIRS]) {
+            continue;
+        }
+        int j = 2;
+        while (j <= 7 && !got[(i + j) % STICK_DIRS]) {
+            j++;
+        }
+        if (j > 7) {
+            continue;
+        }
+        const float *p0 = out[i], *p1 = out[(i + j) % STICK_DIRS];
+        for (int g = 1; g < j; g++) {
+            const float t = (float)g / j;
+            float *q = out[(i + g) % STICK_DIRS];
+            q[0] = p0[0] + (p1[0] - p0[0]) * t;
+            q[1] = p0[1] + (p1[1] - p0[1]) * t;
+            fill[(i + g) % STICK_DIRS] = true;
+        }
+    }
+    float reach = 0, px = 0, py = 0;
+    bool prev = false;
+    for (int i = 0; i <= STICK_DIRS; i++) {
+        const int d = i % STICK_DIRS;
+        if (!got[d] && !fill[d]) {
+            prev = false;
+            continue;
+        }
+        const float ox = out[d][0], oy = out[d][1];
+        const float qx = cx + ox * h, qy = cy - oy * h;
+        if (i < STICK_DIRS) {
+            ui_line(cx, cy, qx, qy, 4, ui_alpha(UI_WHITE, 0.10f));
+            /* against the square's edge in that direction */
+            const float m = fmaxf(fabsf(ox), fabsf(oy));
+            reach += m > 1 ? 1 : m;
+        }
+        if (prev) {
+            ui_line(px, py, qx, qy, 2.5f, UI_WHITE);
+        }
+        px = qx;
+        py = qy;
+        prev = true;
+    }
+    reach /= STICK_DIRS;
+    if (pad) {
+        float ox, oy;
+        im_stick(x, y, dz, range, round, &ox, &oy);
+        ui_circle(cx + x * h, cy - y * h, 5, ui_alpha(UI_GREY, 0.8f));      /* the stick itself */
+        ui_glow(cx + ox * h, cy - oy * h, 22, ui_alpha(UI_GREEN_HI, 0.5f));
+        ui_circle(cx + ox * h, cy - oy * h, 8, UI_GREEN_HI);                /* what the game gets */
+    }
+    char t[64];
+    snprintf(t, sizeof(t), "%s: %d%%", T(S_STICK_REACH), (int)lroundf(reach * 100));
+    ui_text(cx, by + S + 18, t, 22, UI_FONT_BOLD, reach >= 0.95f ? UI_GREEN_HI : reach >= 0.8f ? UI_WHITE : UI_RED,
+            UI_ALIGN_CENTER);
+}
+
+void scr_sticks(void)
+{
+    const float W = ui_w(), H = ui_h();
+    draw_header(T(S_STICK_RANGE), NULL);
+    if (ui_time() - g_sticks_seen > 0.5) {
+        memset(g_reach, 0, sizeof(g_reach));    /* a fresh look each time it opens */
+    }
+    g_sticks_seen = ui_time();
+    Config *c = D.editing_game ? &D.game : &D.global;
+    const char *shape = cfg_get(c, "stick.shape") ? cfg_get(c, "stick.shape") : cfg_get(&D.global, "stick.shape");
+    const bool round = shape && !strcmp(shape, "round");
+    const Config *rc = cfg_get(c, "stick.range") ? c : &D.global;
+    const Config *dc = cfg_get(c, "deadzone") ? c : &D.global;
+    const float range = cfg_int(rc, "stick.range", 100) / 100.0f, dz = cfg_int(dc, "deadzone", 10) / 100.0f;
+
+    /* the legend: the square, the outline */
+    const float ly = 128;
+    float lx = W / 2 - (ui_text_width(T(S_STICK_NEEDED), 18, UI_FONT_REGULAR) +
+                        ui_text_width(T(S_STICK_REACHED), 18, UI_FONT_REGULAR) + 92) / 2;
+    ui_round_outline(lx, ly + 3, 16, 16, 2, 2, UI_GREEN);
+    lx += 24;
+    lx += ui_text(lx, ly, T(S_STICK_NEEDED), 18, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_LEFT) + 32;
+    ui_line(lx, ly + 11, lx + 22, ly + 11, 2.5f, UI_WHITE);
+    lx += 30;
+    ui_text(lx, ly, T(S_STICK_REACHED), 18, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_LEFT);
+
+    SDL_Gamepad *pad = dash_active_pad();
+    const float S = fminf(220, (W - 200) / 2 - 60), by = 196, gap = fminf(160, W - 2 * S - 200);
+    const float bx0 = W / 2 - S - gap / 2, bx1 = W / 2 + gap / 2;
+    stick_box(0, pad, bx0, by, S, dz, range, round);
+    stick_box(1, pad, bx1, by, S, dz, range, round);
+    ui_text(W / 2, by + S + 52, T(pad ? S_STICK_ROTATE : S_STICK_NO_PAD), 18, UI_FONT_REGULAR,
+            pad ? UI_GREY : UI_RED, UI_ALIGN_CENTER);
+
+    List l;
+    list_begin(&l, 74, by + S + 96, W - 148, 3 * 44, 44);
+    opt_int(&l, S_STICK_RANGE, "stick.range", 50, 150, 5, 100, "%");
+    static const char *const sv[] = {"square", "round"};
+    const char *sn[] = {T(S_SHAPE_SQUARE), T(S_SHAPE_ROUND)};
+    opt_choice(&l, S_STICK_SHAPE, "stick.shape", sv, sn, 2, "square");
+    opt_int(&l, S_DEADZONE, "deadzone", 0, 50, 5, 10, "%");
+    list_end(&l);
+    if (D.in.x) {
+        memset(g_reach, 0, sizeof(g_reach));
+    }
+    if (D.in.back) {
+        dash_save_cfg();
+        dash_pop();
+    }
+    draw_hints(T(S_CHANGE), T(S_BACK), T(S_CLEAR), NULL);
+    (void)H;
 }
 
 void scr_remap(void)

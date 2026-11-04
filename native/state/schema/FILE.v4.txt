@@ -1,0 +1,33 @@
+section FILE
+record NcDiscFile
+  sector U32 x1 since 1
+  size U32 x1 since 1
+  attr U8 x1 since 1
+record DirEntry
+  name U8 x64 since 1
+  size U64 x1 since 1
+  dir BOOL x1 since 1
+record NcFile
+  used BOOL x1 since 1
+  kind U32 x1 since 1
+  path U8 x512 since 1
+  disc rec NcDiscFile x1 since 1
+  host U8 x512 since 1
+  is_dir BOOL x1 since 1
+  pos U64 x1 since 1
+  dir_next U32 x1 since 1
+  mask U8 x128 since 1
+  partition I32 x1 since 1
+  old_path U8 x320 since 1
+  old_size U64 x1 since 1
+  wrote BOOL x1 since 1
+  nlisting U32 x1 since 1
+  async BOOL x1 since 1
+  can_write BOOL x1 since 1
+  del BOOL x1 since 2
+  no_buffering BOOL x1 since 3
+record NcLink
+  name U8 x64 since 1
+  target U8 x256 since 1
+record NcFileState
+  nfiles U32 x1 since 1

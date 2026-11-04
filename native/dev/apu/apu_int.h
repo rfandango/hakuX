@@ -114,6 +114,12 @@ typedef struct MCPXAPUState {
 
 extern MCPXAPUState *g_state; /* the one APU: the savestate section's */
 
+/* 5.1 (out.c's g_apu_out_channels 6): an EP frame of the GP's six speaker
+ * outputs, FL FR C LFE BL BR, queued in place of monitor.frame_buf. Not in
+ * the savestate: the next frame fills it. */
+extern int g_apu_out_channels;
+extern int16_t g_apu_frame6[256][6];
+
 /* ---- the output device (out.c): 48 kHz 16-bit stereo, a ring of EP frames
  * (1024 bytes each) the frame thread fills and the device's callback drains */
 

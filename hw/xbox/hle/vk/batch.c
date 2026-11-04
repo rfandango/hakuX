@@ -20,7 +20,7 @@
 #include "hw/xbox/hle/hle.h"
 #include "hw/xbox/hle/vk/vkdev.h"
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
 #include <sys/system_properties.h>
 #include "hw/xbox/hle/prop.h"
 #endif
@@ -164,7 +164,7 @@ static bool batch_wanted(void)
     if (e) {
         return atoi(e) != 0;
     }
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     char v[PROP_VALUE_MAX] = "";
     if (hle_prop_get("debug.hakux.batch", v) > 0 && v[0]) {
         return atoi(v) != 0;

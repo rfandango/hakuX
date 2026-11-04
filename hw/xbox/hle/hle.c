@@ -12,7 +12,12 @@
 
 #ifdef __ANDROID__
 #include <android/log.h>
+#endif
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
 #include <sys/system_properties.h>
+#endif
+#ifdef NC_DESKTOP
+void nc_log(const char *tag, const char *fmt, ...); /* native/core/log.c: the log file */
 #endif
 
 HleRuntime g_hle;
@@ -212,13 +217,20 @@ void hle_prof_init(void)
     uint64_t f;
     __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(f));
     g_hle_prof_ns_per_tick = f ? 1e9 / (double)f : 1.0;
+#elif defined(__x86_64__)
+    /* the TSC's rate against the monotonic clock, over 20 ms */
+    const int64_t t0 = hle_prof_now(), n0 = hle_now_ns();
+    while (hle_now_ns() - n0 < 20000000) {
+    }
+    const int64_t t1 = hle_prof_now(), n1 = hle_now_ns();
+    g_hle_prof_ns_per_tick = t1 > t0 ? (double)(n1 - n0) / (double)(t1 - t0) : 1.0;
 #endif
 }
 
 /* On demand (debug): a new value of the property debug.hakux.perf turns the
  * profile on for debug.hakux.perfsec seconds (default 10); the late-frame
  * report and GPU times follow the profile. */
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
 /* Guest PC sampler (debug, during a perf capture): ~1000 times a second the
  * vCPU's EIP (racy: synced at translation-block boundaries) or "halted";
  * the hottest EIPs are logged when the capture ends. */

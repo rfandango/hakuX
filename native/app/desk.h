@@ -34,8 +34,8 @@ typedef void *HANDLE;
 #define INVALID_FILE_ATTRIBUTES ((DWORD)-1)
 #define FILE_ATTRIBUTE_DIRECTORY 0x10
 
-void nc_desk_thread_name(const char *name);     /* compat/linux/linux.c */
-void nc_desk_thread_priority(int level);
+void nc_win_thread_name(const char *name);     /* compat/linux/linux.c */
+void nc_win_thread_priority(int level);
 
 static inline DWORD GetModuleFileNameA(void *m, char *out, DWORD n)
 {

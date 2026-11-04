@@ -64,6 +64,9 @@ void hle_pb_subroutine_written(uint32_t v);
 void hle_pb_gamma(const uint8_t rgb[3][256]);
 /* PGRAPH waits in FLIP_STALL for a flip (any thread). */
 bool hle_pb_flip_waiting(void);
+/* cb runs on the decode thread each time PGRAPH starts waiting in FLIP_STALL
+ * (the uncapped vblank's early one, at once rather than at its next look). */
+void hle_pb_on_flip_wait(void (*cb)(void));
 /* Once a second: kicks, words, the method histogram's top, errors. */
 void hle_pb_diag(void);
 /* debug (the decode thread): the decoder's GET and the guest's PUT */

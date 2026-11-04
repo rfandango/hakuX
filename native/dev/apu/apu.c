@@ -466,13 +466,21 @@ static void se_frame(MCPXAPUState *d)
             for (int i = 0; i < 256; i++) {
                 d->monitor.frame_buf[i][0] *= f;
                 d->monitor.frame_buf[i][1] *= f;
+                for (int c = 0; c < 6; c++) {
+                    g_apu_frame6[i][c] *= f;
+                }
             }
         }
 
         if (d->monitor.fifo_capacity_bytes > 0) {
-            apu_out_push(d->monitor.frame_buf, sizeof(d->monitor.frame_buf));
+            if (g_apu_out_channels == 6) {
+                apu_out_push(g_apu_frame6, sizeof(g_apu_frame6));
+            } else {
+                apu_out_push(d->monitor.frame_buf, sizeof(d->monitor.frame_buf));
+            }
         }
         memset(d->monitor.frame_buf, 0, sizeof(d->monitor.frame_buf));
+        memset(g_apu_frame6, 0, sizeof(g_apu_frame6));
     }
 
     d->ep_frame_div++;
@@ -521,12 +529,12 @@ static void monitor_init(MCPXAPUState *d)
 
     int fifo_frames = getenv_int_clamped("NC_APU_FIFO_FRAMES", 3, 128, 48);
     int audio_samples = getenv_int_clamped("NC_APU_SAMPLES", 256, 4096, 512);
-    int fifo_frame_bytes = sizeof(d->monitor.frame_buf);
+    int fifo_frame_bytes = g_apu_out_channels == 6 ? (int)sizeof(g_apu_frame6) : (int)sizeof(d->monitor.frame_buf);
     int fifo_capacity_bytes = fifo_frames * fifo_frame_bytes;
 
     int drain_bytes = apu_out_open(fifo_capacity_bytes, audio_samples, &d->cond);
     if (drain_bytes <= 0) {
-        drain_bytes = audio_samples * 2 * sizeof(int16_t);
+        drain_bytes = audio_samples * g_apu_out_channels * (int)sizeof(int16_t);
     }
     drain_bytes = MAX(drain_bytes, fifo_frame_bytes);
     d->monitor.fifo_capacity_bytes = fifo_capacity_bytes;

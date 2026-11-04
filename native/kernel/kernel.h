@@ -71,7 +71,7 @@ typedef uint64_t (*NcKFn)(NcKernel *k, NcFrame *f, const uint32_t *args);
 
 /* Guest object types: the VA of the kernel's type-object data export. */
 enum NcObType { NC_OB_THREAD, NC_OB_EVENT, NC_OB_SEMAPHORE, NC_OB_MUTANT, NC_OB_TIMER, NC_OB_FILE,
-                NC_OB_DEVICE, NC_OB_SYMLINK, NC_OB_DIRECTORY, NC_OB_TYPES };
+                NC_OB_DEVICE, NC_OB_SYMLINK, NC_OB_DIRECTORY, NC_OB_IOCOMPLETION, NC_OB_TYPES };
 
 #define NC_MAX_THREADS 128
 /* The Xbox kernel's handle table grows as it fills. Super Monkey Ball
@@ -161,9 +161,20 @@ typedef struct NcThread {
     uint64_t ready_seq, run_seq;
     uint64_t slice_used_ns, slice_start_ns;
     bool slice_expired;
-    unsigned boost;          /* wait-end priority boost steps remaining (ps.c NtYieldExecution) */
+    /* NT's wait boost (KiUnwaitThread): a thread a signal woke runs at
+     * priority + the signal's increment (up to 15) until a quantum of its
+     * ends, a step a quantum. no_boost: KeSetDisableBoostThread's. */
+    int boost;
+    bool no_boost;
     NcCpuContext ctx;
 } NcThread;
+
+/* The priority t is scheduled at: its own, with its wait boost. */
+static inline int nc_thread_prio(const NcThread *t)
+{
+    const int p = t->priority + t->boost;
+    return t->boost && t->priority < 16 ? (p > 15 ? 15 : p) : t->priority;
+}
 
 typedef struct NcHandle {
     uint32_t object;         /* guest VA of the object body, 0 if free */
@@ -394,6 +405,12 @@ void nc_kernel_set_video(int64_t flags, int av_pack);
  * 7 Korean, 8 Chinese (traditional), 9 Portuguese. Before the title starts;
  * any other value keeps the stored one. */
 void nc_kernel_set_language(int language);
+/* ex.c: the console's audio setting (XC_AUDIO_FLAGS): stereo, or Dolby
+ * Digital on (the games mix six channels). Before the title starts. */
+void nc_kernel_set_audio(bool surround);
+/* ex.c: PAL titles at 60 Hz (the console's PAL-60 setting, NC_VIDEO_PAL60
+ * in the video flags; the default) or at 50 Hz. Before the title starts. */
+void nc_kernel_set_pal60(bool on);
 
 /* The console's clock and time zone, before the title starts. ke.c: its
  * time at boot is the phone's (CLOCK_REALTIME) moved by offset_ms, the
@@ -450,6 +467,9 @@ void nc_ke_register(NcKernel *k);
 uint32_t nc_ke_set_event(NcKernel *k, uint32_t event);
 /* KeClearEvent. */
 void nc_ke_clear_event(NcKernel *k, uint32_t event);
+/* A packet on an I/O completion port (its object): an I/O of a file
+ * associated with it finished. */
+void nc_ke_port_queue(NcKernel *k, uint32_t port, uint32_t key, uint32_t ctx, uint32_t status, uint32_t info);
 /* KeInitializeEvent: type 0 notification, 1 synchronization. */
 void nc_ke_init_event(NcKernel *k, uint32_t event, unsigned type, bool signaled);
 /* The running thread waits for the host's work for its call (no object, no
@@ -577,6 +597,9 @@ const char *nc_io_hdd_root(void);
 bool nc_io_host_file(const char *xbox_path, char *out, size_t n);
 /* \??\D:, the directory the title was launched from (its XBE's). */
 void nc_io_set_launch_dir(const char *dir);
+/* Whether the disc has language folders, English's among them, and none for
+ * XC_LANGUAGE lang next to it (Fable's Data\lang\English without Spanish). */
+bool nc_io_disc_lacks_language(const struct NcDisc *disc, int lang);
 /* Console timing: reads take the console's drives' time, their thread waiting (io.c). */
 void nc_io_set_device_time(bool on);
 /* A file object's handle closed (ob.c). */

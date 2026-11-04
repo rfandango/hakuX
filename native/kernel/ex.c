@@ -145,6 +145,20 @@ void nc_kernel_set_language(int language)
     g_language = language >= 1 && language <= 9 ? language : 0;
 }
 
+/* The app's audio (nc_kernel_set_audio): stereo unless 5.1 was chosen. */
+static bool g_audio_surround;
+static bool g_pal60 = true;
+
+void nc_kernel_set_pal60(bool on)
+{
+    g_pal60 = on;
+}
+
+void nc_kernel_set_audio(bool surround)
+{
+    g_audio_surround = surround;
+}
+
 /* The app's time zone (nc_kernel_set_time_zone): minutes east of UTC. */
 static int g_tz_minutes;
 
@@ -398,8 +412,30 @@ static uint8_t *eeprom(NcKernel *k)
         if (g_video_flags >= 0) {
             nc_wr32(g_eeprom + 0x94, (uint32_t)g_video_flags);
         }
+        /* PAL titles at 60 Hz, as a PAL console with PAL-60 on runs them
+         * (the app's default; 50 Hz the other choice): the flag the console's
+         * dashboard sets, which the titles read to offer or take 60 Hz. */
+        if (pal) {
+            const uint32_t v = nc_rd32(g_eeprom + 0x94);
+            nc_wr32(g_eeprom + 0x94, g_pal60 ? v | NC_VIDEO_PAL60 : v & ~NC_VIDEO_PAL60);
+        }
         if (g_language) {
             nc_wr32(g_eeprom + 0x90, (uint32_t)g_language);
+        }
+        /* The audio, the app's: stereo (0), or Dolby Digital on
+         * (XC_AUDIO_FLAGS_ENABLE_AC3), the games mixing six channels.
+         * Not what an EEPROM kept: one left at surround or mono by another
+         * console played that way without a word in the settings. */
+        nc_wr32(g_eeprom + 0x98, g_audio_surround ? 0x00010000u : 0);
+        /* A disc without the console's language plays in English, as a
+         * console set to it would have the title choose. Its files in
+         * English under the language's name (io.c's fallback) weren't
+         * enough: Fable checked its Spanish folder, found none, and went
+         * on with half of a language loaded until it crashed. */
+        const uint32_t lang = nc_rd32(g_eeprom + 0x90);
+        if (lang >= 2 && nc_io_disc_lacks_language(k->disc, (int)lang)) {
+            nc_wr32(g_eeprom + 0x90, 1);
+            nc_log("hakuX-native", "ex: the disc hasn't the console's language (%u): English", lang);
         }
         /* And the time zone, the phone's: its offset from UTC now as the
          * bias (UTC = local time + bias, minutes), without daylight saving

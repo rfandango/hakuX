@@ -19,7 +19,23 @@
 #endif
 
 #define OUT_RATE 48000
-#define OUT_FRAME_BYTES 4   /* a stereo sample: two 16-bit channels */
+/* The channels out: 2, or 6 for 5.1 (nc_audio_set_channels: FL FR C LFE BL BR,
+ * SDL's order and the Xbox's mixbins'); a sample frame: 16 bits each. */
+int g_apu_out_channels = 2;
+int16_t g_apu_frame6[256][6];
+#define OUT_FRAME_BYTES (2 * g_apu_out_channels)
+
+/* The channels out (2 or 6), before the APU starts: SDL mixes six down to
+ * the device's speakers when it has fewer. AAudio's stream stays stereo. */
+void nc_audio_set_channels(int n)
+{
+#ifdef NC_DESKTOP
+    g_apu_out_channels = n == 6 ? 6 : 2;
+#else
+    (void)n;
+#endif
+}
+
 #define REOPEN_NS 1000000000LL  /* a failed open is tried again after this */
 
 static struct {
@@ -311,7 +327,7 @@ int apu_out_open(int capacity_bytes, int samples, pthread_cond_t *wake)
     char frames[16];
     snprintf(frames, sizeof(frames), "%d", samples);
     SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, frames);
-    const SDL_AudioSpec spec = {SDL_AUDIO_S16LE, 2, OUT_RATE};
+    const SDL_AudioSpec spec = {SDL_AUDIO_S16LE, g_apu_out_channels, OUT_RATE};
     if (SDL_InitSubSystem(SDL_INIT_AUDIO)) {
         g_sdl = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, on_sdl, NULL);
     }
@@ -326,8 +342,8 @@ int apu_out_open(int capacity_bytes, int samples, pthread_cond_t *wake)
         }
         SDL_SetAudioStreamGain(g_sdl, g_volume);
         pthread_mutex_unlock(&g_out.mu);
-        nc_log("hakuX-apu", "output stream: %s, %d frames a callback asked",
-               SDL_GetAudioDeviceName(SDL_GetAudioStreamDevice(g_sdl)), samples);
+        nc_log("hakuX-apu", "output stream: %s, %d frames a callback asked, %d channels",
+               SDL_GetAudioDeviceName(SDL_GetAudioStreamDevice(g_sdl)), samples, g_apu_out_channels);
     }
     return samples * OUT_FRAME_BYTES;
 }

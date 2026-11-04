@@ -36,8 +36,11 @@ bool nc_hle_pb_active(void);
 /* Before boot: the vkGetInstanceProcAddr of a custom Vulkan driver (Turnip
  * through adrenotools) for the HLE GPU, instead of the system driver's. */
 void nc_hle_set_vk_loader(void *gipa);
-/* Before boot: the HLE GPU's render scale (1-4x the title's resolution). */
+/* Before boot: the HLE GPU's render scale (1-8x the title's resolution). */
 void nc_hle_set_render_scale(int scale);
+/* Anisotropic filtering forced on the game's textures: 0 (the game's own),
+ * or 2, 4, 8, 16. */
+void nc_hle_set_anisotropy(int level);
 /* Before boot: the app's "Asynchronous shader compilation" and "Build cached
  * shaders before starting" settings (hw/xbox/hle/vk/pipeasync.h). */
 void nc_hle_set_pipeline_options(bool async, bool prebuild);

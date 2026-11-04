@@ -69,6 +69,7 @@ static void count(uint32_t addr, bool write, uint64_t value)
     g_other++;
 }
 
+#if !defined(__x86_64__) /* arm64: the faulting instruction decoded here */
 /* The transfer a load/store instruction makes: one or two elements (LDP/STP)
  * of `bytes` each (16 for a Q register), and the base register writeback of
  * the pre- and post-indexed forms. */
@@ -441,6 +442,178 @@ bool nc_ram_emulate(NcVm *vm, const siginfo_t *info, void *ucontext,
     mc->pc += 4;
     return true;
 }
+
+#else /* x86-64 (Windows, Linux): the faulting instruction is x86-64, run against a buffer */
+
+#include "native/cpu/x64emu.h"
+#include "native/cpu/cpu.h"
+
+static uint64_t dev_read(const NcMmioDev *dev, uint32_t off, unsigned bytes)
+{
+    if (bytes <= 8 && !(bytes & (bytes - 1))) {
+        return dev->read(dev->opaque, off, bytes);
+    }
+    uint64_t v = 0; /* 3, 5-7 bytes: byte by byte */
+    for (unsigned i = 0; i < bytes && i < 8; i++) {
+        v |= (dev->read(dev->opaque, off + i, 1) & 0xFF) << (8 * i);
+    }
+    return v;
+}
+
+static void dev_write(const NcMmioDev *dev, uint32_t off, uint64_t v, unsigned bytes)
+{
+    if (bytes <= 8 && !(bytes & (bytes - 1))) {
+        dev->write(dev->opaque, off, v, bytes);
+        return;
+    }
+    for (unsigned i = 0; i < bytes && i < 8; i++) {
+        dev->write(dev->opaque, off + i, (v >> (8 * i)) & 0xFF, 1);
+    }
+}
+
+/* A string instruction's elements: a device's registers where its window
+ * is, ordinary memory elsewhere (a copy between RAM and a device). */
+static uint64_t str_rd(void *opaque, uint64_t addr, unsigned bytes)
+{
+    const NcMmioDev *dev = addr >> 32 ? NULL : dev_at((uint32_t)addr);
+    uint64_t v = 0;
+    if (dev) {
+        v = dev_read(dev, (uint32_t)addr - dev->base, bytes);
+        g_total++;
+        count((uint32_t)addr, false, v);
+    } else {
+        memcpy(&v, (const void *)(uintptr_t)addr, bytes);
+    }
+    return v;
+}
+
+static void str_wr(void *opaque, uint64_t addr, uint64_t v, unsigned bytes)
+{
+    const NcMmioDev *dev = addr >> 32 ? NULL : dev_at((uint32_t)addr);
+    if (dev) {
+        dev_write(dev, (uint32_t)addr - dev->base, v, bytes);
+        g_total++;
+        count((uint32_t)addr, true, v);
+    } else {
+        memcpy((void *)(uintptr_t)addr, &v, bytes);
+    }
+}
+
+bool nc_mmio_fault(const NcVm *vm, const siginfo_t *info, void *ucontext)
+{
+    const uint64_t guest = nc_vm_guest_of(vm, info->si_addr);
+    if (guest == UINT64_MAX) {
+        return false;
+    }
+    const NcMmioDev *dev = dev_at((uint32_t)guest);
+    if (!dev) {
+        return false;
+    }
+    const NcX64Mem sm = {str_rd, str_wr, NULL};
+    if (nc_x64_string(ucontext, &sm)) {
+        return true;
+    }
+    NcX64Access a;
+    if (!nc_x64_access(ucontext, (uint64_t)(uintptr_t)info->si_addr, &a)) {
+        static unsigned logged;
+        if (logged++ < 16) {
+            const uint8_t *pc = (const uint8_t *)nc_cpu_context_pc(ucontext);
+            nc_log("hakuX-native-mmio", "%s %08x: the host instruction at %p isn't one to replay "
+                   "(%02x %02x %02x %02x %02x %02x %02x %02x)", dev->name, (uint32_t)guest, (const void *)pc, pc[0],
+                   pc[1], pc[2], pc[3], pc[4], pc[5], pc[6], pc[7]);
+        }
+        return false;
+    }
+    const uint64_t first64 = nc_vm_guest_of(vm, (void *)(uintptr_t)a.ea);
+    if (first64 == UINT64_MAX) {
+        return false;
+    }
+    const uint32_t first = (uint32_t)first64;
+    uint8_t data[16] = {0};
+    uint64_t v = 0;
+    if (a.read) {
+        if (a.bytes == 16) {
+            const uint64_t lo = dev_read(dev, first - dev->base, 8), hi = dev_read(dev, first + 8 - dev->base, 8);
+            memcpy(data, &lo, 8);
+            memcpy(data + 8, &hi, 8);
+        } else {
+            v = dev_read(dev, first - dev->base, a.bytes);
+            memcpy(data, &v, 8);
+        }
+    }
+    if (!nc_x64_run(ucontext, data)) {
+        return false;
+    }
+    if (a.write) {
+        if (a.bytes == 16) {
+            uint64_t lo, hi;
+            memcpy(&lo, data, 8);
+            memcpy(&hi, data + 8, 8);
+            dev_write(dev, first - dev->base, lo, 8);
+            dev_write(dev, first + 8 - dev->base, hi, 8);
+        } else {
+            v = 0;
+            memcpy(&v, data, a.bytes > 8 ? 8 : a.bytes);
+            dev_write(dev, first - dev->base, v, a.bytes);
+        }
+    }
+
+    g_total++;
+    count(first, a.write, v);
+    if (g_logged < LOG_FIRST) {
+        g_logged++;
+        char line[160];
+        int n = snprintf(line, sizeof(line), "hakuX-native-mmio: %s %s+%06x %s %0*llx (%u)\n", dev->name,
+                         a.write ? "w" : "r", first - dev->base, a.write ? "<-" : "->",
+                         (int)(2 * (a.bytes > 8 ? 8 : a.bytes)), (unsigned long long)v, a.bytes);
+        nc_dump_line(2, line, (size_t)n);
+    }
+    return true;
+}
+
+bool nc_ram_access_span(const NcVm *vm, const siginfo_t *info, void *ucontext, uint32_t *lo,
+                        uint32_t *hi, bool *store)
+{
+    NcX64Access a;
+    if (!nc_x64_access(ucontext, (uint64_t)(uintptr_t)info->si_addr, &a)) {
+        return false;
+    }
+    const uint64_t g = nc_vm_guest_of(vm, (void *)(uintptr_t)a.ea);
+    const uint32_t p0 = g == UINT64_MAX ? UINT32_MAX : nc_vm_phys(vm, (uint32_t)g);
+    if (p0 == UINT32_MAX || (p0 & (NC_PAGE - 1)) + a.bytes > NC_PAGE || (uint64_t)p0 + a.bytes > vm->ram_size) {
+        return false;
+    }
+    *lo = p0;
+    *hi = p0 + a.bytes;
+    *store = a.write;
+    return true;
+}
+
+bool nc_ram_emulate(NcVm *vm, const siginfo_t *info, void *ucontext,
+                    void (*stored)(uint32_t pa, uint32_t n))
+{
+    NcX64Access a;
+    if (!nc_x64_access(ucontext, (uint64_t)(uintptr_t)info->si_addr, &a)) {
+        return false;
+    }
+    const uint64_t g = nc_vm_guest_of(vm, (void *)(uintptr_t)a.ea);
+    const uint32_t pa = g == UINT64_MAX ? UINT32_MAX : nc_vm_phys(vm, (uint32_t)g);
+    if (pa == UINT32_MAX || (pa & (NC_PAGE - 1)) + a.bytes > NC_PAGE || (uint64_t)pa + a.bytes > vm->ram_size) {
+        return false;
+    }
+    uint8_t data[16];
+    memcpy(data, vm->phys + pa, a.bytes);
+    if (!nc_x64_run(ucontext, data)) {
+        return false;
+    }
+    if (a.write) {
+        stored(pa, a.bytes);
+        memcpy(vm->phys + pa, data, a.bytes);
+    }
+    return true;
+}
+
+#endif
 
 /* nc_mmio_access's store may run again (nc_mmio_retry); one was asked for */
 static __thread bool t_retry_ok, t_retry;

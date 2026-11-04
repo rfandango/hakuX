@@ -40,5 +40,8 @@ void cfg_remove_value(Config *c, const char *key, const char *val);
 const char *cfg_data_dir(void);
 /* Beside the executable (fonts, mods). */
 const char *cfg_exe_dir(void);
+/* Runs a helper program (curl, tar) to its end, with no window of its own
+ * (a console's, on Windows); true when it exits with 0. */
+bool cfg_run(const char *const *args);
 
 #endif

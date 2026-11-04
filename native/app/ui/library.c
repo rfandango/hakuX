@@ -348,21 +348,14 @@ SDL_Texture *lib_cover(LibGame *g)
 
 static bool run(const char *const *args)
 {
-    SDL_Process *p = SDL_CreateProcess(args, false);
-    if (!p) {
-        return false;
-    }
-    int code = -1;
-    SDL_WaitProcess(p, true, &code);
-    SDL_DestroyProcess(p);
-    return code == 0;
+    return cfg_run(args);
 }
 
 static bool download(const char *url, const char *to)
 {
     char tmp[1200];
     snprintf(tmp, sizeof(tmp), "%s.part", to);
-    const char *args[] = {"curl", "-sfL", "--max-time", "60", "-A", "kantaiX", "-o", tmp, url, NULL};
+    const char *args[] = {"curl", "-sfL", "--max-time", "60", "-A", "xbased", "-o", tmp, url, NULL};
     if (!run(args)) {
         remove(tmp);
         return false;

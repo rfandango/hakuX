@@ -15,7 +15,7 @@ extern "C" {
 #endif
 int __system_property_get(const char *name, char *value);
 /* A value set while running, over props.ini's (NULL: unset). */
-void nc_desk_prop_set(const char *name, const char *value);
+void nc_win_prop_set(const char *name, const char *value);
 #ifdef __cplusplus
 }
 #endif

@@ -79,7 +79,14 @@ static uint32_t surf_scale(const HleSurfDesc *d, VkImageAspectFlags aspect)
     bool small = !d->role && !d->pitch && !d->parent && d->levels <= 1 && d->faces <= 1 &&
                  (aspect & VK_IMAGE_ASPECT_COLOR_BIT) &&
                  MAX(d->w, d->h) <= SURF_UNSCALED_MAX;
-    return small ? 1 : g_hle_rscale;
+    if (small) {
+        return 1;
+    }
+    /* The largest whole scale the device's images take: at 7x and 8x a
+     * 2048-wide target outgrows maxImageDimension2D (16384 on desktop GPUs). */
+    const uint32_t lim = MAX(g_hvk.props.limits.maxImageDimension2D, 1u);
+    const uint32_t side = MAX(MAX(d->w, d->h), 1u);
+    return MAX(MIN(g_hle_rscale, lim / side), 1u);
 }
 
 static uint32_t sub_bit(const HleVkSurf *o, uint32_t level, uint32_t face)

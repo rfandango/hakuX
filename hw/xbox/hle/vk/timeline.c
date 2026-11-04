@@ -13,7 +13,7 @@
 #include "hw/xbox/hle/vk/guest_ram.h"
 #include "hw/xbox/hle/vk/quirks.h"
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
 #include "hw/xbox/hle/prop.h"
 #endif
 #include <time.h>
@@ -319,7 +319,7 @@ int hle_tl_init(void (*on_complete)(uint64_t))
     }
     g_tl.on_complete = on_complete;
     g_tl.gap_hold_ns = 4000000;
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     char v[PROP_VALUE_MAX] = "";
     if (hle_prop_get("debug.hakux.gaphold", v) > 0 && atoi(v) >= 0) {
         g_tl.gap_hold_ns = (int64_t)atoi(v) * 1000;  /* microseconds (the A/B) */

@@ -4,7 +4,7 @@
  * READBACK with the front end's timeline value (spec §5.3, §5.10-5.12).
  */
 #include "hw/xbox/hle/base.h"
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
 #include <sys/system_properties.h>
 #endif
 
@@ -847,7 +847,7 @@ uint32_t g_hle_rscale = 1;
 
 static void cmd_device(const HleCmdDevice *c, bool reset)
 {
-    uint32_t scale = MIN(MAX(hle_host_render_scale(), 1), 4);
+    uint32_t scale = MIN(MAX(hle_host_render_scale(), 1), 8);
     /* A Reset replaces only the device's surfaces (the front end destroys the
      * old ones by OBJ_DESTROY): the title's own render targets and textures
      * keep their images. A new scale resizes every image. */
@@ -985,7 +985,7 @@ static void rtd_extras(const char *v)
 
 static void rtd_poll(void)
 {
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     if (g_back.st.swaps < g_rtd.poll) {
         return;
     }
@@ -1150,7 +1150,7 @@ static struct {
 
 static void pix_poll(void)
 {
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     if (g_back.st.swaps < g_pix.poll) {
         return;
     }
@@ -1913,7 +1913,7 @@ static void cmd_swap(const HleCmdSwap *c)
  * (hle_vk_lose) as a driver fault would: the game stops, the app says so */
 static void back_props_poll(uint64_t swap)
 {
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     static int64_t next_poll;
     static HleProp log_prop, lose_prop;
     if ((int64_t)swap < next_poll) {
@@ -2545,6 +2545,54 @@ static void dispatch(const HleCmdHdr *h)
     }
 }
 
+#if defined(__x86_64__)
+#include <cpuid.h>
+#include <x86intrin.h>
+
+/* A short low-power wait for a store to *p (or ~20 us): the CPU's monitor
+ * on its line where user mode has one. */
+__attribute__((target("mwaitx"))) static void wait_mwaitx(const volatile uint32_t *p, uint32_t seen)
+{
+    _mm_monitorx((void *)p, 0, 0);
+    if (*p == seen) {
+        _mm_mwaitx(0x2, 0xF0, 20000 * 3);      /* timer enabled: ~20 us of TSC at ~3 GHz */
+    }
+}
+
+__attribute__((target("waitpkg"))) static void wait_umwait(const volatile uint32_t *p, uint32_t seen)
+{
+    _umonitor((void *)p);
+    if (*p == seen) {
+        _umwait(0, __rdtsc() + 20000 * 3);      /* C0.2 */
+    }
+}
+
+static void x86_wait_line(const volatile uint32_t *p, uint32_t seen)
+{
+    static int kind = -1;   /* 0 pause, 1 mwaitx, 2 umwait */
+    if (kind < 0) {
+        unsigned a, b, c, d;
+        kind = 0;
+        if (__get_cpuid(0x80000001, &a, &b, &c, &d) && (c & (1u << 29))) {
+            kind = 1;
+        } else if (__get_cpuid_count(7, 0, &a, &b, &c, &d) && (c & (1u << 5))) {
+            kind = 2;
+        }
+        hle_log("hakuX-hle-back", "render thread's brief wait: %s",
+                kind == 1 ? "MWAITX" : kind == 2 ? "UMWAIT" : "PAUSE");
+    }
+    if (kind == 1) {
+        wait_mwaitx(p, seen);
+    } else if (kind == 2) {
+        wait_umwait(p, seen);
+    } else {
+        for (int i = 0; i < 64 && *p == seen; i++) {
+            _mm_pause();
+        }
+    }
+}
+#endif
+
 /* After draining: up to ~200 us waiting for the producer's next publish, in
  * WFE on the ring head (its store clears the exclusive monitor; interrupts
  * and the timer event stream bound each WFE), before sleeping on the kick
@@ -2568,6 +2616,24 @@ static bool ring_wait_brief(HleRing *r, uint32_t seen)
         __asm__ volatile("wfe" ::: "memory");
         __asm__ volatile("mrs %0, cntvct_el0" : "=r"(t));
         if (t - t0 > f / 5000) {
+            return false;
+        }
+    }
+#elif defined(__x86_64__)
+    /* x86: the same wait on the head's line, in AMD's MONITORX/MWAITX
+     * (Zen) or Intel's UMONITOR/UMWAIT (WAITPKG), else PAUSE. Returning at
+     * once, the render thread slept after every draw and each commit paid
+     * a wake (Conker uncapped: 40 thousand a second, 12% of the decoder). */
+    const int64_t t0 = hle_now_ns();
+    for (;;) {
+        if (__atomic_load_n(&r->head, __ATOMIC_ACQUIRE) != seen) {
+            return true;
+        }
+        if (hle_atomic_read(&g_pend.urgent)) {
+            return false;
+        }
+        x86_wait_line(&r->head, seen);
+        if (hle_now_ns() - t0 > 200000) {
             return false;
         }
     }

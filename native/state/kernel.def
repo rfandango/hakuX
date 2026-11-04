@@ -12,7 +12,7 @@ NC_F(NcRange, va, U32, 1, 1, 0)
 NC_F(NcRange, len, U32, 1, 1, 0)
 NC_END(NcRange)
 
-NC_REC(NcKernel, 573808)
+NC_REC(NcKernel, 574832)
 NC_SKIP(NcKernel, vm)
 NC_SKIP(NcKernel, cpu)
 NC_SKIP(NcKernel, disc)

@@ -11,7 +11,35 @@
 
 #include <pthread.h>
 
-#ifndef __ANDROID__
+#ifdef _WIN32
+/* Windows: the desktop compositor's frames (DwmFlush returns at each of the
+ * primary monitor's vblanks) stand in for Choreographer's vsyncs. */
+#include <windows.h>
+#include <dwmapi.h>
+
+static void *vsync_thread(void *arg)
+{
+    nc_win_thread_priority(2);
+    unsigned failed = 0;
+    for (;;) {
+        if (FAILED(DwmFlush())) {
+            if (++failed == 1) {
+                nc_log("hakuX-app", "vsync: no compositor vblank; the vblank runs free");
+            }
+            Sleep(100);
+            continue;
+        }
+        failed = 0;
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        nc_dev_nv2a_display_vsync((uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec);
+        if (nc_paused()) {
+            Sleep(200); /* the emulation paused: a look now and then */
+        }
+    }
+    return NULL;
+}
+#elif !defined(__ANDROID__)
 /* Linux: no compositor's vblanks to follow; the emulated display's clock
  * runs free (nv2a.c, as with no panel) */
 static void *vsync_thread(void *arg)

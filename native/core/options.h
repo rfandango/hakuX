@@ -15,6 +15,7 @@
  *                    player n + 1; default player 1)
  *   video=FLAGS      the console's video settings (XC_VIDEO_FLAGS, hex)
  *   avpack=hdtv|standard|svideo|scart|vga   its AV cable
+ *   pal60=0|1        PAL titles at 60 Hz (1, the default: PAL-60 on) or 50
  *   lang=N           its language (XC_LANGUAGE: 1 English ... 9 Portuguese)
  *   clock=MS         its clock's distance from the phone's time
  *   tz=MINUTES       its time zone, east of UTC
