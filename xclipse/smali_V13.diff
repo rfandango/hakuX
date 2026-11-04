@@ -1,0 +1,129 @@
+diff -ru a/a5/j0.smali b/a5/j0.smali
+--- a/a5/j0.smali
++++ b/a5/j0.smali
+@@ -4018,7 +4018,7 @@
+     .line 1347
+     .line 1348
+     .line 1349
+-    const-string v3, "1.2.0"
++    const-string v3, "1.2.0-xclipse-V13"
+ 
+     .line 1350
+     .line 1351
+diff -ru a/a5/m0.smali b/a5/m0.smali
+--- a/a5/m0.smali
++++ b/a5/m0.smali
+@@ -445,7 +445,7 @@
+ 
+     .line 79
+     :pswitch_4e
+-    const-string v0, "1.2.0"
++    const-string v0, "1.2.0-xclipse-V13"
+ 
+     .line 80
+     .line 81
+diff -ru a/a5/n.smali b/a5/n.smali
+--- a/a5/n.smali
++++ b/a5/n.smali
+@@ -2691,7 +2691,7 @@
+     .line 1275
+     .line 1276
+     .line 1277
+-    const-string v2, "1.2.0"
++    const-string v2, "1.2.0-xclipse-V13"
+ 
+     .line 1278
+     .line 1279
+diff -ru a/com/rfandango/haku_x/HakuXApplication.smali b/com/rfandango/haku_x/HakuXApplication.smali
+--- a/com/rfandango/haku_x/HakuXApplication.smali
++++ b/com/rfandango/haku_x/HakuXApplication.smali
+@@ -358,7 +358,7 @@
+ 
+     .line 169
+     .line 170
+-    const-string v2, "hakuX 1.2.0 (8)\nsession started "
++    const-string v2, "hakuX 1.2.0-xclipse-V13 (24)\nsession started "
+ 
+     .line 171
+     .line 172
+@@ -519,7 +519,7 @@
+     move-result v2
+ 
+     .line 261
+-    const-string v7, "=== hakuX 1.2.0: the app, pid "
++    const-string v7, "=== hakuX 1.2.0-xclipse-V13: the app, pid "
+ 
+     .line 262
+     .line 263
+diff -ru a/com/rfandango/haku_x/NativeCoreActivity.smali b/com/rfandango/haku_x/NativeCoreActivity.smali
+--- a/com/rfandango/haku_x/NativeCoreActivity.smali
++++ b/com/rfandango/haku_x/NativeCoreActivity.smali
+@@ -11332,6 +11332,35 @@
+ .method public onCreate(Landroid/os/Bundle;)V
+     .registers 16
+ 
++    .line 10001
++    :try_start_xclipse
++    const-string v0, "HAKUX_HLE_CAPS"
++
++    const-string v1, "-bc,-fbfetch,-bindless,-vids,-ahb,-eds1,-eds2"
++
++    const/4 v2, 0x1
++
++    invoke-static {v0, v1, v2}, Landroid/system/Os;->setenv(Ljava/lang/String;Ljava/lang/String;Z)V
++
++    const-string v0, "HAKUX_HLE_QUIRKS"
++
++    const-string v1, "+ds_same_load,+z_eq_w,+no_push_desc,+fresh_clear"
++
++    const/4 v2, 0x1
++
++    invoke-static {v0, v1, v2}, Landroid/system/Os;->setenv(Ljava/lang/String;Ljava/lang/String;Z)V
++
++    :try_end_xclipse
++    .catch Ljava/lang/Exception; {:try_start_xclipse .. :try_end_xclipse} :catch_xclipse
++
++    goto :xclipse_done
++
++    :catch_xclipse
++    move-exception v0
++
++    :xclipse_done
++
++
+     .line 1
+     invoke-static {p0}, Lc5/a;->a(Landroid/app/Activity;)Z
+ 
+diff -ru a/d5/f.smali b/d5/f.smali
+--- a/d5/f.smali
++++ b/d5/f.smali
+@@ -302,7 +302,7 @@
+     .line 116
+     .line 117
+     .line 118
+-    const-string v0, "1.2.0"
++    const-string v0, "1.2.0-xclipse-V13"
+ 
+     .line 119
+     .line 120
+diff -ru a/o4/c0.smali b/o4/c0.smali
+--- a/o4/c0.smali
++++ b/o4/c0.smali
+@@ -129,7 +129,7 @@
+ 
+     .line 30
+     .line 31
+-    const-string v1, "hakuX/1.2.0 (Android)"
++    const-string v1, "hakuX/1.2.0-xclipse-V13 (Android)"
+ 
+     .line 32
+     .line 33
+@@ -153,7 +153,7 @@
+     move-result-object p0
+ 
+     .line 5
+-    const-string v0, "1.2.0"
++    const-string v0, "1.2.0-xclipse-V13"
+ 
+     .line 6
+     .line 7

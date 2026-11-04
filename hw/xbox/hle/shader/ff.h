@@ -206,6 +206,15 @@ typedef struct HleFfPush {
 /* The block in a storage buffer (set by the back end before any shader is made) */
 extern bool g_hle_push_ssbo;
 
+/* The constants (set 1: VshConst, FfConst) in a read-only storage buffer, not
+ * a uniform one (vk/quirks.h HLE_QUIRK_CONST_SSBO: Xclipse; set by the back
+ * end before any shader is made); the block's qualifier */
+extern bool g_hle_const_ssbo;
+static inline const char *hle_const_glsl(void)
+{
+    return g_hle_const_ssbo ? "readonly buffer" : "uniform";
+}
+
 /* A linear texture is addressed by texel within its own size (its image
  * rect), clamped, bordered or wrapped at its edges. One sampled from a larger
  * surface (a target's top-left part: Munch's Oddysee samples the top 128 rows
