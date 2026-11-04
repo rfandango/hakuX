@@ -24,6 +24,107 @@ core does not expose.
 
 No BIOS, MCPX ROM or hard disk image is needed.
 
+## Features
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### Like a console
+- **Console-style dashboard**: an animated green orb, drifting hexagons, 3D
+  transitions and navigation sounds.
+- **Gamepad, keyboard or mouse** everywhere; button prompts follow the device
+  you're using.
+- **Borderless full screen by default**, any resolution, any DPI.
+- **Exit from the gamepad**, with a confirmation.
+
+</td>
+<td width="50%" valign="top">
+
+### Your library
+- **Automatic box art** and the discs' own title icons.
+- **A page per game**: play, load a state, settings, patches, controls.
+- **Memory manager**: your games' saves with their icons; export, import and
+  delete.
+- **Broad compatibility** with many games, inherited from hakuX.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### Picture
+- **Internal resolution** up to 8x, aspect ratio, widescreen and video modes.
+- **FXAA** and **anisotropic filtering** up to 16x.
+- **Upscaling**: bilinear or AMD FSR 1.
+- **CRT filters**: soft scanlines, a classic TV, an arcade monitor.
+- Every setting **global or per game**.
+
+</td>
+<td valign="top">
+
+### Patches & mods
+- **Per-game patches**: 60/120 fps, widescreen, fixes and cheats, toggled per
+  game.
+- **Frame-rate unlock per game**, where the game allows it.
+- **Add your own**: drop IPS patches into `mods/<TITLE ID>/` and they show up
+  in the game's menu ([mods/README.md](mods/README.md)).
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### Save states & in-game menu
+- **10 save-state slots per game**, with pictures.
+- **In-game menu** with F1, or **Back + Start** / the **Guide** button on a
+  gamepad: states, settings, controls, restart, back to the dashboard.
+- **Shortcuts**: F5 quick save, F8 quick load, Tab fast forward, F2 pause,
+  F12 screenshot, F11 full screen; all configurable.
+
+</td>
+<td valign="top">
+
+### Controls, online, languages
+- **4 controller ports**: automatic, any gamepad or the keyboard; remap every
+  button, per game too; dead zone and vibration.
+- **PAL games at 60 Hz**, as with the console's PAL-60 setting on.
+- **Stereo or 5.1 surround**: the games' Dolby Digital mix, six channels out.
+- **Online**: Insignia (the community's Xbox Live replacement), XLink Kai and
+  System Link on your network.
+- **11 languages**, your system's by default.
+
+</td>
+</tr>
+</table>
+
+## Getting started
+
+1. Download `kantaiX-<version>-aarch64.AppImage` from
+   [Releases](https://github.com/kiequoo/kantaiX/releases/latest), `chmod +x`
+   it and run it.
+2. The dashboard opens. Go to **Settings › Interface › Add folder** and pick the
+   folder with your disc images.
+3. Choose a game in **Games**. Box art downloads automatically.
+
+**Command line:** `kantaiX <image.iso> [options]` starts a game directly.
+Options match the settings files' keys (`scale=2`, `uncap`, `crt=2`,
+`fullscreen=0`, `mod=<patch>`, …). Settings are kept in `xbased.ini` (global)
+and `games/<TITLE ID>.<version>.ini` (per game) in `~/.local/share/xbased/`.
+
+### Default keyboard controls
+
+| Xbox | Key | Xbox | Key |
+|---|---|---|---|
+| A / B / X / Y | Space / Left Shift / Q / E | Left stick | W A S D |
+| Black / White | C / Z | Right stick | I J K L |
+| Left / right trigger | 1 / 3 | D-pad | Arrow keys |
+| Start / Back | Enter / Backspace | Stick clicks | F / H |
+
+**Shortcuts:** F1 menu, F5 quick save, F8 quick load (Shift: slot 2), Tab fast
+forward (hold), F2 pause, F12 screenshot, F11 full screen. On a gamepad,
+Back + Start or the Guide button opens the menu.
+
 ## Building
 
 ```bash
