@@ -680,13 +680,17 @@ static uint64_t KePulseEvent(NcKernel *k, NcFrame *f, const uint32_t *a)
 /* NtCreateEvent(EventHandle, ObjectAttributes, EventType, InitialState) */
 static uint64_t NtCreateEvent(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
-    uint32_t ev = nc_ob_create(k, NC_OB_EVENT, 0x10);
+    uint32_t status;
+    bool fresh;
+    uint32_t ev = nc_ob_create_named(k, NC_OB_EVENT, 0x10, a[1], &status, &fresh);
     if (!ev) {
-        return NC_STATUS_INSUFFICIENT_RESOURCES;
+        return status;
     }
-    init_header(k, ev, (uint8_t)a[2], 4, (int32_t)(a[3] & 0xff));
+    if (fresh) {
+        init_header(k, ev, (uint8_t)a[2], 4, (int32_t)(a[3] & 0xff));
+    }
     nc_vm_wr32(k->vm, a[0], nc_ob_handle(k, ev, NC_OB_EVENT));
-    return NC_STATUS_SUCCESS;
+    return status;
 }
 
 /* NtSetEvent(EventHandle, PreviousState) */
@@ -772,14 +776,18 @@ static uint64_t KeReleaseSemaphore(NcKernel *k, NcFrame *f, const uint32_t *a)
 /* NtCreateSemaphore(SemaphoreHandle, ObjectAttributes, InitialCount, MaximumCount) */
 static uint64_t NtCreateSemaphore(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
-    uint32_t sem = nc_ob_create(k, NC_OB_SEMAPHORE, 0x14);
+    uint32_t status;
+    bool fresh;
+    uint32_t sem = nc_ob_create_named(k, NC_OB_SEMAPHORE, 0x14, a[1], &status, &fresh);
     if (!sem) {
-        return NC_STATUS_INSUFFICIENT_RESOURCES;
+        return status;
     }
-    init_header(k, sem, OBJ_SEMAPHORE, 5, (int32_t)a[2]);
-    nc_vm_wr32(k->vm, sem + SEMAPHORE_LIMIT, a[3]);
+    if (fresh) {
+        init_header(k, sem, OBJ_SEMAPHORE, 5, (int32_t)a[2]);
+        nc_vm_wr32(k->vm, sem + SEMAPHORE_LIMIT, a[3]);
+    }
     nc_vm_wr32(k->vm, a[0], nc_ob_handle(k, sem, NC_OB_SEMAPHORE));
-    return NC_STATUS_SUCCESS;
+    return status;
 }
 
 /* NtReleaseSemaphore(SemaphoreHandle, ReleaseCount, PreviousCount) */
@@ -830,13 +838,17 @@ static uint64_t KeReleaseMutant(NcKernel *k, NcFrame *f, const uint32_t *a)
 /* NtCreateMutant(MutantHandle, ObjectAttributes, InitialOwner) */
 static uint64_t NtCreateMutant(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
-    uint32_t m = nc_ob_create(k, NC_OB_MUTANT, 0x20);
+    uint32_t status;
+    bool fresh;
+    uint32_t m = nc_ob_create_named(k, NC_OB_MUTANT, 0x20, a[1], &status, &fresh);
     if (!m) {
-        return NC_STATUS_INSUFFICIENT_RESOURCES;
+        return status;
     }
-    init_mutant(k, m, a[2] & 0xff);
+    if (fresh) {
+        init_mutant(k, m, a[2] & 0xff);
+    }
     nc_vm_wr32(k->vm, a[0], nc_ob_handle(k, m, NC_OB_MUTANT));
-    return NC_STATUS_SUCCESS;
+    return status;
 }
 
 /* NtReleaseMutant(MutantHandle, PreviousCount) */

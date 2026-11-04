@@ -139,6 +139,7 @@ typedef struct PbObj {
     bool want;                          /* ... drawn into since its last landing */
     uint8_t unread;                     /* its landings in a row the guest didn't take */
     bool display;                       /* shown: the front-buffer path keeps its memory */
+    uint32_t frees;                     /* hle_host_mem_frees over its memory when bound (writeback) */
 } PbObj;
 
 /* A texture the stage registers described: the back end's image of it,
@@ -970,6 +971,20 @@ static void writeback(uint32_t id)
         return;
     }
     const uint32_t len = d->pitch * d->h;
+    /* The decoder runs behind the guest: the title may have freed the
+     * target, and its memory have a new owner, before the decoder reaches
+     * the unbind. Top Spin's Player Creator draws the player's name into a
+     * 112 x 23 target, saves it and frees it as it starts a career; the
+     * name landed over its heap's new pages and the heap crashed a few saves
+     * later. */
+    if (o && hle_host_mem_frees(d->pa, len) != o->frees) {
+        static unsigned s_logged;
+        if (s_logged++ < 8) {
+            hle_log("hakuX-hle-pb", "surface %u (%08x %ux%u): its memory was freed since it was bound, "
+                    "not written back", id, d->pa, d->w, d->h);
+        }
+        return;
+    }
     const uint32_t fb = hle_res_rb_fb(len);
     if (!fb) {
         coh_pend_wait_inplace(d->pa, len);
@@ -1157,11 +1172,15 @@ static void sync_rt(void)
         zwrite_from_colour(ds);
     }
     if (rt != g_pd.rt || ds != g_pd.ds) {
-        if (rt != g_pd.rt) {
+        const bool new_rt = rt != g_pd.rt;
+        if (new_rt) {
             writeback(g_pd.rt);
         }
         g_pd.rt = rt;
         g_pd.rt_obj = obj_of(rt);
+        if (new_rt && g_pd.rt_obj) {
+            g_pd.rt_obj->frees = hle_host_mem_frees(g_pd.rt_obj->d.pa, g_pd.rt_obj->d.pitch * g_pd.rt_obj->d.h);
+        }
         g_pd.ds_obj = obj_of(ds);
         g_pd.ds = ds;
         /* the objects' size: a view of a part of one is the whole (object()) */

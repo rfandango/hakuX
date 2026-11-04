@@ -56,6 +56,9 @@ bool hle_tl_land_swz(uint64_t value, uint32_t off, uint32_t pa, uint32_t w, uint
 bool hle_tl_land_copy(uint64_t value, uint32_t spa, uint32_t spitch, uint32_t dpa, uint32_t dpitch,
                       uint32_t row, uint32_t rows, HleLandDone done, uint32_t token);
 bool hle_tl_land_note(uint64_t value, HleLandDone done, uint32_t token);
+/* Guest memory [pa, pa + len) freed (any thread): the landings queued into
+ * it are dropped (their done reports them not landed). */
+void hle_tl_land_forget(uint32_t pa, uint32_t len);
 
 typedef struct HleBackStats {
     uint64_t cmds, clears, passes, submits, swaps, readbacks, draws;
