@@ -68,6 +68,8 @@ fun SettingsScreen(
   onGpuDriver: () -> Unit,
   /** The first-start screen again: the xemu-based release's data brought over. */
   onMigrate: () -> Unit,
+  /** Insignia's setup wizard (Xbox Live). */
+  onInsignia: () -> Unit,
 ) {
   val context = LocalContext.current
   val prefs = remember { AppPrefs(context) }
@@ -81,6 +83,7 @@ fun SettingsScreen(
   var uncapped by remember { mutableStateOf(prefs.uncapped) }
   var asyncShaders by remember { mutableStateOf(prefs.asyncShaders) }
   var prebuildShaders by remember { mutableStateOf(prefs.prebuildShaders) }
+  var consoleTiming by remember { mutableStateOf(prefs.consoleTiming) }
   var showFps by remember { mutableStateOf(prefs.showFps) }
   var showHitches by remember { mutableStateOf(prefs.showHitches) }
   var scale by remember { mutableIntStateOf(prefs.renderScale) }
@@ -237,8 +240,17 @@ fun SettingsScreen(
         supportingContent = { Text(clockLabel(clockOffset) + ". " + stringResource(R.string.settings_clock_desc)) },
         modifier = Modifier.clickable { clockDialog = true },
       )
+      if (BuildConfig.DEBUG) {
+        SwitchItem(
+          title = stringResource(R.string.settings_console_timing),
+          summary = stringResource(R.string.settings_console_timing_desc) + " " +
+            stringResource(R.string.settings_applies_next_start),
+          checked = consoleTiming,
+          onChange = { consoleTiming = it; prefs.consoleTiming = it },
+        )
+      }
 
-      NetworkSettings(prefs)
+      NetworkSettings(prefs, onInsignia)
 
       Section(stringResource(R.string.settings_section_console_video))
       Hint(stringResource(R.string.settings_console_video_desc))

@@ -11,3 +11,10 @@ refresh: 120
 # 60, which its movie player also reads): 1/120 s a frame.
 0x00554944: 02 -> 01
 0x001D9668: 50 49 55 00 -> 70 80 48 00
+
+[$u\default.xbe]
+# Xbox Live's title update (version 0x301): the vblanks at 0x555224, the
+# frame time's divisor at 0x1D9F88 (the rate at 0x555230) and a 120 in
+# .rdata at 0x4888F0.
+0x00555224: 02 -> 01
+0x001D9F88: 30 52 55 00 -> F0 88 48 00

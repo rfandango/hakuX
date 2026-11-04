@@ -227,6 +227,10 @@ typedef struct HleCmdReadback {
     uint32_t fb, fb_len;            /* fb 0: none */
 } HleCmdReadback;
 #define HLE_RB_DIRECT 0xFFFFFFFFu
+/* arena_off: the subresource packed as above into the landing buffer (the
+ * arena without one) at fb - 1, swizzled into guest memory at the value
+ * (hle_tl_land_swz) */
+#define HLE_RB_PACKED 0xFFFFFFFEu
 
 /* ---- P3 draws ------------------------------------------------------------- */
 
@@ -283,6 +287,8 @@ typedef struct HleCmdDraw {
                                    coordinates (whatever the layout of a target there) */
     uint32_t tex_ord;           /* bits 2s..2s+1: the stage's 32-bit byte order where it
                                    samples an A8R8G8B8 target of another (HLE_DRAW_ORD_*) */
+    uint32_t tex_rect[HLE_TSS_STAGES];  /* a linear stage's own size, its IMAGE_RECT
+                                           (width 28:16, height 12:0); 0 for the others */
     /* vertex programs and declarations (P4, pulled forward) */
     uint64_t vsh;               /* program hash (HLE_OP_VSH); 0 = fixed function */
     uint32_t consts_off;        /* program draws: arena, 192 vec4 constants */

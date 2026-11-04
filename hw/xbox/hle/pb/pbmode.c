@@ -107,6 +107,8 @@ static struct {
     bool overlay_req;                   /* hle_pb_overlay_changed's */
     bool overlay_show;
     bool scan_req;                      /* hle_pb_vblank's */
+    uint32_t fb_pa;                     /* hle_pb_display_fb's, for the decode thread */
+    bool fb_req;
     uint8_t gamma[3][256];              /* hle_pb_gamma's, for the decode thread */
     bool gamma_req;
     bool gamma_set;                     /* ... once at least (a savestate applies it again) */
@@ -164,6 +166,16 @@ void hle_pb_display_start(uint32_t pa)
         __atomic_store_n(&g_pb.disp_flip, true, __ATOMIC_RELAXED);
     }
     __atomic_store_n(&g_pb.disp_req, true, __ATOMIC_RELEASE);
+    hle_pb_kick();
+}
+
+void hle_pb_display_fb(uint32_t pa)
+{
+    if (!g_pb.on) {
+        return;
+    }
+    __atomic_store_n(&g_pb.fb_pa, pa, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_pb.fb_req, true, __ATOMIC_RELEASE);
     hle_pb_kick();
 }
 
@@ -361,6 +373,7 @@ static int kelvin(uint32_t m, uint32_t v)
         g_pb.sem_offset = v;
         break;
     case NV097_BACK_END_WRITE_SEMAPHORE_RELEASE:
+        hle_pbd_fence();                    /* the guest may read targets once it sees this */
         if (g_pb.sem_inst) {
             uint32_t pa = dma_base(g_pb.sem_inst) + g_pb.sem_offset;
             static unsigned s_logged;
@@ -501,19 +514,26 @@ static void blit(const uint32_t *r)
         g_pb.copies_skipped++;
         return;
     }
-    hle_pbd_blit_begin(sbase, dbase);       /* the CPU's writes before the blit's */
-    for (uint32_t y = 0; y < h; y++) {
-        const uint32_t so = sbase + (iy + y) * sp + ix * bpp, d = dbase + (oy + y) * dp + ox * bpp;
-        uint8_t *sr = hle_pa_ptr(so, row), *dr = hle_pa_ptr(d, row);
-        if (!sr || !dr) {
-            g_pb.copies_skipped++;
-            return;
+    /* between linear render targets, their images' copy (a render target's
+     * pixels are in its image); else the copy in memory, now or queued behind
+     * the landings of the images it reads (pbdraw.c hle_pbd_copy_begin),
+     * the images over it following */
+    if (!hle_pbd_blit_images(sbase, sp, dbase, dp, bpp, ix, iy, ox, oy, w, h)) {
+        const uint32_t slo = sbase + iy * sp + ix * bpp, dlo = dbase + oy * dp + ox * bpp;
+        const uint64_t dep = hle_pbd_copy_begin(slo, sp, dlo, dp, row, h, dbase);
+        for (uint32_t y = 0; !dep && y < h; y++) {
+            const uint32_t so = slo + y * sp, d = dlo + y * dp;
+            uint8_t *sr = hle_pa_ptr(so, row), *dr = hle_pa_ptr(d, row);
+            if (!sr || !dr) {
+                g_pb.copies_skipped++;
+                return;
+            }
+            memmove(dr, sr, row);
+            hle_mem_mark_written(d, row);
         }
-        memmove(dr, sr, row);
-        hle_mem_mark_written(d, row);
+        hle_pbd_copy_done(dlo, dp, row, h, dep);
+        hle_pbd_blit(dbase, dp, ox, oy, w, h, dep);
     }
-    /* the back end's images: a render target's pixels are in its image */
-    hle_pbd_blit(sbase, sp, dbase, dp, bpp, ix, iy, ox, oy, w, h);
     g_pb.blits++;
     g_pb.blit_bytes += (uint64_t)row * h;
 }
@@ -530,7 +550,9 @@ static void m2mf(const uint32_t *r)
         g_pb.copies_skipped++;
         return;
     }
-    for (uint32_t y = 0; y < lines; y++) {
+    /* now, or queued behind the landings of the images it reads */
+    const uint64_t dep = hle_pbd_copy_begin(in, (uint32_t)pin, out, (uint32_t)pout, len, lines, 0);
+    for (uint32_t y = 0; !dep && y < lines; y++) {
         uint8_t *s = hle_pa_ptr(in + y * pin, len), *d = hle_pa_ptr(out + y * pout, len);
         if (!s || !d) {
             g_pb.copies_skipped++;
@@ -539,6 +561,7 @@ static void m2mf(const uint32_t *r)
         memmove(d, s, len);
         hle_mem_mark_written(out + y * pout, len);
     }
+    hle_pbd_copy_done(out, (uint32_t)pout, len, lines, dep);
     g_pb.m2mfs++;
     g_pb.m2mf_bytes += (uint64_t)len * lines;
 }
@@ -594,6 +617,11 @@ static inline void boundary_take(void)
     if (__builtin_expect(__atomic_load_n(&g_bnd_req, __ATOMIC_RELAXED) != 0, 0)) {
         hle_pbd_boundary(__atomic_exchange_n(&g_bnd_req, 0, __ATOMIC_ACQUIRE));
     }
+}
+
+void hle_pb_boundary_request(uint64_t value)
+{
+    boundary_request(value);
 }
 
 /* D3D 4928's RunPushBuffer, when the GPU may still be running the recorded
@@ -844,6 +872,9 @@ static void consume_pass(void)
         hle_pbd_display(__atomic_load_n(&g_pb.disp_pa, __ATOMIC_RELAXED),
                         __atomic_exchange_n(&g_pb.disp_flip, false, __ATOMIC_ACQ_REL));
     }
+    if (__atomic_exchange_n(&g_pb.fb_req, false, __ATOMIC_ACQ_REL)) {
+        hle_pbd_cpu_display(__atomic_load_n(&g_pb.fb_pa, __ATOMIC_RELAXED));
+    }
     if (__atomic_exchange_n(&g_pb.scan_req, false, __ATOMIC_ACQ_REL)) {
         hle_pbd_scanout();
     }
@@ -983,6 +1014,7 @@ static void catch_up(void)
         return;
     }
     const int64_t t0 = hle_now_ns();
+    hle_host_guest_hold(true);              /* the guest's time stands still meanwhile */
     while (hle_sem_trywait(&g_cu.sem)) {
         /* a post that came as an earlier wait timed out */
     }
@@ -1019,6 +1051,7 @@ static void catch_up(void)
         }
     }
     __atomic_store_n(&g_cu.state, 0, __ATOMIC_RELEASE);
+    hle_host_guest_hold(false);
     g_cu.ns += (uint64_t)(hle_now_ns() - t0);
     __atomic_fetch_add(&g_cu.waits, 1, __ATOMIC_RELAXED);
 }
@@ -1692,6 +1725,17 @@ void hle_pb_diag(void)
                 (unsigned long long)g_cu.gave_up[1], (unsigned long long)g_cu.gave_up[2],
                 (unsigned long long)g_cu.gave_up[3], (unsigned long long)g_cu.timeouts,
                 (double)g_cu.ns / 1e6);
+    }
+    static uint64_t prev_coh;
+    uint64_t lands, copies, cwaits, nbr, hot;
+    hle_pbd_coh_counts(&lands, &copies, &cwaits);
+    hle_barrier_guard_stats(&nbr, &hot);
+    if (lands + copies + cwaits + nbr + hot != prev_coh) {
+        prev_coh = lands + copies + cwaits + nbr + hot;
+        hle_log("hakuX-hle-pb", "targets' images landed %llu, copies queued behind them %llu (the decoder "
+                "waited %llu), accesses beside guards served %llu (hot pages %llu)",
+                (unsigned long long)lands, (unsigned long long)copies, (unsigned long long)cwaits,
+                (unsigned long long)nbr, (unsigned long long)hot);
     }
     static uint64_t prev_rw;
     uint64_t rw, rns, rto, rheld;

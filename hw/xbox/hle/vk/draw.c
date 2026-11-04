@@ -2409,7 +2409,15 @@ static unsigned g_rt_told;
  * share one object (object_view). Fable draws a lock-on's silhouette into
  * a swizzled 256 x 256 target through its linear view and blurs it from
  * there with a linear texture, by texel; addressed normalized, as the
- * swizzled object, every tap clamped to the corner and the halo was gone. */
+ * swizzled object, every tap clamped to the corner and the halo was gone.
+ * A linear surface's texel coordinates are divided by the surface's own
+ * scale, so the bit that has the shaders divide (8 + st) is set for a
+ * surface at the resolution scale only: a small target renders at 1x
+ * (surf_scale), and divided by the device's scale its texel coordinates
+ * were multiplied by it: at 2x the whole target came in a quarter of the
+ * area it was drawn over, the rest read past its edges as the stage
+ * addresses them (reported for Sega GT 2002's car skins, twelve 64 x 64
+ * targets a frame, read by texel). */
 static uint32_t stage_slot(const HleCmdDraw *c, unsigned st, uint32_t rt_id, uint32_t *flags)
 {
     HleVkTex *tx = tex_find(c->tex[st]);
@@ -2422,12 +2430,14 @@ static uint32_t stage_slot(const HleCmdDraw *c, unsigned st, uint32_t rt_id, uin
     } else if (c->tex[st] == rt_id && g_snap_cur >= 0 && g_snap_rt == rt_id &&
                (rt = hle_surf_get(rt_id)) != NULL) {
         slot = g_snap[g_snap_cur].slot;  /* the target, copied before the draw */
-        *flags |= (c->tex_lin >> st & 1) ? (1u << st) | (256u << st) : 0;
+        *flags |= (c->tex_lin >> st & 1) ? (1u << st) | (rt->scale > 1 ? 256u << st : 0) : 0;
         return slot;
     } else if (ts && (ts->general || ts->layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)) {
         slot = surf_slot(ts, c->tex_ord >> 2 * st & 3);  /* RT as texture (identity) */
-        /* linear format: texel coords, of a scaled image */
-        *flags |= (c->tex_lin >> st & 1) ? (1u << st) | (256u << st) : 0;
+        /* linear format: texel coords, of an image at the resolution scale
+         * (bit 8 + st) or at 1x (a small target, surf.c surf_scale: its
+         * texels are its own, and the scale must not divide them) */
+        *flags |= (c->tex_lin >> st & 1) ? (1u << st) | (ts->scale > 1 ? 256u << st : 0) : 0;
     }
     uint32_t id = c->tex[st];
     if (id && !tx && id < 8192 && g_rt_told < 64 && !(g_rt_seen[id >> 3] >> (id & 7) & 1)) {
@@ -2441,6 +2451,34 @@ static uint32_t stage_slot(const HleCmdDraw *c, unsigned st, uint32_t rt_id, uin
                 rt_id);
     }
     return slot;
+}
+
+/* The push block's fog.w for stage st when its linear texture (the draw's
+ * tex_rect: per draw, as the state cache isn't rebuilt for a texture alone)
+ * is a surface larger than the texture's own size on an axis (the top-left
+ * part of a target): that size (an axis the surface matches at the surface's)
+ * and the stage's address modes, its texel coordinates kept inside it (ff.h
+ * HLE_NVRECT_GLSL); 0 when the rect covers the surface, isn't valid, or the
+ * texture is no surface (a texture's image is its size). */
+static uint32_t lin_rect(const HleCmdDraw *c, const HleCmdState *s, unsigned st)
+{
+    const HleVkSurf *sf = (c->tex_lin >> st & 1) && c->tex[st] && !tex_find(c->tex[st]) ?
+                          hle_surf_get(c->tex[st]) : NULL;
+    const uint32_t r = c->tex_rect[st];
+    uint32_t w = (r >> 16) & 0x1FFF, h = r & 0x1FFF;
+    if (!sf || !w || !h || !sf->d.w || !sf->d.h || (w >= sf->d.w && h >= sf->d.h)) {
+        return 0;
+    }
+    w = MIN(w, sf->d.w);
+    h = MIN(h, sf->d.h);
+    if (w > 4096 || h > 4096) {
+        return 0;
+    }
+    /* NV2A modes: 1 wrap, 2 mirror, 3 clamp to edge, 4 border, 5 clamp (as addr_mode) */
+    static const uint8_t k_class[8] = { 2, 2, 3, 0, 1, 0, 2, 2 };
+    return (w - 1) | (h - 1) << 12 | (uint32_t)k_class[s->tss[st][TSS_ADDRESSU] & 7] << 24 |
+           (uint32_t)k_class[s->tss[st][TSS_ADDRESSV] & 7] << 26 | (st & 1u) << 28 | 1u << 29 |
+           (st >> 1) << 31;
 }
 
 /* Vertex-buffer support of f, else of its four-component form (one more
@@ -3423,6 +3461,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     memcpy(&pc.fog[0], &s->rs[RS_FOGSTART], 4);
     memcpy(&pc.fog[1], &s->rs[RS_FOGEND], 4);
     memcpy(&pc.fog[2], &s->rs[RS_FOGDENSITY], 4);
+    uint32_t rect = 0;                  /* lin_rect's (register combiners: a stage's that samples by it) */
     /* POINTSPRITEENABLE: the cascade is texture stage 3 alone (ff.h) */
     unsigned first = s->rs[RS_POINTSPRITEENABLE] ? HLE_FF_SPRITE_STAGE : 0;
     for (unsigned st = first; st < HLE_FF_STAGES; st++) {
@@ -3499,6 +3538,25 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
             } else if (m == HLE_PST_PROJECT3D && flat && !((k.pk.shadow >> st) & 1)) {
                 k.pk.tex_modes -= (HLE_PST_PROJECT3D - HLE_PST_PROJECT2D) << (5 * st);
             }
+        }
+        /* the first stage that samples a 2D image through samp() (as psh.c
+         * generates it) whose linear texture is part of a larger surface:
+         * its texel coordinates kept to the texture's own size */
+        for (unsigned st = 0; st < 4 && !rect; st++) {
+            const unsigned m = (k.pk.tex_modes >> (5 * st)) & 0x1F;
+            const bool v = (k.pk.vol >> st) & 1;
+            const bool samp2d = m == HLE_PST_DOT_ST || m == HLE_PST_BRDF || m == HLE_PST_DOT_ZW ||
+                                m > HLE_PST_DOT_RFLCT_SPEC_CONST ||
+                                ((m == HLE_PST_PROJECT2D || m == HLE_PST_BUMPENVMAP ||
+                                  m == HLE_PST_BUMPENVMAP_LUM) && !v) ||
+                                ((m == HLE_PST_DPNDNT_AR || m == HLE_PST_DPNDNT_GB) && !st);
+            if (samp2d && !((k.pk.shadow >> st) & 1) && !((k.pk.fbfetch >> st) & 1) &&
+                (pc.tex[st] & 0xFFFFu)) {
+                rect = lin_rect(c, s, st);
+            }
+        }
+        if (rect) {
+            k.pk.vol |= HLE_PSH_RECT;           /* the stage fog.w names, kept to its size */
         }
         if (k.pk.shadow) {
             uint32_t f = s->rs[RS_SHADOWFUNC];
@@ -3733,7 +3791,8 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
      * depth meets the programs' (Splinter Cell: FF world, program
      * characters); their pixel stage scale is 1 / wfar (c->wscale). */
     bool wff = !prog && !rhw && c->wscale > 0.0f;
-    bool wbuf = (prog || rhw || wff) && ds && s->rs[RS_ZENABLE] == 2 && !(dbgf & 8);
+    bool wbuf = (prog || rhw || wff) && ds && s->rs[RS_ZENABLE] == 2 && !(dbgf & 8) &&
+                !hle_quirk(HLE_QUIRK_NO_WBUF);
     /* NV2A ZCLAMP_EN CLAMP: depth past the near and far planes is clamped to
      * them instead of clipping the primitive (MechAssault 2's sky, drawn past
      * the far plane, was black): the rasterizer's depth clamp */
@@ -3957,8 +4016,9 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     pc.zscale = wbuf && wff ? c->wscale : c->zscale;
     pc.tfactor = s->rs[RS_TEXTUREFACTOR];
     pc.alpha_ref = (s->rs[RS_ALPHAREF] & 0xFF) / 255.0f;
-    /* the target's scale (point sizes, texel edges) and linear surfaces'
-     * (always scaled); antialiased: texel edges as they are (ff.h) */
+    memcpy(&pc.fog[3], &rect, 4);       /* (bits: HLE_NVRECT_GLSL) */
+    /* the target's scale (point sizes, texel edges) and the scaled linear
+     * surfaces' (stage_slot); antialiased: texel edges as they are (ff.h) */
     pc.flags |= MIN(rs, 255u) << 16 | MIN(g_hle_rscale, 255u) << 24 |
                 (aax > 1.0f || aay > 1.0f ? HLE_TEXEL_EDGE_FLAG : 0u) | (g_snap_trunc ? HLE_SNAP_TRUNC_FLAG : 0u);
     if (!g_hvk.caps.bindless) {

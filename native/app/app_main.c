@@ -501,8 +501,11 @@ EXPORT int SDL_main(int argc, char *argv[])
         return 1;
     }
     const char *disc = argv[1];
-    g_disc_fd = !strncmp(disc, "fd:", 3) ? atoi(disc + 3) : open(disc, O_RDONLY | O_CLOEXEC);
-    if (g_disc_fd < 0) {
+    /* "none": no disc (the dashboard, option dash) */
+    g_disc_fd = !strcmp(disc, "none")       ? -1
+                : !strncmp(disc, "fd:", 3) ? atoi(disc + 3)
+                                           : open(disc, O_RDONLY | O_CLOEXEC);
+    if (g_disc_fd < 0 && strcmp(disc, "none")) {
         /* the boot says so (NC_FATAL_BOOT), and the activity goes back */
         nc_log("hakuX-app", "can't open the disc %s", disc);
     }

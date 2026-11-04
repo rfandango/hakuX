@@ -411,6 +411,13 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
     return true;
 }
 
+uint32_t hle_draw_tex_bytes(const uint32_t h5[5])
+{
+    HleResDesc d;
+    HleResInfo ri;
+    return hle_res_from_header(h5[0], h5[3], h5[4], &d) && hle_res_info(&d, &ri) ? ri.bytes : 0;
+}
+
 uint32_t hle_draw_tex_define(uint32_t id, const uint32_t h5[5], const uint32_t *pal, uint32_t npal,
                              uint32_t *bytes)
 {
@@ -570,6 +577,21 @@ uint32_t hle_res_rb_fb(uint32_t len)
     /* the landing buffer (host-cached): its space is free again once the
      * GPU passes the value, after the landing read it */
     uint32_t off = ring_alloc(&g_hland.alloc, len, 256);
+    return off == HLE_ARENA_FULL ? 0 : off + 1;
+}
+
+bool hle_res_ram_direct(void)
+{
+    return g_hram.zero_copy;
+}
+
+uint32_t hle_res_land_alloc(uint32_t len)
+{
+    uint8_t *p;
+    if (!len) {
+        return 0;
+    }
+    const uint32_t off = g_hland.buf ? ring_alloc(&g_hland.alloc, len, 256) : hle_draw_arena_alloc(len, &p);
     return off == HLE_ARENA_FULL ? 0 : off + 1;
 }
 

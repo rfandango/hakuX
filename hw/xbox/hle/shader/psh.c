@@ -25,6 +25,7 @@ typedef struct Buf {
     char *p;
     size_t cap, len;
     bool overflow;
+    const char *half;                   /* the bias mappings' 0.5 (hle_psh_glsl) */
 } Buf;
 
 static void put(Buf *b, const char *fmt, ...)
@@ -90,22 +91,23 @@ static void in_expr(Buf *b, uint8_t in, bool alpha, bool final)
     case 1: put(b, "(1.0 - clamp(%s, 0.0, 1.0))", x); break;     /* UNSIGNED_INVERT */
     case 2: put(b, "(2.0 * max(%s, 0.0) - 1.0)", x); break;      /* EXPAND_NORMAL */
     case 3: put(b, "(-2.0 * max(%s, 0.0) + 1.0)", x); break;     /* EXPAND_NEGATE */
-    case 4: put(b, "(max(%s, 0.0) - 0.5)", x); break;            /* HALFBIAS_NORMAL */
-    case 5: put(b, "(-max(%s, 0.0) + 0.5)", x); break;           /* HALFBIAS_NEGATE */
+    case 4: put(b, "(max(%s, 0.0) - %s)", x, b->half); break;    /* HALFBIAS_NORMAL */
+    case 5: put(b, "(-max(%s, 0.0) + %s)", x, b->half); break;   /* HALFBIAS_NEGATE */
     case 6: put(b, "(%s)", x); break;                            /* SIGNED_IDENTITY */
     default: put(b, "(-(%s))", x); break;                        /* SIGNED_NEGATE */
     }
 }
 
-static const char *out_map(uint32_t out)
+/* A stage's result v through its output mapping (half: the bias's 0.5). */
+static void out_expr(char *e, size_t n, uint32_t out, const char *v, const char *half)
 {
     switch ((out >> 15) & 7) {
-    case 1: return "(%s - 0.5)";                        /* BIAS */
-    case 2: return "(%s * 2.0)";                        /* SHIFTLEFT_1 */
-    case 3: return "((%s - 0.5) * 2.0)";                /* SHIFTLEFT_1_BIAS */
-    case 4: return "(%s * 4.0)";                        /* SHIFTLEFT_2 */
-    case 6: return "(%s * 0.5)";                        /* SHIFTRIGHT_1 */
-    default: return "(%s)";
+    case 1: snprintf(e, n, "(%s - %s)", v, half); break;            /* BIAS */
+    case 2: snprintf(e, n, "(%s * 2.0)", v); break;                 /* SHIFTLEFT_1 */
+    case 3: snprintf(e, n, "((%s - %s) * 2.0)", v, half); break;    /* SHIFTLEFT_1_BIAS */
+    case 4: snprintf(e, n, "(%s * 4.0)", v); break;                 /* SHIFTLEFT_2 */
+    case 6: snprintf(e, n, "(%s * 0.5)", v); break;                 /* SHIFTRIGHT_1 */
+    default: snprintf(e, n, "(%s)", v); break;
     }
 }
 
@@ -140,7 +142,7 @@ static void stage(Buf *b, const HlePshKey *k, unsigned s)
         put(b, ";\n");
     }
     /* MSB: bit 7 of the 8-bit value (D3D cnd: r0.a > 0.5); 1.0 * 0.5 is
-     * 0xFF >> 1 = 0x7F, clear */
+     * 0xFF >> 1 = 0x7F, clear, and a bias's 0.5 is 0x80, set (b->half) */
     put(b, "    bool mx = %s;\n", (k->count & 0x100) ? "r0.a > 0.5"
                                                    : "(uint(r0.a * 255.0) & 1u) == 1u");
     put(b, "    vec3 ab = %s, cd = %s;\n", (ro & 0x2000) ? "vec3(dot(A, B))" : "A * B",
@@ -152,9 +154,9 @@ static void stage(Buf *b, const HlePshKey *k, unsigned s)
     static const char *const k_rv[3] = { "ab", "cd", "ms" };
     static const char *const k_av[3] = { "aab", "acd", "ams" };
     for (unsigned i = 0; i < 3; i++) {
-        snprintf(e, sizeof(e), out_map(ro), k_rv[i]);
+        out_expr(e, sizeof(e), ro, k_rv[i], b->half);
         put(b, "    %s = clamp(%s, -1.0, 1.0);\n", k_rv[i], e);
-        snprintf(e, sizeof(e), out_map(ao), k_av[i]);
+        out_expr(e, sizeof(e), ao, k_av[i], b->half);
         put(b, "    %s = clamp(%s, -1.0, 1.0);\n", k_av[i], e);
     }
     /* outputs: AB bits 4-7, CD bits 0-3, SUM bits 8-11 */
@@ -273,9 +275,39 @@ static void alpha_kill(Buf *b, const HlePshKey *k, unsigned s, unsigned m)
 
 size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsupported)
 {
-    Buf b = { buf, cap, 0, false };
+    Buf b = { buf, cap, 0, false, "0.5" };
     const char *interp = k->flat ? "flat " : "";
+    /* The combiners compute in signed fixed point, 1.0 = 0xFF: the bias
+     * mappings' 0.5 is 0x80, its MSB set, while a halving of 1.0 is 0x7F,
+     * clear; both are 0.5 in float. A MUX on r0.a's MSB tells them apart:
+     * Halo 2's scope mask sets r0.a = 0.5 - t0.b (HALFBIAS_NEGATE) to pick
+     * its black where t0.b is 0 (a dimmed view around the scope, black
+     * lines) and a light blue elsewhere, and read as 0.5 it painted the
+     * whole view light blue; PGR2's road halves t0.a (SHIFTRIGHT_1) and must
+     * not pick at 1.0. Shaders with such a MUX take 0x80 / 0xFF for the
+     * bias; the others keep 0.5 and their text (a colour moves by half an
+     * 8-bit step only). A MUX on the LSB keeps 0.5 too: its test truncates
+     * r0.a * 255, which lands a 0x80 bias's sums just under their integer
+     * (no title is known to depend on its parity at a bias). */
+    if (k->count & 0x100) {
+        for (unsigned s = 0; s < (k->count & 0xFF) && s < 8; s++) {
+            if ((k->rgb_out[s] | k->alpha_out[s]) & 0x4000) {
+                b.half = "(128.0 / 255.0)";
+                break;
+            }
+        }
+    }
     unsigned unsup = 0;
+    /* PSDotMapping HILO_1 (4) in a stage's field: dmap reads the 32-bit texel
+     * as two 16-bit halves, hi A:R and lo G:B, over 65535 (as xemu). Read as
+     * its R and G bytes mapped to -1..1, the depth buffer Halo 2's fog pass reads as
+     * A8R8G8B8 (its top 16 bits in A:R) gave its fog-table lookup depth bits
+     * 8-15, which wrap every 256 steps: stripes of fog and none across the
+     * scenery, moving with the camera. */
+    bool hilo1 = false;
+    for (unsigned s = 0; s < 3; s++) {
+        hilo1 |= ((k->dot_map >> (4 * s)) & 7) == 4;
+    }
     put(&b, "#version 450\n#extension GL_EXT_nonuniform_qualifier : require\n%s",
         hle_push_glsl());
     put(&b, "layout(set = 0, binding = 0) uniform texture2D uTex2D[];\n"
@@ -293,9 +325,11 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "layout(location = 0) out vec4 oColor;\n"
             "vec4 col(uint c) { return unpackUnorm4x8(c).zyxw; }\n"
             HLE_NVPROJ_GLSL
+            "%s"
             /* Xbox linear (non-swizzled) textures use texel coordinates */
             "vec4 samp(uint s, vec2 uv) {\n"
             "  uint ti = pc.tex[s] & 0xFFFFu, si = pc.tex[s] >> 16;\n"
+            "%s"
             "  if ((pc.flags & (1u << s)) != 0u)\n"
             "    uv /= vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0)) /\n"
             "          ((pc.flags & (256u << s)) != 0u ? float(pc.flags >> 24) : 1.0);\n"
@@ -314,6 +348,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             /* PSDotMapping of a texture color to a vector */
             "vec3 dmap(uint m, vec4 c) {\n"
             "  if (m == 0u) return c.rgb;\n"
+            "%s"
             "  if (m == 3u) { vec3 v = floor(c.rgb * 255.0 + 0.5);\n"
             "    return mix(v, v - 256.0, greaterThanEqual(v, vec3(128.0))) / 127.0; }\n"
             "  if (m >= 4u) { vec2 h = c.rg * 2.0 - 1.0;\n"
@@ -332,6 +367,17 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "layout(input_attachment_index = 0, set = 2, binding = 0) "
             "uniform subpassInput uFb;\n" : "",
         k->fbfetch & HLE_FB_ZEQ ? HLE_ZEQ_DECL_GLSL : "",
+        /* a linear texture kept to its own size (ff.h HLE_NVRECT_GLSL): the stage fog.w names */
+        k->vol & HLE_PSH_RECT ? HLE_NVRECT_GLSL : "",
+        k->vol & HLE_PSH_RECT ?
+            "  { uint r = floatBitsToUint(pc.fog.w);\n"
+            "    if (r != 0u && s == ((r >> 28 & 1u) | (r >> 30 & 2u)))\n"
+            "      uv = nvrect(uv, (pc.flags & (256u << s)) != 0u ? 0.5 / float(pc.flags >> 24) : 0.5); }\n"
+            : "",
+        /* HILO_1: the texel's two 16-bit halves, unsigned, and 1 (only where a
+         * stage maps so: other shaders' text, and their cached SPIR-V, stay) */
+        hilo1 ? "  if (m == 4u) { uvec4 i = uvec4(c * 255.0 + 0.5);\n"
+                "    return vec3(float(i.a << 8 | i.r), float(i.g << 8 | i.b), 65535.0) / 65535.0; }\n" : "",
         k->point_sprite ? "vec4(gl_PointCoord, 1.0, 1.0)" : "vTex3i");
     if (k->wbuf) {
         put(&b, HLE_WBUF_CALC_GLSL);

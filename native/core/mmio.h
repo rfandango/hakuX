@@ -33,6 +33,18 @@ void nc_mmio_register(const NcMmioDev *dev);
  * the decoder knows. Returns false to let the caller report the fault. */
 bool nc_mmio_fault(const NcVm *vm, const siginfo_t *info, void *ucontext);
 
+/* From a SIGSEGV handler on guest RAM: the guest physical bytes [*lo, *hi)
+ * the faulting load or store reaches, and whether it stores. False if the
+ * decoder doesn't know the instruction or its bytes aren't on one page. */
+bool nc_ram_access_span(const NcVm *vm, const siginfo_t *info, void *ucontext, uint32_t *lo,
+                        uint32_t *hi, bool *store);
+/* ... that access done through the host's view of RAM (the guest's page
+ * keeps its protection), stored(pa, n) told before each store, and the
+ * guest resumed after the instruction. False if it can't be (the caller
+ * lets the access run on its own). */
+bool nc_ram_emulate(NcVm *vm, const siginfo_t *info, void *ucontext,
+                    void (*stored)(uint32_t pa, uint32_t n));
+
 /* Writes the busiest MMIO sites to fd. */
 void nc_mmio_dump_stats(int fd);
 /* A device access at guest physical/virtual addr (the windows are identity

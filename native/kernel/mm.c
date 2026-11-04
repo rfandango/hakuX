@@ -541,6 +541,7 @@ static uint32_t contig_alloc(NcKernel *k, uint32_t size, uint32_t lo, uint32_t h
      * window needing the fewest moves; neither when there are fewer free
      * pages than asked for. */
     uint32_t pa = UINT32_MAX, moved = 0;
+    static unsigned s_failed;           /* failures since the last success (reports below) */
     if (nc_vm_free_bytes(k->vm) >= size) {
         pa = nc_vm_alloc_phys_top(k->vm, size, lo, hi, align, &moved);
     }
@@ -560,8 +561,9 @@ static uint32_t contig_alloc(NcKernel *k, uint32_t size, uint32_t lo, uint32_t h
          * by asking for less and less (The Warriors: 46.5 MiB down to 38.5
          * in 4 KiB steps after its 18.5 MiB block, 2033 failures), and each
          * report scanned RAM twice and logged three lines: 35 s of its boot.
-         * The first 4 failures, then every power of two, are reported. */
-        static unsigned s_failed;
+         * The first 4 failures since a success, then every power of two, are
+         * reported: a run's own failure later (Amped 2's 1.4 MiB at a level's
+         * load, after ~2500 sizing its heap at boot) is reported whole. */
         const unsigned n = ++s_failed;
         if (n <= 4 || !(n & (n - 1))) {
             char runs[400];
@@ -574,6 +576,7 @@ static uint32_t contig_alloc(NcKernel *k, uint32_t size, uint32_t lo, uint32_t h
         }
         return 0;
     }
+    s_failed = 0;
     memset(k->vm->ram + pa, 0, size);
     /* An aligned block below another leaves the pages its alignment skipped
      * free between them, and virtual memory takes the highest free pages:
@@ -791,6 +794,16 @@ static uint64_t MmPersistContiguousMemory(NcKernel *k, NcFrame *f, const uint32_
     return 0;
 }
 
+void nc_mm_keep_drop(uint32_t va)
+{
+    for (unsigned i = 0; i < g_nkept; i++) {
+        if (g_kept[i].va == va) {
+            g_kept[i] = g_kept[--g_nkept];
+            return;
+        }
+    }
+}
+
 static void kept_file(char *out, size_t n)
 {
     snprintf(out, n, "%s/../kept.bin", nc_io_hdd_root());
@@ -821,6 +834,9 @@ void nc_mm_keep_save(NcKernel *k, uint32_t saved)
     for (unsigned i = 0; ok && i < g_nkept; i++) {
         const uint32_t pa = kept_pa(k, g_kept[i].va), len = g_kept[i].len;
         const uint32_t rec[2] = {g_kept[i].va, len};
+        if (pa < k->vm->ram_size && len <= k->vm->ram_size - pa) {
+            nc_vm_will_read(NC_CONTIG_WINDOW + pa, len);    /* the window's pages a target closed */
+        }
         ok = pa < k->vm->ram_size && len <= k->vm->ram_size - pa && fwrite(rec, sizeof(rec), 1, fp) == 1 &&
              fwrite(k->vm->ram + pa, 1, len, fp) == len;
         bytes += len;

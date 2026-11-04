@@ -49,6 +49,8 @@ typedef struct HlePbdState {
     uint32_t nimm, ninl, nidx;
     bool vis_open;
     uint64_t clears, swaps, draws;
+    uint32_t disp_w, disp_h;            /* the device's display (v2; 0: none yet) */
+    bool disp_moded;                    /* ... the video mode's size */
 } HlePbdState;
 
 /* pb/kelvin.c: its register shadow (the draw state reads it) */

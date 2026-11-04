@@ -45,6 +45,12 @@ bool nc_disc_find(const NcDisc *d, const char *path, NcDiscFile *out);
 
 /* Reads len bytes at offset off of a file. */
 bool nc_disc_read(const NcDisc *d, const NcDiscFile *f, uint64_t off, void *buf, size_t len);
+/* ... as the title's file I/O sees it: the overlay's files, but not the XBE
+ * patches. Those patch the image the core boots, and a title reading an XBE
+ * as a file gets the disc's bytes: a title update's patch, built against the
+ * disc's XBE and applied by the title's updater, came out damaged over a mod's
+ * byte (PGR2, Forza with their 60 fps mods). */
+bool nc_disc_read_file(const NcDisc *d, const NcDiscFile *f, uint64_t off, void *buf, size_t len);
 
 /* The overlay, before the title boots: a host file at a disc path (either
  * slash); a later one at the same path takes its place. Folders the disc

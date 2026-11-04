@@ -25,7 +25,11 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
+#include <time.h>
 #include <unistd.h>
+#ifdef __ANDROID__
+#include "hw/xbox/hle/prop.h"
+#endif
 
 #define STATUS_NO_MORE_FILES          0x80000006u
 #define STATUS_INVALID_DEVICE_REQUEST 0xC0000010u
@@ -39,6 +43,7 @@
 #define STATUS_OBJECT_PATH_NOT_FOUND  0xC000003Au
 #define STATUS_DELETE_PENDING         0xC0000056u
 #define STATUS_MEDIA_WRITE_PROTECTED  0xC00000A2u
+#define STATUS_NO_MEDIA_IN_DEVICE     0xC0000013u
 #define STATUS_FILE_IS_A_DIRECTORY    0xC00000BAu
 #define STATUS_NOT_A_DIRECTORY        0xC0000103u
 #define STATUS_DIRECTORY_NOT_EMPTY    0xC0000101u
@@ -145,6 +150,13 @@ typedef struct NcFile {
 #define FCB_FATX_CLUSTER 0x1Cu
 
 static NcFile g_files[MAX_FILES];
+/* Console timing: each open file's pages in the file system's cache, those
+ * its last read from the drive brought in ([lo, hi), FS_PAGE pages). A read
+ * inside them takes no drive time; not kept in states. */
+#define FS_PAGE 4096u
+static struct FsCache {
+    uint64_t lo, hi;
+} g_fs_cache[MAX_FILES];
 typedef struct NcLink {
     char name[64];
     char target[256];
@@ -322,6 +334,26 @@ static int device_of(const char *path, const char **rel)
     return -2;
 }
 
+static int host_path(int part, const char *rel, char *out, size_t cap);
+
+bool nc_io_host_file(const char *xbox_path, char *out, size_t n)
+{
+    char path[512];
+    const char *rel;
+    if (!canon(xbox_path, path, sizeof(path))) {
+        return false;
+    }
+    const int part = device_of(path, &rel);
+    struct stat st;
+    return part >= 1 && part <= 5 && *rel && host_path(part, rel, out, n) == 1 && stat(out, &st) == 0 &&
+           S_ISREG(st.st_mode);
+}
+
+void nc_io_set_launch_dir(const char *dir)
+{
+    link_set("\\??\\D:", dir);
+}
+
 static bool mkdirs(const char *path)
 {
     char tmp[512];
@@ -375,6 +407,7 @@ static NcFile *file_new(void)
     for (int i = 0; i < MAX_FILES; i++) {
         if (!g_files[i].used) {
             memset(&g_files[i], 0, sizeof(g_files[i]));
+            g_fs_cache[i] = (struct FsCache){0};
             g_files[i].used = true;
             g_files[i].fd = -1;
             return &g_files[i];
@@ -608,6 +641,60 @@ static void complete(NcKernel *k, const uint32_t *a)
  * reported dirty when the read completes (nc_vm_dma). */
 #define DISC_JOBS 64
 
+/* Console timing (the app's setting, nc_io_set_device_time): a read takes at
+ * least a quarter of the time the console's drives take at their best (the
+ * whole of it made loads too slow), and the thread that asked waits it
+ * out. At the phone's speed a load ran without its
+ * thread ever waiting, so the game's lower-priority threads didn't run
+ * until it was done: Morrowind starts its loading screen's thread as a cell
+ * load begins, and on the Xbox the thread sets up its first picture while
+ * the load still reads. A load done first (a cell it held) found that
+ * setup half done, asked the thread to end and waited for it, while the
+ * thread waited for that request to clear: a freeze leaving a building.
+ * So every synchronous read the file system's cache doesn't hold goes to
+ * the reader, its caller waiting (NtReadFile), and the reader spends a
+ * request's time plus the transfer at the drive's rate on each, one at a
+ * time. NC_DEVTIME="disc_us,disc_kBps,hdd_us,hdd_kBps" (or the property
+ * debug.hakux.devtime, read at boot) tunes the drives. */
+static bool g_devtime;
+static struct DevRate {
+    uint32_t req_us, kbps;
+} g_dev_disc = {125, 27600},    /* the DVD drive at 5x: 500 us, 6900 kB/s */
+  g_dev_hdd = {50, 80000};      /* the hard disk: 200 us, 20000 kB/s */
+
+void nc_io_set_device_time(bool on)
+{
+    g_devtime = on;
+    const char *e = getenv("NC_DEVTIME");
+#ifdef __ANDROID__
+    char v[PROP_VALUE_MAX];
+    if (!e && hle_prop_get("debug.hakux.devtime", v) > 0) {
+        e = v;
+    }
+#endif
+    if (e) {
+        sscanf(e, "%u,%u,%u,%u", &g_dev_disc.req_us, &g_dev_disc.kbps, &g_dev_hdd.req_us, &g_dev_hdd.kbps);
+    }
+    nc_log("hakuX-native-io", "console timing %s: disc %u us + %u kB/s, hard disk %u us + %u kB/s", on ? "on" : "off",
+           g_dev_disc.req_us, g_dev_disc.kbps, g_dev_hdd.req_us, g_dev_hdd.kbps);
+}
+
+/* The drive's time for n bytes of nf (console timing on), in microseconds. */
+static uint32_t device_us(const NcFile *nf, uint32_t n)
+{
+    if (!g_devtime) {
+        return 0;
+    }
+    const struct DevRate *r = nf->kind == F_DISC ? &g_dev_disc : &g_dev_hdd;
+    return r->req_us + (r->kbps ? (uint32_t)((uint64_t)n * 1000 / r->kbps) : 0);
+}
+
+/* A read's buffer as guest virtual runs, filled in order: NtReadFile's one,
+ * NtReadFileScatter's pages. */
+typedef struct IoRun {
+    uint32_t va, len;
+} IoRun;
+
 typedef struct DiscJob {
     const NcDisc *disc;
     NcDiscFile file;
@@ -620,6 +707,7 @@ typedef struct DiscJob {
     unsigned nseg;
     uint64_t gpu;            /* the GPU value to wait for first (nc_vm_dma.fence), or 0 */
     uint32_t va, n;
+    uint32_t dev_us;         /* the drive's time for it (console timing), 0: none */
     uint32_t iosb, event, apc, apc_ctx;
     NcThread *thread;
     uint32_t thread_id;      /* its id then: the slot may hold another thread by the end */
@@ -638,7 +726,27 @@ static struct {
     unsigned ndone;
     unsigned busy;           /* queued, reading or done: at most DISC_JOBS */
     bool started;
+    bool hurry;              /* a savestate's drain: no drive time left to wait (atomic) */
 } g_reader = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER};
+
+static uint64_t mono_ns(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec;
+}
+
+/* A request's drive time, until due (mono_ns), in slices a savestate's drain
+ * cuts short: the guest stands still then, and sees the read land as it goes
+ * on. The next request waits for it too, as the drive's. */
+static void drive_wait(uint64_t due)
+{
+    for (uint64_t now; !__atomic_load_n(&g_reader.hurry, __ATOMIC_ACQUIRE) && (now = mono_ns()) < due;) {
+        const uint64_t left = due - now;
+        const struct timespec ts = {0, (long)(left < 1000000 ? left : 1000000)};
+        nanosleep(&ts, NULL);
+    }
+}
 
 static void *reader_thread(void *arg)
 {
@@ -651,6 +759,7 @@ static void *reader_thread(void *arg)
         g_reader.head = (g_reader.head + 1) % DISC_JOBS;
         g_reader.n--;
         pthread_mutex_unlock(&g_reader.mu);
+        const uint64_t due = mono_ns() + (uint64_t)j.dev_us * 1000;
         if (j.gpu && nc_vm_dma.wait) {
             nc_vm_dma.wait(j.gpu);
         }
@@ -660,10 +769,13 @@ static void *reader_thread(void *arg)
         for (unsigned i = 0; j.ok && i < j.nseg; i++) {
             const struct DmaSeg *g = &j.seg[i];
             j.ok = j.fd >= 0 ? pread(j.fd, g->host, g->len, (off_t)o) == (ssize_t)g->len
-                             : nc_disc_read(j.disc, &j.file, o, g->host, g->len);
+                             : nc_disc_read_file(j.disc, &j.file, o, g->host, g->len);
             o += g->len;
         }
         j.err = j.ok ? 0 : errno;
+        if (j.dev_us) {
+            drive_wait(due);
+        }
         pthread_mutex_lock(&g_reader.mu);
         g_reader.done[g_reader.ndone++] = j;
         pthread_mutex_unlock(&g_reader.mu);
@@ -677,20 +789,21 @@ static void *reader_thread(void *arg)
  * contiguous allocation relocates virtual pages (vm.c), and a page copied
  * while the read went on lost what the reader wrote after the copy. Pinned
  * and unpinned on the guest's CPU, where relocation runs. */
-static void pin_buffer(NcKernel *k, uint32_t va, uint32_t n, int lock)
+static void pin_buffer(NcKernel *k, const DiscJob *j, int lock)
 {
-    for (uint32_t p = va & ~(NC_PAGE - 1); n && p < va + n; p += NC_PAGE) {
-        const uint32_t pa = nc_vm_phys(k->vm, p);
-        if (pa != UINT32_MAX) {
-            nc_vm_pin(k->vm, pa & ~(NC_PAGE - 1), false, lock);
+    for (unsigned i = 0; i < j->nseg; i++) {
+        const uint32_t pa = j->seg[i].pa, end = pa + j->seg[i].len;
+        for (uint32_t p = pa & ~(NC_PAGE - 1); p < end; p += NC_PAGE) {
+            nc_vm_pin(k->vm, p, false, lock);
         }
     }
 }
 
-/* Queues a read of n bytes at off into the buffer a[5] (resident and
+/* Queues a read of n bytes at off into the buffer's runs (resident and
  * writable); false when it must happen in place. sync: the calling thread
- * waits for it, every other one runs on. */
-static bool disc_read_later(NcKernel *k, const NcFile *nf, const uint32_t *a, uint64_t off, uint32_t n, bool sync)
+ * waits for it, every other one runs on. dev_us: the drive's time for it. */
+static bool disc_read_later(NcKernel *k, const NcFile *nf, const uint32_t *a, const IoRun *run, unsigned nrun,
+                            uint64_t off, uint32_t n, bool sync, uint32_t dev_us)
 {
     static int in_place = -1; /* NC_DISC_SYNC: every disc read in place, as before */
     if (in_place < 0) {
@@ -712,29 +825,35 @@ static bool disc_read_later(NcKernel *k, const NcFile *nf, const uint32_t *a, ui
             event = fo + NC_FO_EVENT;
         }
     }
-    DiscJob j = {.disc = k->disc, .file = nf->disc, .fd = -1, .off = off, .va = a[5], .n = n, .iosb = a[4],
-                 .event = event, .apc = a[2], .apc_ctx = a[3], .thread = k->current,
-                 .thread_id = k->current ? k->current->id : 0, .sync = sync};
+    DiscJob j = {.disc = k->disc, .file = nf->disc, .fd = -1, .off = off, .va = run[0].va, .n = n,
+                 .dev_us = dev_us, .iosb = a[4], .event = event, .apc = a[2], .apc_ctx = a[3],
+                 .thread = k->current, .thread_id = k->current ? k->current->id : 0, .sync = sync};
     snprintf(j.path, sizeof(j.path), "%s", nf->path);
-    j.seg = malloc(sizeof(*j.seg) * ((n + NC_PAGE - 1) / NC_PAGE + 1));
+    size_t segs = 0;
+    for (unsigned r = 0; r < nrun; r++) {
+        segs += run[r].len / NC_PAGE + 2;
+    }
+    j.seg = malloc(sizeof(*j.seg) * segs);
     if (!j.seg) {
         return false;
     }
-    for (uint32_t va = a[5], left = n; left;) {
-        const uint32_t room = NC_PAGE - (va & (NC_PAGE - 1)), chunk = left < room ? left : room;
-        const uint32_t pa = nc_vm_phys(k->vm, va);
-        if (pa == UINT32_MAX || (uint64_t)pa + chunk > k->vm->ram_size) {
-            free(j.seg);
-            return false;                   /* not all RAM: in place */
+    for (unsigned r = 0; r < nrun; r++) {
+        for (uint32_t va = run[r].va, left = run[r].len; left;) {
+            const uint32_t room = NC_PAGE - (va & (NC_PAGE - 1)), chunk = left < room ? left : room;
+            const uint32_t pa = nc_vm_phys(k->vm, va);
+            if (pa == UINT32_MAX || (uint64_t)pa + chunk > k->vm->ram_size) {
+                free(j.seg);
+                return false;               /* not all RAM: in place */
+            }
+            struct DmaSeg *last = j.nseg ? &j.seg[j.nseg - 1] : NULL;
+            if (last && last->pa + last->len == pa) {
+                last->len += chunk;
+            } else {
+                j.seg[j.nseg++] = (struct DmaSeg){k->vm->phys + pa, pa, chunk};
+            }
+            va += chunk;
+            left -= chunk;
         }
-        struct DmaSeg *last = j.nseg ? &j.seg[j.nseg - 1] : NULL;
-        if (last && last->pa + last->len == pa) {
-            last->len += chunk;
-        } else {
-            j.seg[j.nseg++] = (struct DmaSeg){k->vm->phys + pa, pa, chunk};
-        }
-        va += chunk;
-        left -= chunk;
     }
     if (nf->kind == F_HOST && (j.fd = dup(nf->fd)) < 0) {
         free(j.seg);
@@ -754,7 +873,7 @@ static bool disc_read_later(NcKernel *k, const NcFile *nf, const uint32_t *a, ui
     }
     const bool queued = g_reader.started && g_reader.busy < DISC_JOBS;
     if (queued) {
-        pin_buffer(k, j.va, j.n, 1);
+        pin_buffer(k, &j, 1);
         g_reader.q[(g_reader.head + g_reader.n++) % DISC_JOBS] = j;
         g_reader.busy++;
         pthread_cond_signal(&g_reader.cv);
@@ -774,7 +893,7 @@ static bool disc_read_later(NcKernel *k, const NcFile *nf, const uint32_t *a, ui
 
 static void disc_read_done(NcKernel *k, const DiscJob *j)
 {
-    pin_buffer(k, j->va, j->n, -1);
+    pin_buffer(k, j, -1);
     const bool ok = j->ok;
     const int err = j->err;
     for (unsigned i = 0; i < j->nseg; i++) {
@@ -945,6 +1064,9 @@ static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t attrs, uint32_t d
         return in_dir ? STATUS_OBJECT_NAME_NOT_FOUND : STATUS_OBJECT_PATH_NOT_FOUND;
     }
     if (dev == -1) {
+        if (k->disc->fd < 0 && !k->disc->ov) {
+            return STATUS_NO_MEDIA_IN_DEVICE;   /* the dashboard booted with the tray empty */
+        }
         if (disposition != FILE_OPEN && disposition != FILE_OPEN_IF) {
             return STATUS_MEDIA_WRITE_PROTECTED;
         }
@@ -1146,6 +1268,40 @@ static void raw_io(int part, uint64_t off, uint8_t *buf, uint32_t len, bool writ
     close(fd);
 }
 
+/* ExReadWriteRefurbInfo(RefurbInfo, ValueLength, DoWrite): XBOX_REFURB_INFO
+ * { Signature, PowerCycleCount, FirstSetTime } in the config area's sector 3;
+ * read without its signature there, zeros. */
+#define REFURB_SECTOR    3
+#define REFURB_SIGNATURE 0x52465242u    /* 'RFRB' */
+
+static uint64_t ExReadWriteRefurbInfo(NcKernel *k, NcFrame *f, const uint32_t *a)
+{
+    if (a[1] != 16) {
+        return 0xC000000Du;             /* STATUS_INVALID_PARAMETER */
+    }
+    uint8_t sector[512];
+    raw_io(0, REFURB_SECTOR * 512, sector, sizeof(sector), false);
+    uint8_t *info = nc_vm_host(k->vm, a[0]);
+    if (a[2] & 0xFF) {
+        memcpy(sector, info, 16);
+        nc_wr32(sector, REFURB_SIGNATURE);
+        raw_io(0, REFURB_SECTOR * 512, sector, sizeof(sector), true);
+    } else if (nc_rd32(sector) == REFURB_SIGNATURE) {
+        memcpy(info, sector, 16);
+    } else {
+        memset(info, 0, 16);
+    }
+    return NC_STATUS_SUCCESS;
+}
+
+/* IoDismountVolumeByName(DeviceName): the volumes are host folders, with
+ * nothing cached to write back; the dashboard dismounts the disc and the
+ * drives it formats. */
+static uint64_t IoDismountVolumeByName(NcKernel *k, NcFrame *f, const uint32_t *a)
+{
+    return NC_STATUS_SUCCESS;
+}
+
 /* The offset an NtReadFile/NtWriteFile works at: ByteOffset, or the file position. */
 static uint64_t io_offset(NcKernel *k, const NcFile *nf, uint32_t byte_offset)
 {
@@ -1156,6 +1312,23 @@ static uint64_t io_offset(NcKernel *k, const NcFile *nf, uint32_t byte_offset)
         }
     }
     return nf->pos;
+}
+
+/* A read or write through nf ended at end: the file's position goes there
+ * through a handle opened for synchronous I/O, as the Xbox's file systems
+ * keep it (NT's, FO_SYNCHRONOUS_IO only); an overlapped request names its
+ * offset and leaves the position to the title. Burnout 2 reads its 4.6 MiB
+ * traffic data in 128 KiB overlapped reads, moving the position itself
+ * (SetFilePointer) after each: moved here too, each read came from twice
+ * its offset, and the data's pointer walk faulted as the game started. One
+ * without an offset of its own (the position's) moves it still. */
+static void io_moved(NcKernel *k, NcFile *nf, uint32_t byte_offset, uint64_t end)
+{
+    const bool named = byte_offset && !(nc_vm_rd32(k->vm, byte_offset) == 0xFFFFFFFEu &&
+                                        nc_vm_rd32(k->vm, byte_offset + 4) == 0xFFFFFFFFu);
+    if (!nf->async || !named) {
+        nf->pos = end;
+    }
 }
 
 static int partition_root(const NcFile *nf);
@@ -1195,6 +1368,24 @@ static bool disc_cached(const NcFile *nf, uint64_t off, uint32_t len)
     return nf->kind == F_DISC && ((off | len) & (DISC_SECTOR - 1));
 }
 
+/* Console timing: the file system's cache holds the n bytes at off (the
+ * pages the file's last drive read brought in). */
+static bool fs_cache_holds(const NcFile *nf, uint64_t off, uint32_t n)
+{
+    const struct FsCache *c = &g_fs_cache[nf - g_files];
+    return off >= c->lo && off + n <= c->hi;
+}
+
+/* A drive read of the n bytes at off brings their pages into the cache, in
+ * place of the file's last ones: the bytes the drive transfers. */
+static uint32_t fs_cache_fill(const NcFile *nf, uint64_t off, uint32_t n)
+{
+    struct FsCache *c = &g_fs_cache[nf - g_files];
+    c->lo = off & ~(uint64_t)(FS_PAGE - 1);
+    c->hi = (off + n + FS_PAGE - 1) & ~(uint64_t)(FS_PAGE - 1);
+    return (uint32_t)(c->hi - c->lo);
+}
+
 /* A synchronous read this long goes to the reader thread too, the calling
  * thread waiting for it (XAPI's ReadFile on an ordinary handle): in place,
  * every guest thread, the vblank DPC and the interrupts stopped for the
@@ -1215,27 +1406,55 @@ static bool can_block(const NcKernel *k)
            !k->redirected && *(const uint8_t *)nc_vm_host(k->vm, k->kpcr_va + 0x24) == 0;
 }
 
-static uint64_t NtReadFile(NcKernel *k, NcFrame *f, const uint32_t *a)
+/* The runs' first n bytes: how many runs hold them, the last cut to fit. */
+static unsigned runs_cut(IoRun *run, unsigned nrun, uint32_t n)
+{
+    unsigned i = 0;
+    for (; i < nrun && n; i++) {
+        run[i].len = run[i].len < n ? run[i].len : n;
+        n -= run[i].len;
+    }
+    return i;
+}
+
+static bool runs_resident(NcKernel *k, const IoRun *run, unsigned nrun)
+{
+    for (unsigned i = 0; i < nrun; i++) {
+        if (!nc_kernel_resident(k, run[i].va, run[i].len, true)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* NtReadFile's work for a buffer of runs (len bytes in all): a[] as
+ * NtReadFile takes it, its Buffer and Length aside. */
+static uint64_t read_runs(NcKernel *k, const uint32_t *a, IoRun *run, unsigned nrun, uint32_t len)
 {
     NcFile *nf = file_of(k, a[0]);
     if (!nf) {
         return NC_STATUS_INVALID_HANDLE;
     }
+    const uint32_t va0 = nrun ? run[0].va : 0;
     const int raw = nf->kind == F_VOLUME && nf->partition == 0 ? 0
                   : nf->kind == F_HOST && nf->is_dir ? partition_root(nf) : -1;
     if (raw == 0 || raw >= 3) {
         /* The raw disk's config sectors, or a cache partition read raw. */
-        if (!nc_kernel_resident(k, a[5], a[6], true)) {
+        if (!runs_resident(k, run, nrun)) {
             return 0;
         }
         const uint64_t off = io_offset(k, nf, a[7]);
-        nc_vm_will_write(a[5], a[6]);
-        raw_io(raw, off, nc_vm_host(k->vm, a[5]), a[6], false);
-        nf->pos = off + a[6];
-        if (g_trace_io) {
-            nc_log("hakuX-native-io", "read %s raw +%llx %u", nf->path, (unsigned long long)off, a[6]);
+        uint64_t o = off;
+        for (unsigned i = 0; i < nrun; i++) {
+            nc_vm_will_write(run[i].va, run[i].len);
+            raw_io(raw, o, nc_vm_host(k->vm, run[i].va), run[i].len, false);
+            o += run[i].len;
         }
-        return io_finish(k, nf, a, NC_STATUS_SUCCESS, a[6], true);
+        io_moved(k, nf, a[7], off + len);
+        if (g_trace_io) {
+            nc_log("hakuX-native-io", "read %s raw +%llx %u", nf->path, (unsigned long long)off, len);
+        }
+        return io_finish(k, nf, a, NC_STATUS_SUCCESS, len, true);
     }
     if (nf->is_dir || nf->kind == F_VOLUME) {
         io_status(k, a[4], STATUS_INVALID_DEVICE_REQUEST, 0);
@@ -1249,53 +1468,103 @@ static uint64_t NtReadFile(NcKernel *k, NcFrame *f, const uint32_t *a)
         }
     }
     const uint64_t size = file_size(nf);
-    const bool async = nf->async && !disc_cached(nf, off, a[6]);
+    const bool async = nf->async && !disc_cached(nf, off, len);
     uint32_t st = NC_STATUS_SUCCESS, n = 0;
-    if (!a[6]) {
+    if (!len) {
         /* Zero bytes succeed, past the end too, as the file systems check
          * the length first: Halo's map streaming queues reads of what is
          * left, 0 at the end, and waits for each one's completion. */
     } else if (off >= size) {
         st = STATUS_END_OF_FILE;
     } else {
-        n = (uint32_t)(size - off < a[6] ? size - off : a[6]);
-        if (!nc_kernel_resident(k, a[5], n, true)) {
+        n = (uint32_t)(size - off < len ? size - off : len);
+        nrun = runs_cut(run, nrun, n);
+        if (!runs_resident(k, run, nrun)) {
             return 0;
         }
-        const bool later = async || (n >= SYNC_LATER_MIN && can_block(k));
+        /* console timing: a synchronous read the cache doesn't hold waits for the drive */
+        const bool drive = g_devtime && !async && can_block(k) && !fs_cache_holds(nf, off, n);
+        const bool later = async || drive || (n >= SYNC_LATER_MIN && can_block(k));
+        const uint32_t dev_us = async ? device_us(nf, n) : drive ? device_us(nf, fs_cache_fill(nf, off, n)) : 0;
         if ((nf->kind == F_DISC || (nf->kind == F_HOST && nf->fd >= 0)) && later &&
-            disc_read_later(k, nf, a, off, n, !async)) {
-            nf->pos = off + n;
+            disc_read_later(k, nf, a, run, nrun, off, n, !async, dev_us)) {
+            io_moved(k, nf, a[7], off + n);
             if (g_trace_io) {
-                nc_log("hakuX-native-io", "read %s +%llx %u into %08x %s%s%s", nf->path, (unsigned long long)off,
-                       n, a[5], async ? "pending" : "waited for", a[1] ? " event" : "", a[2] ? " apc" : "");
+                nc_log("hakuX-native-io", "read %s +%llx %u into %08x%s %s%s%s", nf->path, (unsigned long long)off,
+                       n, va0, nrun > 1 ? " (scattered)" : "", async ? "pending" : "waited for",
+                       a[1] ? " event" : "", a[2] ? " apc" : "");
             }
             if (!async) {
                 nc_ke_block(k);         /* the read's status replaces this when it completes */
             }
             return STATUS_PENDING;
         }
-        nc_vm_will_write(a[5], n); /* pread into a protected page fails rather than faults */
-        bool ok = nf->kind == F_DISC ? nc_disc_read(k->disc, &nf->disc, off, nc_vm_host(k->vm, a[5]), n)
-                                     : pread(nf->fd, nc_vm_host(k->vm, a[5]), n, (off_t)off) == (ssize_t)n;
+        bool ok = true;
+        uint64_t o = off;
+        for (unsigned i = 0; ok && i < nrun; i++) {
+            uint8_t *h = nc_vm_host(k->vm, run[i].va);
+            nc_vm_will_write(run[i].va, run[i].len); /* pread into a protected page fails rather than faults */
+            ok = nf->kind == F_DISC ? nc_disc_read_file(k->disc, &nf->disc, o, h, run[i].len)
+                                    : pread(nf->fd, h, run[i].len, (off_t)o) == (ssize_t)run[i].len;
+            o += run[i].len;
+        }
         if (!ok) {
             nc_log("hakuX-native-io", "read %s +%llx (%u) into %08x failed: %s", nf->path, (unsigned long long)off, n,
-                   a[5], strerror(errno));
+                   va0, strerror(errno));
             st = 0xC000009Cu; /* STATUS_DEVICE_DATA_ERROR */
             n = 0;
         }
     }
-    nf->pos = off + n;
+    io_moved(k, nf, a[7], off + n);
     if (g_trace_io) {
         uint8_t b[8] = {0};
-        if (n >= 8) {
-            memcpy(b, nc_vm_host(k->vm, a[5]), 8);
+        if (n >= 8 && run[0].len >= 8) {
+            memcpy(b, nc_vm_host(k->vm, va0), 8);
         }
         nc_log("hakuX-native-io", "read %s +%llx %u into %08x -> %08x n=%u%s%s [%02x%02x%02x%02x %02x%02x%02x%02x]",
-               nf->path, (unsigned long long)off, a[6], a[5], st, n, a[1] ? " event" : "", a[2] ? " apc" : "",
+               nf->path, (unsigned long long)off, len, va0, st, n, a[1] ? " event" : "", a[2] ? " apc" : "",
                b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
     }
     return io_finish(k, nf, a, st, n, async);
+}
+
+static uint64_t NtReadFile(NcKernel *k, NcFrame *f, const uint32_t *a)
+{
+    IoRun run = {a[5], a[6]};
+    return read_runs(k, a, &run, 1, a[6]);
+}
+
+/* NtReadFileScatter(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock,
+ * SegmentArray, Length, ByteOffset): NtReadFile into pages, SegmentArray
+ * holding a page's address (FILE_SEGMENT_ELEMENT, 4 bytes on the Xbox) for
+ * each page of Length, the device writing whole pages (the address's offset
+ * in its page left out). XAPI's ReadFileScatter, for handles opened without
+ * the cache: Double-S.T.E.A.L 2's streamer reads 24 pages at a time through
+ * it (its requests: an OVERLAPPED, then 25 elements, the last NULL), and the
+ * core stopped there as its first scene began. */
+static uint64_t NtReadFileScatter(NcKernel *k, NcFrame *f, const uint32_t *a)
+{
+    const uint32_t len = a[6], pages = (uint32_t)(((uint64_t)len + NC_PAGE - 1) / NC_PAGE);
+    if (!nc_kernel_resident(k, a[5], pages * 4, false)) {
+        return 0;
+    }
+    IoRun *run = malloc(sizeof(*run) * (pages ? pages : 1));
+    if (!run) {
+        return NC_STATUS_INSUFFICIENT_RESOURCES;
+    }
+    unsigned nrun = 0;
+    for (uint32_t i = 0; i < pages; i++) {
+        const uint32_t va = nc_vm_rd32(k->vm, a[5] + 4 * i) & ~(NC_PAGE - 1);
+        const uint32_t n = len - i * NC_PAGE < NC_PAGE ? len - i * NC_PAGE : NC_PAGE;
+        if (nrun && run[nrun - 1].va + run[nrun - 1].len == va) {
+            run[nrun - 1].len += n;
+        } else {
+            run[nrun++] = (IoRun){va, n};
+        }
+    }
+    const uint64_t r = read_runs(k, a, run, nrun, len);
+    free(run);
+    return r;
 }
 
 /* The partition number if nf is a hard disk partition's root, else -1. */
@@ -1365,8 +1634,9 @@ static uint64_t NtWriteFile(NcKernel *k, NcFrame *f, const uint32_t *a)
     if (nf->kind == F_VOLUME) {
         if (nf->partition == 0) {
             const uint64_t off = io_offset(k, nf, a[7]);
+            nc_vm_will_read(a[5], a[6]);
             raw_io(0, off, nc_vm_host(k->vm, a[5]), a[6], true);
-            nf->pos = off + a[6];
+            io_moved(k, nf, a[7], off + a[6]);
             if (g_trace_io) {
                 nc_log("hakuX-native-io", "write %s raw +%llx %u", nf->path, (unsigned long long)off, a[6]);
             }
@@ -1377,7 +1647,8 @@ static uint64_t NtWriteFile(NcKernel *k, NcFrame *f, const uint32_t *a)
         /* A cache drive formatted raw (XMountUtilityDrive): the superblock
          * write empties the folder; the head of the partition is kept. */
         const uint64_t o = io_offset(k, nf, a[7]);
-        nf->pos = o + a[6];
+        io_moved(k, nf, a[7], o + a[6]);
+        nc_vm_will_read(a[5], a[6]);
         raw_io(partition_root(nf), o, nc_vm_host(k->vm, a[5]), a[6], true);
         /* The FATX superblock: "FATX", volume id, sectors per cluster. */
         const uint8_t *sb = nc_vm_host(k->vm, a[5]);
@@ -1409,6 +1680,7 @@ static uint64_t NtWriteFile(NcKernel *k, NcFrame *f, const uint32_t *a)
             regrow(nf, size, off); /* the gap a write past the end leaves */
         }
     }
+    nc_vm_will_read(a[5], a[6]);   /* pwrite from a page without access fails rather than faults */
     ssize_t n = pwrite(nf->fd, nc_vm_host(k->vm, a[5]), a[6], (off_t)off);
     uint32_t st = n == (ssize_t)a[6] ? NC_STATUS_SUCCESS : 0xC000007Fu; /* STATUS_DISK_FULL */
     nf->wrote |= n > 0;
@@ -1420,7 +1692,7 @@ static uint64_t NtWriteFile(NcKernel *k, NcFrame *f, const uint32_t *a)
         nc_log("hakuX-native-io", "write %s +%llx %u from %08x -> %08x [%02x%02x%02x%02x %02x%02x%02x%02x]", nf->path,
                (unsigned long long)off, a[6], a[5], st, b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
     }
-    nf->pos = off + (n > 0 ? (uint64_t)n : 0);
+    io_moved(k, nf, a[7], off + (n > 0 ? (uint64_t)n : 0));
     return io_finish(k, nf, a, st, n > 0 ? (uint32_t)n : 0, nf->no_buffering);   /* cached: in the call */
 }
 
@@ -2392,10 +2664,14 @@ void nc_io_register(NcKernel *k)
 {
     g_trace_io = getenv("NC_TRACE_IO") != NULL;
     link_set("\\??\\D:", "\\Device\\CdRom0");
+    link_set("\\??\\CdRom0:", "\\Device\\CdRom0");     /* the kernel's own, as on the Xbox (the dashboard's) */
+    nc_kernel_impl(k, "ExReadWriteRefurbInfo", ExReadWriteRefurbInfo);
+    nc_kernel_impl(k, "IoDismountVolumeByName", IoDismountVolumeByName);
 
     nc_kernel_impl(k, "NtCreateFile", NtCreateFile);
     nc_kernel_impl(k, "NtOpenFile", NtOpenFile);
     nc_kernel_impl(k, "NtReadFile", NtReadFile);
+    nc_kernel_impl(k, "NtReadFileScatter", NtReadFileScatter);
     nc_kernel_impl(k, "NtWriteFile", NtWriteFile);
     nc_kernel_impl(k, "NtQueryInformationFile", NtQueryInformationFile);
     nc_kernel_impl(k, "NtSetInformationFile", NtSetInformationFile);
@@ -2459,7 +2735,8 @@ const char *nc_io_state_drain(NcKernel *k, uint64_t timeout_ns)
         }
     }
     /* the reads in flight land, and the kernel completes them (the host's
-     * clock: the guest's stands still) */
+     * clock: the guest's stands still), the drive's time not waited out */
+    __atomic_store_n(&g_reader.hurry, true, __ATOMIC_RELEASE);
     for (uint64_t waited = 0;; waited += 1000000) {
         pthread_mutex_lock(&g_reader.mu);
         const bool idle = g_reader.busy == g_reader.ndone;
@@ -2468,10 +2745,12 @@ const char *nc_io_state_drain(NcKernel *k, uint64_t timeout_ns)
             break;
         }
         if (waited > timeout_ns) {
+            __atomic_store_n(&g_reader.hurry, false, __ATOMIC_RELEASE);
             return "a disc read did not finish";
         }
         usleep(1000);
     }
+    __atomic_store_n(&g_reader.hurry, false, __ATOMIC_RELEASE);
     nc_irq_post_work();
     nc_io_poll(k);
     return NULL;
@@ -2515,6 +2794,7 @@ bool nc_file_state_load(NcRd *r, unsigned v)
     for (unsigned i = 0; i < MAX_FILES; i++) {
         file_drop(&g_files[i]);
     }
+    memset(g_fs_cache, 0, sizeof(g_fs_cache));
     memset(g_links, 0, sizeof(g_links));
     nc_recs_get(r, &nc_rec_NcLink, g_links, sizeof(g_links[0]), MAX_LINKS, v);
     bool ok = !r->fail && st.nfiles <= MAX_FILES;

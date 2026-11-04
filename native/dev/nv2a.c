@@ -4,9 +4,12 @@
  * A register file (reads return what was last written) plus the behavior the
  * XDK's D3D needs, added as the frontier shows it:
  *   PMC_BOOT_0      0x000000  chip identification
- *   PMC_INTR_0      0x000100  pending summary (bit 24 PCRTC), read-only
+ *   PMC_INTR_0      0x000100  pending summary (bit 24 PCRTC, 20 PTIMER), read-only
  *   PMC_INTR_EN_0   0x000140  bit 0: interrupts to the CPU
- *   PTIMER          0x009400/0x009410  free-running time (ns), low/high
+ *   PTIMER          0x009400/0x009410  free-running time (ns, the guest's
+ *                   clock), low/high; ALARM_0 0x009420: INTR_0 0x009100 bit
+ *                   0 when the low word reaches it (write 1 to clear),
+ *                   INTR_EN_0 0x009140
  *   PFB_CSTATUS     0x10020C  installed memory size
  *   PCRTC_INTR_0    0x600100  bit 0 vblank, write 1 to clear
  *   PCRTC_INTR_EN_0 0x600140
@@ -61,8 +64,11 @@
 #define NV_USER_REF         0x800048u
 #define NV_PVIDEO_BUFFER    0x008700u   /* bit 0: buffer 0 in use (the overlay shows it) */
 #define NV_PVIDEO_STOP      0x008704u
+#define NV_PTIMER_INTR_0    0x009100u
+#define NV_PTIMER_INTR_EN_0 0x009140u
 #define NV_PTIMER_TIME_0    0x009400u
 #define NV_PTIMER_TIME_1    0x009410u
+#define NV_PTIMER_ALARM_0   0x009420u
 #define NV_PFB_CSTATUS      0x10020Cu
 #define NV_PFB_WBC          0x100410u
 #define NV_PCRTC_INTR_0     0x600100u
@@ -71,8 +77,10 @@
 #define NV_PCRTC_RASTER     0x600808u
 
 #define PMC_INTR_PCRTC   (1u << 24)
+#define PMC_INTR_PTIMER  (1u << 20)
 #define PMC_INTR_PGRAPH  (1u << 12)
 #define PCRTC_VBLANK     1u
+#define PTIMER_ALARM     1u
 #define PFIFO_LOW_MARK   (1u << 4) /* RUNOUT_STATUS / CACHE1_STATUS: empty */
 #define PFIFO_DMA_BUSY   (1u << 4) /* CACHE1_DMA_PUSH state */
 
@@ -263,12 +271,102 @@ static uint32_t pmc_intr(void)
     if (g_pbmode && (ld(NV_PGRAPH_INTR) & ld(NV_PGRAPH_INTR_EN))) {
         v |= PMC_INTR_PGRAPH;                       /* push-buffer mode: a software trap */
     }
+    if (ld(NV_PTIMER_INTR_0) & ld(NV_PTIMER_INTR_EN_0) & PTIMER_ALARM) {
+        v |= PMC_INTR_PTIMER;
+    }
     return v;
 }
 
 static void update_irq(void)
 {
     nc_irq_set(NV2A_IRQ, (ld(NV_PMC_INTR_EN_0) & 1) && pmc_intr());
+}
+
+/* ---- PTIMER's alarm ---- */
+
+uint64_t nc_ke_host_ns(uint64_t guest_ns);  /* native/kernel/ke.c */
+
+/* The alarm interrupt comes when the time's low word reaches ALARM_0: D3D
+ * times its vblank work with it in the modes whose vblank it doesn't take
+ * from the encoder (Project Zero II's PAL disc, 60 Hz on SCART: its swaps
+ * flip at the alarm's vblanks, and with no alarm the first one never did),
+ * and its timer callbacks. The ptimer thread, started at the first alarm a
+ * title sets, waits for it on the guest's clock, which stands still while
+ * the emulation is paused and goes on from a savestate's. An alarm the time
+ * passed less than ALARM_LATE_NS ago comes at once, not after the low word
+ * wraps (4.3 s): the guest set it late, by its own slowness or ours, and
+ * D3D's handler checks the 64-bit time itself. */
+#define ALARM_LATE_NS  1000000000u
+#define ALARM_POLL_NS  20000000ull  /* the pause looked at this often */
+static struct {
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    pthread_once_t once;
+    bool rearm;                     /* ALARM_0 written (or a savestate's): due again */
+    uint64_t due;                   /* guest ns; 0: none */
+} g_alarm = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, PTHREAD_ONCE_INIT, false, 0};
+
+/* When the time's low word, at now, next reaches alarm */
+static uint64_t alarm_due(uint32_t alarm, uint64_t now)
+{
+    const uint32_t d = alarm - ((uint32_t)now & ~0x1Fu);
+    return d >= (uint32_t)-ALARM_LATE_NS ? now : now + d;
+}
+
+static void *ptimer_thread(void *arg)
+{
+    nc_pause_register("ptimer");
+    pthread_mutex_lock(&g_alarm.mu);
+    for (;;) {
+        if (nc_paused()) {
+            pthread_mutex_unlock(&g_alarm.mu);
+            nc_pause_wait();
+            pthread_mutex_lock(&g_alarm.mu);
+            g_alarm.rearm = true;           /* a savestate's clock and alarm, maybe */
+        }
+        const uint64_t now = nc_ke_now_ns();
+        if (g_alarm.rearm) {
+            g_alarm.rearm = false;
+            g_alarm.due = alarm_due(ld(NV_PTIMER_ALARM_0), now);
+        }
+        if (now >= g_alarm.due) {
+            __atomic_fetch_or(reg(NV_PTIMER_INTR_0), PTIMER_ALARM, __ATOMIC_ACQ_REL);
+            update_irq();
+            g_alarm.due += 1ull << 32;      /* the low word comes round to it again */
+            continue;
+        }
+        uint64_t until = nc_ke_host_ns(g_alarm.due);
+        const uint64_t cap = now_ns() + ALARM_POLL_NS;
+        until = until < cap ? until : cap;
+        const struct timespec ts = {(time_t)(until / 1000000000ull), (long)(until % 1000000000ull)};
+        pthread_cond_timedwait(&g_alarm.cv, &g_alarm.mu, &ts);
+    }
+    return NULL;
+}
+
+static void ptimer_start(void)
+{
+    pthread_condattr_t ca;
+    pthread_condattr_init(&ca);
+    pthread_condattr_setclock(&ca, CLOCK_MONOTONIC);
+    pthread_cond_destroy(&g_alarm.cv);
+    pthread_cond_init(&g_alarm.cv, &ca);
+    pthread_condattr_destroy(&ca);
+    pthread_t t;
+    pthread_create(&t, NULL, ptimer_thread, NULL);
+    pthread_detach(t);
+    nc_log("hakuX-native", "nv2a: PTIMER alarm in use (alarm %08x, interrupt %s)", ld(NV_PTIMER_ALARM_0),
+           ld(NV_PTIMER_INTR_EN_0) & PTIMER_ALARM ? "on" : "off");
+}
+
+/* ALARM_0 written, or restored */
+static void alarm_set(void)
+{
+    pthread_once(&g_alarm.once, ptimer_start);
+    pthread_mutex_lock(&g_alarm.mu);
+    g_alarm.rearm = true;
+    pthread_cond_signal(&g_alarm.cv);
+    pthread_mutex_unlock(&g_alarm.mu);
 }
 
 static uint64_t nv2a_read_reg(uint32_t off, unsigned size);
@@ -318,9 +416,9 @@ plain:
     case NV_PMC_INTR_0:
         return pmc_intr();
     case NV_PTIMER_TIME_0:
-        return (uint32_t)now_ns() & ~0x1Fu;
+        return (uint32_t)nc_ke_now_ns() & ~0x1Fu;
     case NV_PTIMER_TIME_1:
-        return (uint32_t)(now_ns() >> 32) & 0x1FFFFFFFu;
+        return (uint32_t)(nc_ke_now_ns() >> 32) & 0x1FFFFFFFu;
     case NV_PCRTC_RASTER: { /* the line since the last vblank */
         const uint64_t since = now_ns() - __atomic_load_n(&g_last_vblank_ns, __ATOMIC_ACQUIRE);
         return (uint32_t)((since % g_frame_ns) * LINES / g_frame_ns);
@@ -454,6 +552,18 @@ static void nv2a_write(void *opaque, uint32_t off, uint64_t value, unsigned size
         hle_host_gpu_trace(HLE_GTR_PCRTC_CLR, (uint32_t)value);
         __atomic_fetch_and(reg(off), ~(uint32_t)value, __ATOMIC_ACQ_REL);
         update_irq();
+        return;
+    case NV_PTIMER_INTR_0:
+        __atomic_fetch_and(reg(off), ~(uint32_t)value, __ATOMIC_ACQ_REL);
+        update_irq();
+        return;
+    case NV_PTIMER_INTR_EN_0:
+        __atomic_store_n(reg(off), (uint32_t)value, __ATOMIC_RELEASE);
+        update_irq();
+        return;
+    case NV_PTIMER_ALARM_0:
+        __atomic_store_n(reg(off), (uint32_t)value, __ATOMIC_RELEASE);
+        alarm_set();
         return;
     case NV_PMC_INTR_EN_0:
     case NV_PCRTC_INTR_EN_0:
@@ -693,9 +803,12 @@ void nc_dev_nv2a_refresh(unsigned hz)
     }
 }
 
-void nc_dev_nv2a_display_mode(uint32_t pitch, uint32_t xfmt, unsigned hz)
+void nc_dev_nv2a_display_mode(uint32_t pitch, uint32_t xfmt, unsigned hz, uint32_t fb)
 {
     hle_pb_display_mode(pitch, xfmt, hz);
+    if (fb) {
+        hle_pb_display_fb(fb);
+    }
 }
 
 void nc_dev_nv2a_vblank_multiply(unsigned n)
@@ -866,6 +979,9 @@ bool nc_nv2a_state_load(NcRd *r, unsigned v)
     g_last_vblank_ns = now_ns();
     g_disp_vsync_ns = 0;
     g_pick_off_ns = -1;
+    if (ld(NV_PTIMER_ALARM_0) || ld(NV_PTIMER_INTR_EN_0)) {
+        alarm_set();                    /* due from the state's alarm, on its clock */
+    }
     update_irq();
     return true;
 }

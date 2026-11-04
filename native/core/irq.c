@@ -81,9 +81,10 @@ uint64_t nc_irq_rise_cpu_ns(unsigned line)
     return line < NC_IRQ_LINES ? __atomic_load_n(&g_up_cpu_ns[line], __ATOMIC_ACQUIRE) : 0;
 }
 
-/* debug (NC_IRQ_SCHED=1): the guest CPU's thread's time runnable but not
- * running (schedstat's run delay) at each rise, so a late line tells a
- * thread waiting for a host CPU from one blocked or sleeping. */
+/* The guest CPU's thread (nc_irq_cpu_thread). debug (NC_IRQ_SCHED=1): its
+ * time runnable but not running (schedstat's run delay) at each rise, so a
+ * late line tells a thread waiting for a host CPU from one blocked or
+ * sleeping. */
 static int g_cpu_tid;
 static uint64_t g_up_delay_ns[NC_IRQ_LINES];
 
@@ -156,6 +157,12 @@ void nc_irq_attach(NcCpu *cpu)
     if (nc_irq_lines()) {
         nc_cpu_request_interrupt(cpu);
     }
+}
+
+bool nc_irq_cpu_thread(void)
+{
+    const int tid = __atomic_load_n(&g_cpu_tid, __ATOMIC_ACQUIRE);
+    return tid && tid == (int)gettid();
 }
 
 volatile int g_nc_idle_waiting;

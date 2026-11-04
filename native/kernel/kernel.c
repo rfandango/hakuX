@@ -40,12 +40,37 @@ static const NcKExport *k_by_ordinal[NC_KORDINAL_MAX];
 #define K_FAST     0x12000u /* exports run as guest code (install_fast_paths) */
 #define K_FAST_END 0x13000u
 
-/* Kernel pool: starts with 512 KiB of high physical RAM below the top
- * reserve (D3D claims GPU instance memory at the top; low RAM is the
- * title's), reached through the contiguous window, and grows as needed
- * (pool.c), as the Xbox kernel's does: a fixed 4 MiB left titles that size
- * their caches by free memory (Forza) 3 MiB short. */
-#define POOL_SIZE  0x00080000u
+/* Kernel pool: starts with one 64 KiB chunk of physical RAM, reached through
+ * the contiguous window, and grows a chunk at a time as needed (pool.c), as
+ * the Xbox kernel's takes pages as it needs them: what it holds unused is
+ * the title's memory on the console. A fixed 4 MiB left titles that size
+ * their caches by free memory (Forza) 3 MiB short; 512 KiB, ~35 KiB of it
+ * used, left Amped 2 188 KiB short of the 1.4 MiB block its first level's
+ * load asks for (its heap took the rest at boot): the call failed and it
+ * wrote through the null pointer. The first chunk sits just above the
+ * kernel, where the Xbox kernel's own memory ends: titles lay out physical
+ * memory at fixed addresses from there (Halo, from 0x61000) and below the
+ * top MiB (Burnout 2, 0x2377000-0x3F00000 in 73 blocks at start), and a
+ * chunk 512 KiB under the top reserve stood in Burnout 2's 6.25 MiB block:
+ * the call failed and its traffic data, pointers baked for those
+ * addresses, faulted at the first race's load. The pool's later chunks
+ * still come from the top (nc_vm_alloc_phys_high): one taken before a title
+ * lays out its memory there would stand in it the same way. */
+#define POOL_SIZE  0x00010000u
+#define POOL_BASE  (NC_KERNEL_PA + NC_KERNEL_SIZE)
+_Static_assert(POOL_BASE + POOL_SIZE <= 0x61000, "the pool's first range under Halo's fixed block");
+
+/* A savestate is loading: the pool's first range where the boot that made
+ * it put it (the 64 KiB under its process object, whose address
+ * nc_kern_state_load checks): states saved before KERN v3, and the ones
+ * saved since by a run that loaded one, have it 512 KiB under the top
+ * reserve. 0: POOL_BASE. */
+static uint32_t g_pool_at;
+
+void nc_kernel_pool_for(uint32_t kprocess)
+{
+    g_pool_at = kprocess >= NC_CONTIG_WINDOW ? (kprocess - NC_CONTIG_WINDOW) & ~(POOL_SIZE - 1) : 0;
+}
 
 const NcKExport *nc_kernel_export(unsigned ordinal)
 {
@@ -459,9 +484,14 @@ bool nc_kernel_init(NcKernel *k, NcVm *vm)
         nc_wr32(km + K_IDT + 8 * v + 4, (k->trap_va & 0xFFFF0000u) | 0x8E00u);
     }
 
-    /* The pool's first range comes from high RAM (below the top reserve):
-     * low RAM is the title's (nc_vm_alloc_at). */
-    const uint32_t pool_pa = nc_vm_alloc_phys_ex(vm, POOL_SIZE, 0, vm->ram_size - NC_TOP_RESERVE, NC_PAGE, true);
+    /* The pool's first range just above the kernel (POOL_BASE), or for a
+     * state, where its boot made it, so that the objects made at boot are
+     * where the state's are. */
+    const uint32_t pool_lo = g_pool_at ? g_pool_at : POOL_BASE;
+    uint32_t pool_pa = nc_vm_alloc_phys_ex(vm, POOL_SIZE, pool_lo, pool_lo + POOL_SIZE, NC_PAGE, false);
+    if (pool_pa == UINT32_MAX) {
+        pool_pa = nc_vm_alloc_phys_ex(vm, POOL_SIZE, 0, vm->ram_size - NC_TOP_RESERVE, NC_PAGE, true);
+    }
     if (pool_pa == UINT32_MAX) {
         return false;
     }
@@ -672,10 +702,12 @@ static void stats_tick(NcKernel *k)
     static uint64_t faults_seen, mmio_seen, apu_seen, commits_seen, decommits_seen, ticks_seen;
     const uint64_t ticks = __atomic_load_n(&g_clock_ticks, __ATOMIC_RELAXED);
     const uint64_t mmio = nc_mmio_total();
+    uint64_t held_out_ns, held_max_ns;
+    const unsigned holds = nc_ke_held(&held_out_ns, &held_max_ns);  /* in the window, not per s */
     nc_log("hakuX-native-stats",
            "per s: kcalls %.0f sysops %.0f (int %.0f, of them ticks %.0f; hook %.0f) schedules %.0f switches %.0f idle %.0f "
            "slices %.0f page faults %.0f mmio %.0f apu waits %.0f vm pages +%.0f -%.0f "
-           "isr%s | dpc max wait %.1f run %.1f ms, %llu over 8 ms |%s",
+           "isr%s | dpc max wait %.1f run %.1f ms, %llu over 8 ms | holds %u (longest %.1f ms), %.1f ms left out |%s",
            g_kcalls / s, g_sysops / s, g_sysop_kind[NC_SYSOP_INTERRUPT] / s, (double)(ticks - ticks_seen) / s,
            g_sysop_kind[NC_SYSOP_HOOK] / s,
            g_nc_sched.schedules / s, g_nc_sched.switches / s, g_nc_sched.idles / s, g_nc_sched.slices / s,
@@ -683,7 +715,7 @@ static void stats_tick(NcKernel *k)
            (double)(k->apu_spins - apu_seen) / s,
            (double)(k->vm_commits - commits_seen) / s, (double)(k->vm_decommits - decommits_seen) / s, isr,
            g_nc_sched.dpc_wait_max_ns / 1e6, g_nc_sched.dpc_run_max_ns / 1e6,
-           (unsigned long long)g_nc_sched.dpc_slow, top);
+           (unsigned long long)g_nc_sched.dpc_slow, holds, held_max_ns / 1e6, held_out_ns / 1e6, top);
     {
         static uint64_t cr, di, mm, ua;
         char ms[240];

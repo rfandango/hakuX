@@ -16,6 +16,7 @@
 
 #include "hw/xbox/hle/host.h"
 #include "hw/xbox/hle/mem/barrier.h"
+#include "native/core/mmio.h"
 
 #include <dlfcn.h>
 #include <sys/mman.h>
@@ -25,11 +26,66 @@
 #include <time.h>
 
 static NcVm *g_vm;
+/* Per page: written before hle_host_mem_rearm protected it again, which a
+ * test_and_clear still reports (a page's protection is its dirty bit
+ * otherwise: protected <=> clean) */
+static uint8_t *g_hdirty;
+
+
+/* A page without access, given it back the way a guest access's fault does
+ * (hle_mem_stale_access_rw: the image newer than its memory goes in first;
+ * write: the host is about to write it). A page several ranges share takes
+ * one call each. */
+static void stale_open(uint32_t pa, bool write)
+{
+    for (unsigned k = 0; k < 16 && nc_vm_noaccess_has(g_vm, pa); k++) {
+        hle_mem_stale_access_rw(pa, write);
+    }
+}
+
+/* Host code about to read [va, va + len) through a system call (a page
+ * without access fails it with EFAULT rather than faulting). */
+static void va_load(uint32_t va, uint32_t len)
+{
+    if (!g_vm) {
+        return;
+    }
+    for (uint32_t a = va & ~(NC_PAGE - 1); a < va + len; a += NC_PAGE) {
+        const uint32_t pa = nc_vm_phys(g_vm, a);
+        if (pa < g_vm->ram_size) {
+            stale_open(pa, false);
+        }
+    }
+}
+
+/* Memory the host or a device wrote through the RAM view (no fault: it
+ * isn't the guest's view), or freed: newer than an image guarded over it,
+ * which no fill may land over it now. The fill's own landing comes here too,
+ * and drops its guard. */
+static void unguard_written(uint32_t pa, uint32_t len)
+{
+    for (uint32_t p = pa & ~(NC_PAGE - 1); p < pa + len && p < g_vm->ram_size; p += NC_PAGE) {
+        if (nc_vm_noaccess_has(g_vm, p)) {
+            hle_barrier_unguard_range(pa, len);
+            return;
+        }
+    }
+}
+
+static void freed(uint32_t pa, uint32_t len)
+{
+    if (g_vm) {
+        hle_barrier_freed(pa, len);
+    }
+}
 
 void nc_hle_dirty_init(NcVm *vm)
 {
     g_vm = vm; /* every page starts dirty (unprotected) */
+    g_hdirty = calloc(vm->ram_size / NC_PAGE, 1);
     nc_vm_write_hook = hle_va_store;
+    nc_vm_read_hook = va_load;
+    nc_vm_free_hook = freed;
     /* overlapped file reads: the reader waits for the GPU, not the guest */
     nc_vm_dma = (NcVmDma){hle_mem_write_fence, hle_mem_wait_fence, hle_host_mem_set_dirty};
 }
@@ -39,7 +95,17 @@ bool hle_host_mem_dirty(uint32_t pa)
     if (!g_vm || pa >= g_vm->ram_size) {
         return true;
     }
-    return __atomic_load_n(&g_vm->wp[pa / NC_PAGE], __ATOMIC_ACQUIRE) != NC_WP_CLEAN;
+    return __atomic_load_n(&g_vm->wp[pa / NC_PAGE], __ATOMIC_ACQUIRE) != NC_WP_CLEAN ||
+           (g_hdirty && __atomic_load_n(&g_hdirty[pa / NC_PAGE], __ATOMIC_ACQUIRE));
+}
+
+bool hle_host_mem_open(uint32_t pa)
+{
+    if (!g_vm || pa >= g_vm->ram_size) {
+        return true;
+    }
+    return __atomic_load_n(&g_vm->wp[pa / NC_PAGE], __ATOMIC_ACQUIRE) != NC_WP_CLEAN &&
+           !nc_vm_noaccess_has(g_vm, pa);  /* (closed: a store faults) */
 }
 
 static uint64_t ram_end(uint32_t pa, uint32_t len)
@@ -71,9 +137,46 @@ static bool protect_runs(uint32_t pa, uint32_t len, bool ro)
     return any;
 }
 
+/* g_hdirty over [pa, pa + len): whether any was set; cleared (clear) */
+static bool hdirty_take(uint32_t pa, uint32_t len, bool clear)
+{
+    bool any = false;
+    const uint64_t end = ram_end(pa, len);
+    for (uint64_t a = pa & ~(uint64_t)(NC_PAGE - 1); g_hdirty && a < end; a += NC_PAGE) {
+        if (__atomic_load_n(&g_hdirty[a / NC_PAGE], __ATOMIC_ACQUIRE)) {
+            any = true;
+            if (clear) {
+                __atomic_store_n(&g_hdirty[a / NC_PAGE], 0, __ATOMIC_RELEASE);
+            }
+        }
+    }
+    return any;
+}
+
 bool hle_host_mem_test_and_clear(uint32_t pa, uint32_t len)
 {
-    return g_vm && protect_runs(pa, len, true);
+    if (!g_vm) {
+        return false;
+    }
+    const bool sticky = hdirty_take(pa, len, true);
+    return protect_runs(pa, len, true) || sticky;
+}
+
+/* Protected again so the guest's next store faults and is counted
+ * (hle_mem_first_write), without losing that the pages were written: a
+ * later test_and_clear still sees it. */
+void hle_host_mem_rearm(uint32_t pa, uint32_t len)
+{
+    if (!g_vm || !g_hdirty) {
+        return;
+    }
+    const uint64_t end = ram_end(pa, len);
+    for (uint64_t a = pa & ~(uint64_t)(NC_PAGE - 1); a < end; a += NC_PAGE) {
+        if (__atomic_load_n(&g_vm->wp[a / NC_PAGE], __ATOMIC_ACQUIRE) != NC_WP_CLEAN) {
+            __atomic_store_n(&g_hdirty[a / NC_PAGE], 1, __ATOMIC_RELEASE);
+        }
+    }
+    protect_runs(pa, len, true);
 }
 
 /* A host write: every view of the page writable (the host writes through
@@ -143,7 +246,25 @@ void hle_host_mem_set_dirty(uint32_t pa, uint32_t len)
         return;
     }
     hle_mem_host_wrote(pa, len);        /* its cache lines, before the GPU reads them */
+    unguard_written(pa, len);
     protect_runs(pa, len, false);
+}
+
+/* Dirty to the trackers through g_hdirty, each page's protection left as it
+ * is (no guest access while guarded; a tracked page still faults at the
+ * guest's next store, and counts it) */
+void hle_host_mem_landed(uint32_t pa, uint32_t len)
+{
+    if (!g_vm || !g_hdirty) {
+        return;
+    }
+    hle_mem_host_wrote(pa, len);
+    const uint64_t end = ram_end(pa, len);
+    for (uint64_t a = pa & ~(uint64_t)(NC_PAGE - 1); a < end; a += NC_PAGE) {
+        if (__atomic_load_n(&g_vm->wp[a / NC_PAGE], __ATOMIC_ACQUIRE) == NC_WP_CLEAN) {
+            __atomic_store_n(&g_hdirty[a / NC_PAGE], 1, __ATOMIC_RELEASE);
+        }
+    }
 }
 
 void hle_host_mem_noaccess(uint32_t pa, uint32_t len, bool on)
@@ -159,6 +280,17 @@ static void first_write(uint32_t pa, uint32_t len)
 {
     hle_mem_first_write(pa, len);
     make_dirty(pa);
+}
+
+/* A store the host makes for the guest into [pa, pa + len), within a page
+ * (an emulated one, nc_ram_emulate): counted as the guest's would be */
+static void guest_stored(uint32_t pa, uint32_t len)
+{
+    if (g_vm->wp[pa / NC_PAGE] == NC_WP_CLEAN) {
+        first_write(pa, len);
+    } else if (g_vm->wp[pa / NC_PAGE] == NC_WP_WRITTEN) {
+        make_dirty(pa);
+    }
 }
 
 static uint32_t g_wlo, g_whi, g_wdelay; /* NC_WATCHPA="pa:len[:seconds]" */
@@ -253,15 +385,13 @@ void hle_va_store(uint32_t va, uint32_t len)
         if (pa == UINT32_MAX || pa >= g_vm->ram_size) {
             continue;
         }
-        if (nc_vm_noaccess_has(g_vm, pa)) {
-            /* a page without access (barrier.c: a frame buffer whose image is
-             * newer, a report page): what a guest access's fault does, as a
-             * host write into it fails instead (EFAULT). Halo 2 streams
-             * bitmaps from its map cache into an old frame buffer's memory;
-             * the reads failed and its scope reticle sampled the frame
-             * buffer's leftover bytes. */
-            hle_mem_stale_access(pa);
-        }
+        /* a page without access (barrier.c: a frame buffer or target whose
+         * image is newer, a report page): what a guest access's fault does,
+         * as a host write into it fails instead (EFAULT). Halo 2 streams
+         * bitmaps from its map cache into an old frame buffer's memory; the
+         * reads failed and its scope reticle sampled the frame buffer's
+         * leftover bytes. */
+        stale_open(pa, true);
         if (g_vm->wp[pa / NC_PAGE] == NC_WP_CLEAN) {
             first_write(pa, len);
         } else if (g_vm->wp[pa / NC_PAGE] == NC_WP_WRITTEN) {
@@ -311,7 +441,7 @@ static void dirty_sample(uint32_t pa)
     }
 }
 
-bool nc_hle_dirty_fault(const siginfo_t *info)
+bool nc_hle_dirty_fault(const siginfo_t *info, void *ucontext)
 {
     if (!g_vm) {
         return false;
@@ -326,8 +456,19 @@ bool nc_hle_dirty_fault(const siginfo_t *info)
     }
     if (nc_vm_noaccess_has(g_vm, pa)) {
         /* a read or write of memory an image is newer than (the frame on
-         * screen): the image goes in first, then the access runs again */
-        hle_mem_stale_access(pa);
+         * screen, a render target): the image goes in first, then the
+         * access runs again. The guest's own bytes on a page a target only
+         * shares (barrier.c hle_mem_stale_neighbour) are reached through
+         * the host's view instead: the page stays closed and nothing waits
+         * for the GPU. */
+        uint32_t lo, hi;
+        bool store = true;
+        const bool known = nc_ram_access_span(g_vm, info, ucontext, &lo, &hi, &store);
+        const int nb = known ? hle_mem_stale_neighbour(lo, hi) : 0;
+        if (nb == 2 || (nb == 1 && nc_ram_emulate(g_vm, info, ucontext, guest_stored))) {
+            return true;                    /* (2: the page given back, the access runs again) */
+        }
+        hle_mem_stale_access_rw(pa, !known || store);
         return true;
     }
     const uint8_t wp = __atomic_load_n(&g_vm->wp[pa / NC_PAGE], __ATOMIC_ACQUIRE);

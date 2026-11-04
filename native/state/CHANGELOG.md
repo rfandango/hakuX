@@ -43,3 +43,13 @@ One entry per section version (tools/native/statelock.py).
 ## NIC v1 (2026-10-26, after a7063de469)
 
 - first version
+
+## PBD v2 (2026-10-29, after d44f6d0fe3)
+
+- HlePbdState.disp_w, disp_h, disp_moded: the device's display and whether the video mode sized it, for the run that loads the state (the title doesn't set its mode again); v1 states: 0, the display from the first frame swapped as before
+- upgraded: v1..v1 states load
+
+## KERN v3 (2026-10-29, after 113a34e7e7)
+
+- the kernel pool's first 64 KiB range sits just above the kernel (physical 0x50000), not 512 KiB under the top reserve (Burnout 2 lays out 0x2377000-0x3F00000 at fixed addresses); a state's boot puts it under the state's process object (v1, v2 states, and states saved since by a run that loaded one: where it was)
+- upgraded: v1..v2 states load

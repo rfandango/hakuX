@@ -46,6 +46,12 @@ author: someone
   checks the bytes first: a patch whose bytes differ is skipped and logged
   (the wrong disc or another mod's patch). Patches change the XBE as it is
   read, so sections the game loads later are patched too.
+- `[$u\default.xbe]` starts the patches of the game's Xbox Live title
+  update (`E:\TDATA\<title ID>\$u\default.xbe`, which boots instead of the
+  disc's once installed), in the same mod: its addresses differ from the
+  disc's. Without an update installed the section does nothing. The game
+  reading its XBE as a file (an updater building the update) gets the
+  disc's bytes, without the patches.
 - `files/` mirrors the disc: `files/media/title.xpr` replaces `media\title.xpr`;
   a path the disc doesn't have is added (folders too). The game sees the
   file's new size, also in directory listings.

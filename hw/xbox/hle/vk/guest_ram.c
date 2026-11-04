@@ -123,9 +123,9 @@ int hle_vk_arena_init(uint32_t size)
 
 int hle_vk_land_init(uint32_t size)
 {
-    if (g_hram.zero_copy) {
-        return 0;                       /* readbacks go straight to guest RAM */
-    }
+    /* with zero-copy RAM too: rows go straight to guest RAM, but a swizzled
+     * target's texels are swizzled into it on the CPU (pb/pbdraw.c), read
+     * here rather than from the write-combined arena */
     VkBufferCreateInfo bci = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size,
         .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT, .sharingMode = VK_SHARING_MODE_EXCLUSIVE };

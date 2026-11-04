@@ -67,29 +67,49 @@ enum {
     /* Older PowerVR drivers corrupt the output unless the swapchain is a
      * multiple of 32 pixels wide: its width is rounded down to one. */
     HLE_QUIRK_SWAP_W32 = 1u << 9,
-    /* Timestamp queries never resolve (Mali-G615): the GPU time profile
-     * (debug) is off. */
+    /* Timestamp queries never resolve (Mali-G615, and the Mali-G52 under
+     * Arm's r34p0): the GPU time profile (debug) is off. */
     HLE_QUIRK_NO_TIMESTAMPS = 1u << 10,
     /* A present with a semaphore to wait on waits for it on the CPU, the
      * queue held (Qualcomm's: Android's present asks the driver for a fence
      * over it): the presenter waits for its pass itself, unlocked, and
      * presents with nothing to wait for (vk/swapchain.c). On for every
-     * driver but Turnip, whose present hands the compositor a fence. */
+     * driver but Turnip, whose present hands the compositor a fence, and the
+     * Mali-G52 under Arm's driver, whose present returns at once (measured). */
     HLE_QUIRK_PRESENT_CPU_WAIT = 1u << 11,
+    /* A vertex attribute whose address its component size doesn't divide
+     * (Vulkan's rule: a float at a 2-byte boundary, as an Xbox vertex of 18
+     * bytes puts every other one) is read wrong, and the meshes explode
+     * (Mali-G57): such a binding's vertices are copied to the arena with each
+     * attribute moved to an offset its components divide (pb/pbdraw.c). */
+    HLE_QUIRK_VB_ALIGN = 1u << 12,
+    /* A pixel shader that writes gl_FragDepth from vW (W-buffering) hangs
+     * the fragment job until the kernel hard-stops it (Mali-G57, Arm's r40p0:
+     * VK_ERROR_DEVICE_LOST, "Job Hard-Stopped", GPU fault 0x4002 on job slot
+     * 0): W-buffered draws test and store the rasterizer's z instead
+     * (vk/draw.c), as HAKUX_HLE_DBGFLAGS bit 8 does. Read per draw. */
+    HLE_QUIRK_NO_WBUF = 1u << 13,
+    /* The host wait on a timeline semaphore (vkWaitSemaphores) returns
+     * VK_ERROR_DEVICE_LOST and takes the session down, while the counter
+     * query (vkGetSemaphoreCounterValue) keeps working: the waits poll the
+     * counter in userspace instead (hle_tl_sem_wait, vk/timeline.c). On for
+     * Arm's driver before r40, whose r34p0 lost the device this way on a
+     * Mali-G52 (mid-game, across titles) and on a Mali-G57 (JSRF). */
+    HLE_QUIRK_NO_SEM_WAIT = 1u << 14,
     /* A uniform buffer indexed per vertex (the vertex programs' c[A0 + n],
      * skinning's bone matrices) reads wrong values (Samsung's Xclipse): the
      * constants (set 1, VshConst / FfConst) are a read-only storage buffer
      * instead, same std140 layout and dynamic offsets (vk/draw.c,
      * shader/ff.h g_hle_const_ssbo). Read when the back end starts: it
      * changes the shaders. */
-    HLE_QUIRK_CONST_SSBO = 1u << 12,
+    HLE_QUIRK_CONST_SSBO = 1u << 15,
     /* Programs' S32K attributes are fetched as integers (R16..._SINT) and
      * converted in the shader; with this quirk as SSCALED floats, the same
      * values (Xclipse, whose missing R16G16B16_SINT fell back to the
      * four-component form, w read from the next 2 bytes). Where a driver
      * lacks an n-component SINT format but has the SSCALED one, that is used
      * regardless (vk/draw.c vat_format). Read when the back end starts. */
-    HLE_QUIRK_S32K_SCALED = 1u << 13,
+    HLE_QUIRK_S32K_SCALED = 1u << 16,
 };
 
 /* Samsung's Xclipse GPUs (AMD RDNA in Exynos SoCs): their PCI vendor ID, and

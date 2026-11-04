@@ -166,14 +166,18 @@ typedef struct HleFfPush {
     float alpha_ref;                  /* ALPHAREF / 255 */
     uint32_t flags;                   /* bit s: stage s samples a linear texture
                                          (texel coordinates); bit 8 + s: that
-                                         texture is a surface, rendered at the
-                                         resolution scale; bits 16-23: the
-                                         target's scale (point sizes), 24-31:
-                                         the resolution scale (those texels) */
+                                         texture is a surface rendered at the
+                                         resolution scale (not a small target,
+                                         at 1x: vk/draw.c stage_slot); bits
+                                         16-23: the target's scale (point
+                                         sizes), 24-31: the resolution scale
+                                         (those surfaces' texels) */
     float zscale;                     /* vertex programs: 1 / depth maximum (2^-n for
                                          the integer formats: HLE_ZNORM_GLSL) */
     uint32_t fog_color;               /* FOGCOLOR (D3DCOLOR) */
-    float fog[4];                     /* FOGSTART, FOGEND, FOGDENSITY, 0 */
+    float fog[4];                     /* FOGSTART, FOGEND, FOGDENSITY, then (bits) the
+                                         stage, size and address modes a linear
+                                         texture is kept inside (HLE_NVRECT_GLSL) */
     uint32_t psc[20];                 /* pixel shaders: C0[8], C1[8], final C0, C1
                                          (D3DCOLOR), W-buffer offset and slope */
     float scr[4];                     /* fixed function: D3D screen pixels = xy *
@@ -210,6 +214,37 @@ static inline const char *hle_const_glsl(void)
 {
     return g_hle_const_ssbo ? "readonly buffer" : "uniform";
 }
+
+/* A linear texture is addressed by texel within its own size (its image
+ * rect), clamped, bordered or wrapped at its edges. One sampled from a larger
+ * surface (a target's top-left part: Munch's Oddysee samples the top 128 rows
+ * of its 128 x 2048 shadow target as a 128 x 128 texture, clamped) has its
+ * texel coordinates kept inside that size first, as the stage's address mode
+ * says: else the sampler's edges are the surface's, and the rows past the
+ * texture's (black) drew a box over the ground. The push block's fog.w (bits,
+ * vk/draw.c lin_rect; one stage a draw): width - 1 in 0-11, height - 1 in
+ * 12-23 (the NV2A's are 4096 at most), U's and V's mode in 24-25 and 26-27 (0
+ * clamp, 1 border, 2 wrap, 3 mirror), the stage's low bit in 28 and high bit
+ * in 31, bit 29 set and 30 clear: as a float always a normal, finite number
+ * (a driver may flush a denormal or quiet a NaN on its way through a float),
+ * never 0. A coordinate outside the rect in border mode goes far outside the
+ * image, to the sampler's border colour; every mode ends kept half a texel of
+ * the image (e: 0.5 over the resolution scale for a scaled surface) inside the
+ * edges, so filtering never reaches a texel past them (a wrap's seam blends
+ * with its edge texel instead of the opposite one). Emitted only for the keys
+ * that ask (HlePshKey.vol's HLE_PSH_RECT). */
+#define HLE_NVRECT_GLSL \
+    "float nvaxis(float u, float n, uint m, float e) {\n" \
+    "  if (m == 1u && (u < 0.0 || u > n)) return -65536.0;\n" \
+    "  if (m == 2u) u -= n * floor(u / n);\n" \
+    "  else if (m == 3u) { u -= 2.0 * n * floor(u / (2.0 * n)); u = u < n ? u : 2.0 * n - u; }\n" \
+    "  return clamp(u, e, n - e);\n" \
+    "}\n" \
+    "vec2 nvrect(vec2 uv, float e) {\n" \
+    "  uint r = floatBitsToUint(pc.fog.w);\n" \
+    "  return vec2(nvaxis(uv.x, float((r & 0xFFFu) + 1u), (r >> 24) & 3u, e),\n" \
+    "              nvaxis(uv.y, float(((r >> 12) & 0xFFFu) + 1u), (r >> 26) & 3u, e));\n" \
+    "}\n"
 
 /* Mali (vk/quirks.h HLE_QUIRK_Z_EQ_W, set with g_hle_push_ssbo): a clip-space
  * z equal to w corrupts the depth buffer (PPSSPP's EQUAL_WZ_CORRUPTS_DEPTH,
@@ -253,7 +288,8 @@ static inline const char *hle_push_glsl(void)
  * vertex a step in front of the far plane (2^24 - 2) came out at 1.0, and
  * Super Monkey Ball Deluxe's movies, drawn there over a depth buffer cleared
  * to the far plane, failed their LESS test (black, the subtitles over it
- * drawn). Any other scale (1.0, a float depth buffer) is the plain product. */
+ * drawn). Any other scale (a float depth buffer's, pbdraw.c zfloat_scale)
+ * is the plain product. */
 #define HLE_ZNORM_GLSL(z, out) \
     "  precise float " out " = " z " * pc.zscale + " z " * (pc.zscale == uintBitsToFloat(0x33800000u) ||\n" \
     "      pc.zscale == uintBitsToFloat(0x37800000u) ? pc.zscale * pc.zscale : 0.0);\n"

@@ -3,6 +3,7 @@ package com.rfandango.haku_x.data
 import android.app.Application
 import android.content.Context
 import androidx.core.content.edit
+import com.rfandango.haku_x.BuildConfig
 import java.util.Locale
 
 /** The settings a game can override; the rest are the app's for every game. */
@@ -11,6 +12,7 @@ enum class GameSetting(val key: String) {
   RENDER_SCALE("render_scale"),
   ASYNC_SHADERS("async_shaders"),
   PREBUILD_SHADERS("prebuild_shaders"),
+  CONSOLE_TIMING("console_timing"),
   ASPECT("aspect"),
   FXAA("fxaa"),
   UPSCALE("upscale"),
@@ -87,6 +89,8 @@ class RunSettings(private val app: AppPrefs, private val game: GameOverrides?) {
   val renderScale get() = game?.get(GameSetting.RENDER_SCALE)?.toIntOrNull() ?: app.renderScale
   val asyncShaders get() = bool(GameSetting.ASYNC_SHADERS, app.asyncShaders)
   val prebuildShaders get() = bool(GameSetting.PREBUILD_SHADERS, app.prebuildShaders)
+  /** A debug build's setting (off for A/B); always on in the others. */
+  val consoleTiming get() = !BuildConfig.DEBUG || bool(GameSetting.CONSOLE_TIMING, app.consoleTiming)
   val aspectRatio get() = text(GameSetting.ASPECT, app.aspectRatio)
   val fxaa get() = bool(GameSetting.FXAA, app.fxaa)
   val upscaleFilter get() = text(GameSetting.UPSCALE, app.upscaleFilter)

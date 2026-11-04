@@ -16,7 +16,7 @@
 
 #define TX_SLOTS 128
 #define RX_SLOTS 256
-#define MAX_FDS 64
+#define MAX_FDS 256                     /* nat: a socket per connection */
 
 typedef struct Frame {
     uint16_t len;
@@ -45,7 +45,6 @@ static struct {
     uint32_t twin;                      /* a console with our MAC, not told yet; 0: none */
 } g_net = {
     .lock = PTHREAD_MUTEX_INITIALIZER,
-    .rx_cond = PTHREAD_COND_INITIALIZER,
     .wake_fd = -1,
     .cfg = { .lan_port = 3075, .kai_port = 34523 },
 };
@@ -356,6 +355,13 @@ static void *net_thread(void *arg)
 
 void nc_net_start(void)
 {
+    /* nc_net_wait_rx's deadline is CLOCK_MONOTONIC's: the condition's clock too
+     * (with CLOCK_REALTIME's it was long past, and the NIC's thread spun) */
+    pthread_condattr_t attr;
+    pthread_condattr_init(&attr);
+    pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+    pthread_cond_init(&g_net.rx_cond, &attr);
+    pthread_condattr_destroy(&attr);
     /* debug: NC_NET="option option ..." over the app's (via debug.hakux.env) */
     const char *env = getenv("NC_NET");
     if (env) {

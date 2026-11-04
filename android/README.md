@@ -35,6 +35,7 @@ libraries in, then build the APK.
 | `SDL3` | release-3.4.18 |
 | `adrenotools` | 8fae8ce, with `tools/native/adrenotools-kgsl-context-priority.patch` applied (`git apply`): the KGSL draw context priority hook |
 | `root/subprojects/nv2a_vsh_cpu` | 561fe80 |
+| `libslirp` | 4.7.0 (26be815b), unmodified: the network's NAT (`native/net/nat.c`) |
 
 ## Steps
 

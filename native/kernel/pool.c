@@ -2,7 +2,7 @@
  * hakuX native core — kernel pool.
  *
  * Guest memory for ExAllocatePool and kernel objects, in physical RAM
- * reached through the contiguous window: an initial range, then 256 KiB
+ * reached through the contiguous window: an initial range, then 64 KiB
  * chunks added as it fills. First-fit over a sorted free list kept on the
  * host; blocks are 16-byte aligned.
  */

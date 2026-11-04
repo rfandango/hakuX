@@ -15,6 +15,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.rfandango.haku_x.R
 import com.rfandango.haku_x.data.AppPrefs
 import com.rfandango.haku_x.ui.common.ChoiceDialog
@@ -22,21 +23,35 @@ import com.rfandango.haku_x.ui.common.Hint
 import com.rfandango.haku_x.ui.common.Section
 
 /**
- * The console's network (native/net): off; system link with the consoles on this network (LAN), others
- * reached directly too (another subnet, a VPN); or system link over the Internet through an XLink Kai
- * engine on this network. Read at the next game start.
+ * The console's network (native/net): off; Xbox Live through Insignia (the Internet through NAT, its DNS
+ * server or an insigniaDNS one); system link with the consoles on this network (LAN), others reached
+ * directly too (another subnet, a VPN); or system link over the Internet through an XLink Kai engine on
+ * this network. Read at the next game start.
  */
 @Composable
-fun NetworkSettings(prefs: AppPrefs) {
+fun NetworkSettings(prefs: AppPrefs, onInsignia: () -> Unit) {
   var mode by remember { mutableStateOf(prefs.networkMode) }
   var peers by remember { mutableStateOf(prefs.lanPeers) }
   var kai by remember { mutableStateOf(prefs.kaiEngine) }
+  var dns by remember { mutableStateOf(prefs.insigniaDns) }
   var modeDialog by remember { mutableStateOf(false) }
   var peersDialog by remember { mutableStateOf(false) }
   var kaiDialog by remember { mutableStateOf(false) }
+  var dnsDialog by remember { mutableStateOf(false) }
+  // back from Insignia's setup, which may have chosen the connection
+  LifecycleResumeEffect(Unit) {
+    mode = prefs.networkMode
+    onPauseOrDispose {}
+  }
 
   Section(stringResource(R.string.settings_section_network))
   Hint(stringResource(R.string.settings_network_desc))
+  // Insignia's setup wizard: everything online play needs, step by step
+  ListItem(
+    headlineContent = { Text(stringResource(R.string.insignia_title)) },
+    supportingContent = { Text(stringResource(R.string.insignia_settings_desc)) },
+    modifier = Modifier.clickable(onClick = onInsignia),
+  )
   ListItem(
     headlineContent = { Text(stringResource(R.string.settings_network_mode)) },
     supportingContent = {
@@ -44,6 +59,16 @@ fun NetworkSettings(prefs: AppPrefs) {
     },
     modifier = Modifier.clickable { modeDialog = true },
   )
+  if (mode == AppPrefs.NET_INSIGNIA) {
+    ListItem(
+      headlineContent = { Text(stringResource(R.string.settings_network_insignia_dns)) },
+      supportingContent = {
+        Text(dns.ifBlank { stringResource(R.string.settings_network_insignia_dns_default, AppPrefs.INSIGNIA_DNS) } +
+          ". " + stringResource(R.string.settings_network_insignia_dns_desc))
+      },
+      modifier = Modifier.clickable { dnsDialog = true },
+    )
+  }
   if (mode == AppPrefs.NET_LAN) {
     ListItem(
       headlineContent = { Text(stringResource(R.string.settings_network_peers)) },
@@ -92,11 +117,21 @@ fun NetworkSettings(prefs: AppPrefs) {
       onDismiss = { kaiDialog = false },
     )
   }
+  if (dnsDialog) {
+    TextDialog(
+      title = stringResource(R.string.settings_network_insignia_dns),
+      hint = AppPrefs.INSIGNIA_DNS,
+      value = dns,
+      onDone = { dns = it.trim(); prefs.insigniaDns = dns; dnsDialog = false },
+      onDismiss = { dnsDialog = false },
+    )
+  }
 }
 
-private val MODES = listOf(AppPrefs.NET_OFF, AppPrefs.NET_LAN, AppPrefs.NET_KAI)
+private val MODES = listOf(AppPrefs.NET_OFF, AppPrefs.NET_INSIGNIA, AppPrefs.NET_LAN, AppPrefs.NET_KAI)
 
 private fun modeLabel(value: String) = when (value) {
+  AppPrefs.NET_INSIGNIA -> R.string.settings_network_insignia
   AppPrefs.NET_LAN -> R.string.settings_network_lan
   AppPrefs.NET_KAI -> R.string.settings_network_kai_mode
   else -> R.string.settings_network_off

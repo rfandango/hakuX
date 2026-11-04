@@ -11,10 +11,12 @@
 #include "hw/xbox/hle/host.h"
 
 #include <ctype.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <unistd.h>
 
 static char g_manifest[512];
 static NcVm *g_vm;
@@ -145,6 +147,106 @@ static void remember(MemPatch **list, unsigned *count, const char *xbe, uint32_t
     }
 }
 
+/* ---- a title update's XBE ([$u\default.xbe]: E:\TDATA\<title ID>\$u, the
+ * Xbox Live update the core boots for the disc's XBE) ----
+ * Its patches go over the file as the kernel reads it (the boot's load,
+ * XeLoadSection), as the disc's go over the disc's. */
+#define MAX_HOST_PATCHES 64
+
+typedef struct HostPatch {
+    char host[320];
+    uint64_t off;
+    uint32_t len;
+    uint8_t *bytes;
+} HostPatch;
+static HostPatch g_hp[MAX_HOST_PATCHES];
+static unsigned g_nhp;
+
+static bool is_update(const char *xbe)
+{
+    return xbe[0] == '$' && (xbe[1] == 'u' || xbe[1] == 'U') && (xbe[2] == '\\' || xbe[2] == '/');
+}
+
+/* The update's file for the disc's title, on the host; false when no update is installed. */
+static bool update_host(NcDisc *disc, const char *xbe, char *out, size_t n)
+{
+    HleXbeInfo x;
+    char path[512];
+    if (!xbe_info(disc, "default.xbe", &x)) {
+        return false;
+    }
+    snprintf(path, sizeof(path), "\\Device\\Harddisk0\\Partition1\\TDATA\\%08x\\$u\\%s", x.title_id, xbe + 3);
+    return nc_io_host_file(path, out, n);
+}
+
+static bool host_read(const char *host, uint64_t off, void *buf, size_t len)
+{
+    const int fd = open(host, O_RDONLY | O_CLOEXEC);
+    const bool ok = fd >= 0 && pread(fd, buf, len, (off_t)off) == (ssize_t)len;
+    if (fd >= 0) {
+        close(fd);
+    }
+    return ok;
+}
+
+static bool host_xbe_info(const char *host, HleXbeInfo *x)
+{
+    uint8_t probe[0x110];
+    if (!host_read(host, 0, probe, sizeof(probe))) {
+        return false;
+    }
+    const uint32_t hdr_size = nc_rd32(probe + 0x108);
+    if (hdr_size < sizeof(probe) || hdr_size > (1u << 20)) {
+        return false;
+    }
+    uint8_t *hdr = malloc(hdr_size);
+    const bool ok = hdr && host_read(host, 0, hdr, hdr_size) && hle_xbe_parse(hdr, hdr_size, x) == HLE_XBE_OK;
+    free(hdr);
+    return ok;
+}
+
+void nc_mods_host_patch(const char *host, uint64_t off, void *buf, size_t len)
+{
+    for (unsigned i = 0; i < g_nhp; i++) {
+        const HostPatch *p = &g_hp[i];
+        if (p->off >= off + len || p->off + p->len <= off || strcmp(p->host, host)) {
+            continue;
+        }
+        const uint64_t a = p->off > off ? p->off : off;
+        const uint64_t b = p->off + p->len < off + len ? p->off + p->len : off + len;
+        memcpy((uint8_t *)buf + (a - off), p->bytes + (a - p->off), (size_t)(b - a));
+    }
+}
+
+/* A patch line of a [$u\...] section, parsed (patch); none without an update. */
+static void patch_update(NcDisc *disc, const char *xbe, const char *mod, uint32_t va, const uint8_t *old,
+                         unsigned nold, const uint8_t *neu, unsigned nnew, bool on)
+{
+    char host[320];
+    HleXbeInfo x;
+    uint32_t off;
+    uint8_t cur[256];
+    if (!update_host(disc, xbe, host, sizeof(host))) {
+        nc_log("hakuX-native-mods", "%s: [%s] %08x: no title update installed", mod, xbe, va);
+    } else if (!host_xbe_info(host, &x)) {
+        nc_log("hakuX-native-mods", "%s: [%s] isn't an XBE", mod, xbe);
+    } else if (!xbe_offset(&x, va, nnew, &off) || !host_read(host, off, cur, nnew)) {
+        nc_log("hakuX-native-mods", "%s: [%s] %08x: not in the XBE's file", mod, xbe, va);
+    } else if (!on) {
+        remember(&g_mp, &g_nmp, xbe, va, cur, neu, nnew, false);
+    } else if (nold && memcmp(cur, old, nold)) {
+        nc_log("hakuX-native-mods", "%s: [%s] %08x: other bytes there, skipped", mod, xbe, va);
+    } else if (g_nhp < MAX_HOST_PATCHES && (g_hp[g_nhp].bytes = malloc(nnew))) {
+        HostPatch *p = &g_hp[g_nhp++];
+        snprintf(p->host, sizeof(p->host), "%s", host);
+        p->off = off;
+        p->len = nnew;
+        memcpy(p->bytes, neu, nnew);
+        remember(&g_mp, &g_nmp, xbe, va, cur, neu, nnew, true);
+        nc_log("hakuX-native-mods", "%s: [%s] %08x: %u bytes", mod, xbe, va, nnew);
+    }
+}
+
 /* "0x0011A2B4: 90 90" or "0x0011A2B4: 74 05 -> EB 05"; a mod that is off
  * (on false) is only remembered, with the disc's bytes */
 static void patch(NcDisc *disc, const char *xbe, const char *mod, const char *line, bool on)
@@ -175,6 +277,8 @@ static void patch(NcDisc *disc, const char *xbe, const char *mod, const char *li
     uint32_t off;
     if (*colon != ':' || !nnew || (nold && nold != nnew) || (*p && *p != '#')) {
         nc_log("hakuX-native-mods", "%s: [%s] \"%s\": not a patch", mod, xbe, line);
+    } else if (is_update(xbe)) {
+        patch_update(disc, xbe, mod, va, old, nold, neu, nnew, on);
     } else if (!xbe_info(disc, xbe, &x)) {
         nc_log("hakuX-native-mods", "%s: [%s] isn't an XBE on the disc", mod, xbe);
     } else if (!xbe_offset(&x, va, nnew, &off)) {
@@ -213,9 +317,11 @@ static const char *base_name(const char *path)
 static bool mem_read(void *opaque, uint32_t va, void *buf, unsigned n);
 static bool mem_write(void *opaque, uint32_t va, const void *buf, unsigned n);
 
+/* A title update's patches ($u\) are its XBE's, the disc's those of the disc's XBE of that name. */
 static bool of_image(const MemPatch *p, const char *image_path)
 {
-    return !strcasecmp(base_name(p->xbe), base_name(image_path));
+    const bool update_image = strstr(image_path, "\\$u\\") || strstr(image_path, "\\$U\\");
+    return is_update(p->xbe) == update_image && !strcasecmp(base_name(p->xbe), base_name(image_path));
 }
 
 static bool same_patch(const MemPatch *a, const MemPatch *b)

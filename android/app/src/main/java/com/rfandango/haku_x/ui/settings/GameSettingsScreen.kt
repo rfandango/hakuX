@@ -19,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import com.rfandango.haku_x.BuildConfig
 import com.rfandango.haku_x.R
 import com.rfandango.haku_x.data.AppPrefs
 import com.rfandango.haku_x.data.GameOverrides
@@ -55,8 +56,12 @@ private val SECTIONS: List<Pair<Int, List<Overridable>>> = listOf(
     Overridable(GameSetting.ASYNC_SHADERS, R.string.settings_async_shaders, ON_OFF, { it.asyncShaders.toString() }, { onOff(it) }),
     Overridable(GameSetting.PREBUILD_SHADERS, R.string.settings_prebuild_shaders, ON_OFF, { it.prebuildShaders.toString() }, { onOff(it) }),
   ),
-  R.string.settings_section_console to listOf(
+  R.string.settings_section_console to listOfNotNull(
     Overridable(GameSetting.LANGUAGE, R.string.settings_language, LANGUAGES, { it.language }, { languageLabel(it) }),
+    // debug builds only: elsewhere always on (RunSettings.consoleTiming)
+    if (BuildConfig.DEBUG) {
+      Overridable(GameSetting.CONSOLE_TIMING, R.string.settings_console_timing, ON_OFF, { it.consoleTiming.toString() }, { onOff(it) })
+    } else null,
   ),
   R.string.settings_section_console_video to listOf(
     Overridable(GameSetting.SCREEN_FORMAT, R.string.settings_screen_format, FORMATS, { it.screenFormat }, { stringResource(formatLabel(it)) }),

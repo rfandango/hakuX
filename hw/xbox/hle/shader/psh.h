@@ -77,7 +77,11 @@ typedef struct HlePshKey {
     uint8_t vol;                        /* stages whose texture is a volume (bits 0-3):
                                            2D-coordinate modes fetch it in 3D, as the NV2A
                                            (LLE): PROJECT2D at r = 0, bump-env at the
-                                           coordinates' r */
+                                           coordinates' r; HLE_PSH_RECT: the stage the
+                                           push block's fog.w names has its linear
+                                           texture kept to its own size, part of a
+                                           larger surface (ff.h HLE_NVRECT_GLSL); bits
+                                           5-7 free */
     uint8_t wbuf;                       /* W-buffering: depth = vW (HLE_WBUF_*_GLSL) */
     uint8_t fbfetch;                    /* stages (bits 0-3) whose texture is the colour
                                            target drawn into: its pixel, read as the
@@ -87,6 +91,7 @@ typedef struct HlePshKey {
     uint8_t sblend;                     /* the NV2A's signed blend equations (ff.h
                                            HleFfPsKey.sblend) */
 } HlePshKey;
+#define HLE_PSH_RECT 0x10u              /* HlePshKey.vol: a linear texture kept to its size */
 
 /* Key from the render-state array (rs[0..56] = the pixel-shader block). */
 void hle_psh_key(const uint32_t *rs, HlePshKey *k);

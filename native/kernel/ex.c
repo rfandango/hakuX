@@ -505,9 +505,11 @@ static uint64_t XeLoadSection(NcKernel *k, NcFrame *f, const uint32_t *a)
     }
     uint8_t *dst = nc_vm_host(k->vm, va);
     memset(dst, 0, vsize);
-    if (!nc_disc_read(k->disc, k->xbe_file, raw, dst, rsize < vsize ? rsize : vsize)) {
+    const uint32_t n = rsize < vsize ? rsize : vsize;
+    if (k->xbe_fd >= 0 ? !nc_xbe_host_read(k->xbe_fd, raw, dst, n) : !nc_disc_read(k->disc, k->xbe_file, raw, dst, n)) {
         return 0xC000009Cu; /* STATUS_DEVICE_DATA_ERROR */
     }
+    nc_kernel_section_fixups(k, va, vsize, section_name(k, s));
     nc_cpu_invalidate(k->cpu, va, vsize);
     return NC_STATUS_SUCCESS;
 }
@@ -749,7 +751,7 @@ static uint64_t AvSetDisplayMode(NcKernel *k, NcFrame *f, const uint32_t *a)
         /* AV mode bit 30: the 50 Hz modes (PAL 576-line timings, as
          * 0x58030314 is); the 480-line, 480p and HD modes are 60 Hz. */
         nc_dev_nv2a_refresh(a[2] & 0x40000000u ? 50 : 60);
-        nc_dev_nv2a_display_mode(a[4], a[3], a[2] & 0x40000000u ? 50 : 60);
+        nc_dev_nv2a_display_mode(a[4], a[3], a[2] & 0x40000000u ? 50 : 60, a[5]);
     }
     return 0;
 }
@@ -805,11 +807,20 @@ bool nc_kernel_launch_xbe(const uint8_t page[NC_LAUNCH_PAGE], char *out, size_t 
     memcpy(p, page + LAUNCH_PATH_OFF, LAUNCH_PATH_LEN);
     p[LAUNCH_PATH_LEN] = 0;
     static const char cd[] = "\\Device\\CdRom0";
-    if (strncasecmp(p, cd, sizeof(cd) - 1) != 0) {
+    static const char hd[] = "\\Device\\Harddisk0\\Partition";
+    size_t dev;
+    if (!strncasecmp(p, cd, sizeof(cd) - 1)) {
+        dev = sizeof(cd) - 1;
+    } else if (!strncasecmp(p, hd, sizeof(hd) - 1) && p[sizeof(hd) - 1] >= '1' && p[sizeof(hd) - 1] <= '5') {
+        dev = sizeof(hd);               /* the partition's digit too */
+    } else {
         return false;
     }
-    const char *rest = p + sizeof(cd) - 1;
     size_t m = 0;
+    for (; m < dev && m + 1 < n; m++) {
+        out[m] = p[m];
+    }
+    const char *rest = p + dev;
     if (*rest != '\\' && *rest != ';' && m + 1 < n) {
         out[m++] = '\\';
     }
@@ -817,7 +828,30 @@ bool nc_kernel_launch_xbe(const uint8_t page[NC_LAUNCH_PAGE], char *out, size_t 
         out[m++] = *rest == ';' ? '\\' : *rest;
     }
     out[m] = 0;
-    return m > 1;
+    return m > dev + 1;
+}
+
+/* LaunchDataType LDT_LAUNCH_DASHBOARD: LaunchData (+0x400) is LD_LAUNCH_DASHBOARD
+ * { dwReason, dwContext, dwParameter1, dwParameter2 }; reason 0 is the main menu. */
+#define LDT_LAUNCH_DASHBOARD 1
+#define LAUNCH_DATA_OFF 0x400
+
+/* A quick reboot to the dashboard (no launch path, or the dashboard's) that
+ * asks for one of its pages, a title's "create an Xbox Live account": true
+ * when the dashboard is there to boot, the page then naming it. To the main
+ * menu, the game closes, as without a dashboard. */
+static bool dashboard_page(uint8_t *page, char *xbe, size_t n)
+{
+    char host[512];
+    const bool to_dash = !page[LAUNCH_PATH_OFF] || !strcasecmp(xbe, NC_DASHBOARD_PATH);
+    if (!to_dash || nc_rd32(page) != LDT_LAUNCH_DASHBOARD || !nc_rd32(page + LAUNCH_DATA_OFF) ||
+        !nc_io_host_file(NC_DASHBOARD_PATH, host, sizeof(host))) {
+        return false;
+    }
+    memset(page + LAUNCH_PATH_OFF, 0, LAUNCH_PATH_LEN);
+    snprintf((char *)page + LAUNCH_PATH_OFF, LAUNCH_PATH_LEN, "%s", "\\Device\\Harddisk0\\Partition2;xboxdash.xbe");
+    snprintf(xbe, n, "%s", NC_DASHBOARD_PATH);
+    return true;
 }
 
 void nc_kernel_launch_page_restore(NcKernel *k, const uint8_t page[NC_LAUNCH_PAGE])
@@ -835,13 +869,23 @@ void nc_kernel_launch_page_restore(NcKernel *k, const uint8_t page[NC_LAUNCH_PAG
 /* HalReturnToFirmware(Routine): 2 (ReturnFirmwareQuickReboot) with a launch
  * data page is XLaunchNewImage. The core can't reboot in place (its state
  * lives for one run), so the page goes to a file and the app starts the core
- * again (NativeCoreActivity), which boots the XBE the page names. */
+ * again (NativeCoreActivity), which boots the XBE the page names: on the
+ * disc, on the hard disk (when it's there), or the dashboard a title asked
+ * a page of (dashboard_page). */
 static uint64_t HalReturnToFirmware(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
     const uint32_t slot = data_va(k, "LaunchDataPage");
     const uint32_t page = slot ? nc_vm_rd32(k->vm, slot) : 0;
-    char xbe[LAUNCH_PATH_LEN] = "";
-    if (a[0] == 2 && page && nc_kernel_launch_xbe(nc_vm_host(k->vm, page), xbe, sizeof(xbe))) {
+    char xbe[LAUNCH_PATH_LEN] = "", host[512];
+    bool go = false;
+    if (a[0] == 2 && page) {
+        uint8_t *pg = nc_vm_host(k->vm, page);
+        const bool named = nc_kernel_launch_xbe(pg, xbe, sizeof(xbe));
+        go = dashboard_page(pg, xbe, sizeof(xbe)) ||
+             (named && strcasecmp(xbe, NC_DASHBOARD_PATH) &&
+              (!strncasecmp(xbe, "\\Device\\CdRom0", 14) || nc_io_host_file(xbe, host, sizeof(host))));
+    }
+    if (go) {
         char path[512];
         nc_kernel_relaunch_file(path, sizeof(path));
         FILE *fp = fopen(path, "wb");
@@ -851,6 +895,7 @@ static uint64_t HalReturnToFirmware(NcKernel *k, NcFrame *f, const uint32_t *a)
         }
         if (ok) {
             k->relaunch = true;
+            nc_mm_keep_drop(page);              /* it goes in the relaunch file */
             nc_mm_keep_save(k, g_av_saved);
             nc_kernel_request_stop(k, f, "relaunch into %s (launch type %u)", xbe, nc_vm_rd32(k->vm, page));
             return 0;
@@ -884,13 +929,24 @@ static uint64_t HalReadSMBusValue(NcKernel *k, NcFrame *f, const uint32_t *a)
     if ((a[0] & 0xFE) == 0x20) {
         switch (a[1]) {
         case 0x01: v = (uint8_t)version[version_idx++ % 3]; break;
-        case 0x03: v = 0x60; break; /* tray closed, media present */
+        case 0x03: v = k->disc && k->disc->fd >= 0 ? 0x60 : 0x40; break; /* tray closed, media present or not */
         case 0x04: v = av_pack_smc(); break; /* the AV pack, as the TV encoder reports it */
         default: break;
         }
     }
     if (a[3]) {
         nc_vm_wr32(k->vm, a[3], v);
+    }
+    return NC_STATUS_SUCCESS;
+}
+
+/* HalReadSMCTrayState(TrayState, TrayStateChangeCount): the tray closed, a
+ * disc in it or none (the dashboard booted alone); it never moves. */
+static uint64_t HalReadSMCTrayState(NcKernel *k, NcFrame *f, const uint32_t *a)
+{
+    nc_vm_wr32(k->vm, a[0], k->disc && k->disc->fd >= 0 ? 0x60 : 0x40);
+    if (a[1]) {
+        nc_vm_wr32(k->vm, a[1], 0);
     }
     return NC_STATUS_SUCCESS;
 }
@@ -941,11 +997,12 @@ static uint32_t data_va(NcKernel *k, const char *name)
     return 0;
 }
 
-void nc_kernel_title_loaded(NcKernel *k, const NcDisc *disc, const NcDiscFile *xbe, uint32_t xbe_base,
+void nc_kernel_title_loaded(NcKernel *k, const NcDisc *disc, const NcDiscFile *xbe, int xbe_fd, uint32_t xbe_base,
                             uint32_t image_size)
 {
     k->disc = disc;
     k->xbe_file = xbe;
+    k->xbe_fd = xbe_fd;
     k->xbe_base = xbe_base;
     k->xbe_size = image_size;
     nc_mm_note_image(xbe_base, image_size);
@@ -965,6 +1022,19 @@ void nc_kernel_title_loaded(NcKernel *k, const NcDisc *disc, const NcDiscFile *x
         *(uint16_t *)nc_vm_host(k->vm, s) = (uint16_t)(len - 1);
         *(uint16_t *)nc_vm_host(k->vm, s + 2) = (uint16_t)len;
         nc_vm_wr32(k->vm, s + 4, buf);
+    }
+    /* An XBE on the hard disk: D: is the folder it was launched from, as the
+     * launch path's directory part becomes D: on the Xbox (the dashboard's:
+     * C:'s root). A disc's stays the disc's root, and so does a title
+     * update's (E:\TDATA\<title>\$u, booted for the disc's XBE). */
+    if (xbe_fd >= 0 && !strstr(path, "\\$u\\")) {
+        char dir[sizeof(k->image_path)];
+        snprintf(dir, sizeof(dir), "%s", path);
+        char *slash = strrchr(dir, '\\');
+        if (slash && slash != dir) {
+            *slash = 0;
+            nc_io_set_launch_dir(dir);
+        }
     }
     nc_kernel_set_hd_key(k);
 }
@@ -1003,6 +1073,8 @@ void nc_ex_register(NcKernel *k)
     nc_kernel_impl(k, "HalInitiateShutdown", HalInitiateShutdown);
     nc_kernel_impl(k, "HalReadSMBusValue", HalReadSMBusValue);
     nc_kernel_impl(k, "HalWriteSMBusValue", HalNothing);
+    nc_kernel_impl(k, "HalReadSMCTrayState", HalReadSMCTrayState);
+    nc_kernel_impl(k, "HalEnableSecureTrayEject", HalNothing);     /* the tray never opens */
     nc_kernel_impl(k, "FscGetCacheSize", FscGetCacheSize);
     nc_kernel_impl(k, "FscSetCacheSize", HalNothing);
     nc_kernel_impl(k, "PhyGetLinkState", PhyGetLinkState);

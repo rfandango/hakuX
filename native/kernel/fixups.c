@@ -21,6 +21,7 @@
 #include "native/kernel/kernel.h"
 #include "native/dev/dev.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include <sys/system_properties.h>
@@ -77,6 +78,12 @@ static bool section_mapped(const NcVm *vm, uint32_t va, uint32_t len)
 
 void nc_kernel_title_fixups(NcKernel *k, const HleXbeInfo *xbe)
 {
+    for (unsigned i = 0; i < xbe->nsections; i++) {
+        const HleXbeSection *s = &xbe->sections[i];
+        if (s->vsize && section_mapped(k->vm, s->va, s->vsize)) {
+            nc_kernel_section_fixups(k, s->va, s->vsize, s->name);
+        }
+    }
     if (!apu_spin_on()) {
         nc_log("hakuX-native", "fixups: DirectSound mailbox waits left spinning (debug.hakux.apuspin=0)");
         return;
@@ -107,6 +114,174 @@ void nc_kernel_title_fixups(NcKernel *k, const HleXbeInfo *xbe)
     }
     if (!patched) {
         nc_log("hakuX-native", "fixups: no DirectSound mailbox wait found");
+    }
+}
+
+/* XMV's decoder close waits for each of its audio streams to stop before it
+ * frees the decoder, where its packets' pdwCompletedSize and pdwStatus are:
+ *
+ *     call [ecx+0Ch]               ; IDirectSoundStream_GetStatus
+ *     test byte [ebp+0Ah], 1       ; DSSTREAMSTATUS_PLAYING
+ *     je next
+ *     push 1
+ *     call Sleep
+ *     call DirectSoundDoWork       ; the flushed packets complete here
+ *     dec edi                      ; the same stream again
+ *   next:
+ *     inc edi
+ *
+ * It counts on the stream still playing at its first look: the console's APU
+ * releases a voice turned off at its next frame, 0.67 ms on, and the CPU gets
+ * from the flush to here in microseconds. Here the guest can take
+ * milliseconds (the code that skips a movie compiled as it first runs), the
+ * release's DPC came first, GetStatus said stopped, DirectSoundDoWork never
+ * ran and the decoder was freed with the flushed packets still to complete;
+ * their completion in the stream's last Release wrote into the freed heap
+ * (Soldier of Fortune II, an intro movie skipped). The je goes to a stub that
+ * runs DirectSoundDoWork before the next stream: a stopped stream's flushed
+ * packets complete there, as when the first look saw it playing. Patched as
+ * the code loads: at boot and in XeLoadSection (XMV is a section of its own
+ * in some titles, loaded for a movie). */
+static const uint8_t k_xmv_wait[] = {0xFF, 0x51, 0x0C,              /* call [ecx+0Ch] */
+                                     0xF6, 0x45, 0x0A, 0x01,        /* test byte [ebp+0Ah], 1 */
+                                     0x74, 0x0D,                    /* je next */
+                                     0x6A, 0x01,                    /* push 1 */
+                                     0xE8};                         /* call Sleep */
+#define XMV_JE      7   /* the je, patched with a jmp to the stub */
+#define XMV_SLEEP   11  /* call Sleep (rel32) */
+#define XMV_DOWORK  16  /* call DirectSoundDoWork (rel32) */
+#define XMV_DEC     21  /* dec edi: the same stream again */
+#define XMV_NEXT    22  /* inc edi: the next stream */
+
+#define XMV_STUB    (2 + 2 + 5 + 5 + 5 + 5 + 5)
+
+/* The stubs made, by the je's VA: a section loaded again reuses its own,
+ * when its bytes are still the ones it would get (a savestate's load brings
+ * the kernel area of the run that saved it). */
+static struct {
+    uint32_t site, stub;
+} g_xmv_stubs[8];
+
+static uint32_t rel_target(NcKernel *k, uint32_t call)
+{
+    return call + 5 + nc_vm_rd32(k->vm, call + 1);
+}
+
+static void put_rel(uint8_t *b, unsigned *n, uint8_t op, uint32_t from, uint32_t to)
+{
+    b[(*n)++] = op;
+    const uint32_t rel = to - (from + *n + 4);
+    memcpy(b + *n, &rel, 4);
+    *n += 4;
+}
+
+/* The stub for the loop at m (the call [ecx+0Ch]) at stub; the flags of the test still set:
+ *   je np ; push 1 ; call Sleep ; call DirectSoundDoWork ; jmp m+21 (dec edi)
+ *   np: call DirectSoundDoWork ; jmp m+22 (inc edi) */
+static void xmv_stub_bytes(NcKernel *k, uint32_t m, uint32_t stub, uint8_t b[XMV_STUB])
+{
+    const uint32_t sleep = rel_target(k, m + XMV_SLEEP), dowork = rel_target(k, m + XMV_DOWORK);
+    unsigned n = 0;
+    b[n++] = 0x74, b[n++] = 2 + 5 + 5 + 5; /* je np */
+    b[n++] = 0x6A, b[n++] = 0x01;          /* push 1 */
+    put_rel(b, &n, 0xE8, stub, sleep);
+    put_rel(b, &n, 0xE8, stub, dowork);
+    put_rel(b, &n, 0xE9, stub, m + XMV_DEC);
+    put_rel(b, &n, 0xE8, stub, dowork);    /* np: */
+    put_rel(b, &n, 0xE9, stub, m + XMV_NEXT);
+}
+
+static uint32_t xmv_stub(NcKernel *k, uint32_t m)
+{
+    const uint32_t site = m + XMV_JE;
+    const unsigned slots = sizeof(g_xmv_stubs) / sizeof(g_xmv_stubs[0]);
+    uint8_t b[XMV_STUB];
+    unsigned slot = slots;
+    for (unsigned i = 0; i < slots && slot == slots; i++) {
+        if (g_xmv_stubs[i].site == site) {
+            slot = i;
+            xmv_stub_bytes(k, m, g_xmv_stubs[i].stub, b);
+            if (!memcmp(nc_vm_host(k->vm, g_xmv_stubs[i].stub), b, XMV_STUB)) {
+                return g_xmv_stubs[i].stub;
+            }
+        } else if (!g_xmv_stubs[i].site) {
+            slot = i;
+        }
+    }
+    const uint32_t stub = nc_kernel_code_alloc(k, XMV_STUB);
+    if (!stub) {
+        nc_log("hakuX-native", "fixups: XMV's stream wait at %08x left as it is (no room for its stub)", m);
+        return 0;
+    }
+    xmv_stub_bytes(k, m, stub, b);
+    memcpy(nc_vm_host(k->vm, stub), b, XMV_STUB);
+    if (slot < slots) {
+        g_xmv_stubs[slot].site = site;
+        g_xmv_stubs[slot].stub = stub;
+    }
+    return stub;
+}
+
+static bool xmv_wait_on(void)
+{
+    char v[PROP_VALUE_MAX] = "";
+    hle_prop_get("debug.hakux.xmvwait", v);
+    return strcmp(v, "0") != 0;
+}
+
+/* The XMV stream waits in [va, va + len): how many were patched. */
+static unsigned section_fixups(NcKernel *k, uint32_t va, uint32_t len, const char *name)
+{
+    if (!xmv_wait_on()) {
+        return 0;                       /* debug.hakux.xmvwait=0: XMV as it is (A/B) */
+    }
+    unsigned patched = 0;
+    const uint8_t *base = nc_vm_host(k->vm, va), *end = base + len, *p = base;
+    while ((p = memmem(p, (size_t)(end - p), k_xmv_wait, sizeof(k_xmv_wait))) != NULL) {
+        const uint32_t m = va + (uint32_t)(p - base);
+        if (end - p > XMV_NEXT && p[XMV_DOWORK] == 0xE8 && p[XMV_DEC] == 0x4F && p[XMV_NEXT] == 0x47) {
+            const uint32_t stub = xmv_stub(k, m);
+            if (stub) {
+                uint8_t *site = nc_vm_host(k->vm, m + XMV_JE);
+                const uint32_t rel = stub - (m + XMV_JE + 5);
+                site[0] = 0xE9;
+                memcpy(site + 1, &rel, 4);
+                memset(site + 5, 0x90, XMV_DEC - XMV_JE - 5);
+                patched++;
+                nc_log("hakuX-native", "fixups: XMV's stream wait at %08x (%s) runs DirectSoundDoWork for a "
+                       "stopped stream too (stub %08x)", m, name, stub);
+            }
+        }
+        p += sizeof(k_xmv_wait);
+    }
+    return patched;
+}
+
+void nc_kernel_section_fixups(NcKernel *k, uint32_t va, uint32_t len, const char *name)
+{
+    section_fixups(k, va, len, name);
+}
+
+/* After a savestate's load: the sections loaded then, as the run that saved
+ * them had them (a build before a fixup, unpatched). */
+void nc_kernel_loaded_fixups(NcKernel *k)
+{
+    const uint32_t base = k->xbe_base;
+    const uint32_t nsec = nc_vm_rd32(k->vm, base + 0x11C), secs = nc_vm_rd32(k->vm, base + 0x120);
+    for (uint32_t i = 0; i < nsec && i < 256; i++) {
+        const uint32_t s = secs + i * 0x38;
+        const uint32_t va = nc_vm_rd32(k->vm, s + 0x04), vsize = nc_vm_rd32(k->vm, s + 0x08);
+        if (!nc_vm_rd32(k->vm, s + 0x18) || !vsize || !section_mapped(k->vm, va, vsize)) {
+            continue;                   /* not loaded */
+        }
+        const uint32_t name = nc_vm_rd32(k->vm, s + 0x14);
+        char nm[9] = "?";
+        if (name && nc_vm_phys(k->vm, name) != UINT32_MAX) {
+            snprintf(nm, sizeof(nm), "%s", (const char *)nc_vm_host(k->vm, name));
+        }
+        if (section_fixups(k, va, vsize, nm) && k->cpu) {
+            nc_cpu_invalidate(k->cpu, va, vsize);
+        }
     }
 }
 

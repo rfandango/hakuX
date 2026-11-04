@@ -74,6 +74,21 @@ static inline void nc_vm_will_write(uint32_t va, uint32_t len)
     }
 }
 
+/* Before host code reads guest memory through a system call (write/pwrite
+ * from a guest buffer): pages without access (nc_vm_noaccess) get what the
+ * HLE puts there first, as a guest read's fault would, instead of failing
+ * the call. */
+extern void (*nc_vm_read_hook)(uint32_t va, uint32_t len);
+/* Physical [pa, pa + len) freed (nc_vm_free_phys): what the HLE keeps over it
+ * goes (its images' guards). */
+extern void (*nc_vm_free_hook)(uint32_t pa, uint32_t len);
+static inline void nc_vm_will_read(uint32_t va, uint32_t len)
+{
+    if (nc_vm_read_hook && len) {
+        nc_vm_read_hook(va, len);
+    }
+}
+
 /* A device write to physical [pa, pa + len) that another thread makes
  * later through the RAM view (an overlapped file read): fence, on the guest's
  * CPU before, the value the GPU must reach first (0: none); wait, on the

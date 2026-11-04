@@ -21,6 +21,10 @@ void hle_pb_stop(void);
 bool hle_pb_active(void);
 /* The host: the guest wrote channel 0's DMA_PUT (any thread). */
 void hle_pb_kick(void);
+/* Any thread: the decoder stops at its next method (pbdraw.c
+ * hle_pbd_boundary: what was recorded up to value submitted, a guest
+ * thread's landing request served), or at its next pass. */
+void hle_pb_boundary_request(uint64_t value);
 /* The guest wrote DMA_PUT (its vCPU thread): a kick, and the thread known to
  * the stutter / hang monitor (hitch.h) */
 void hle_pb_put(void);
@@ -40,6 +44,10 @@ void hle_pb_display_start(uint32_t pa);
  * counts the modes set). */
 void hle_pb_display_mode(uint32_t pitch, uint32_t xfmt, unsigned hz);
 uint32_t hle_pb_display_mode_get(uint32_t *pitch, uint32_t *xfmt, unsigned *hz);
+/* AvSetDisplayMode (any thread), after hle_pb_display_mode: the frame buffer
+ * the display scans out; one a title draws with the CPU, having no GPU
+ * device, is shown (hle_pbd_cpu_display). */
+void hle_pb_display_fb(uint32_t pa);
 /* The vblank thread, each vblank: when the title hasn't flipped for a while,
  * the decode thread looks whether the CPU changed the frame on screen
  * (hle_pbd_scanout). */

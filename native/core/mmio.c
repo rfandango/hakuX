@@ -305,6 +305,143 @@ bool nc_mmio_fault(const NcVm *vm, const siginfo_t *info, void *ucontext)
     return true;
 }
 
+/* ---- guest RAM accesses through the host's view (nc_ram_*) ---- */
+
+/* The host address a decoded load or store's first element is at: its base
+ * register and offset (the fault address may lie further in, an access
+ * that crosses into the page that faulted, or be either of a pair's) */
+static bool access_ea(uint32_t insn, const Access *a, const mcontext_t *mc, uint64_t *ea)
+{
+    const uint64_t base = a->rn == 31 ? mc->sp : mc->regs[a->rn];
+    if (a->count == 2) {
+        *ea = base + (a->wb == 1 ? 0 : a->imm);
+        return true;
+    }
+    if ((insn & 0x3b000000u) == 0x39000000u) {          /* unsigned offset, scaled */
+        *ea = base + ((insn >> 10) & 0xfff) * (uint64_t)a->bytes;
+        return true;
+    }
+    if ((insn & 0x3b200c00u) == 0x38200800u) {          /* register offset */
+        const unsigned rm = (insn >> 16) & 31;
+        uint64_t off = rm == 31 ? 0 : mc->regs[rm];
+        switch ((insn >> 13) & 7) {
+        case 2:                                         /* UXTW */
+            off = (uint32_t)off;
+            break;
+        case 6:                                         /* SXTW */
+            off = (uint64_t)(int64_t)(int32_t)off;
+            break;
+        case 3: case 7:                                 /* LSL (UXTX), SXTX */
+            break;
+        default:
+            return false;
+        }
+        *ea = base + (((insn >> 12) & 1) ? off << __builtin_ctz(a->bytes) : off);
+        return true;
+    }
+    /* unscaled, pre-index: base + simm9; post-index: base */
+    *ea = base + (a->wb == 1 ? 0 : (uint64_t)sext((insn >> 12) & 0x1ff, 9));
+    return true;
+}
+
+/* The access's first element's guest address, the fault address within
+ * the access */
+static bool ram_first(const NcVm *vm, const siginfo_t *info, const mcontext_t *mc, uint32_t insn,
+                      const Access *a, uint32_t *first)
+{
+    uint64_t ea;
+    if (!access_ea(insn, a, mc, &ea)) {
+        return false;
+    }
+    const uint64_t fa = (uint64_t)(uintptr_t)info->si_addr;
+    if (fa < ea || fa - ea >= (uint64_t)a->count * a->bytes) {
+        return false;
+    }
+    const uint64_t guest = nc_vm_guest_of(vm, (void *)(uintptr_t)ea);
+    if (guest == UINT64_MAX) {
+        return false;
+    }
+    *first = (uint32_t)guest;
+    return true;
+}
+
+bool nc_ram_access_span(const NcVm *vm, const siginfo_t *info, void *ucontext, uint32_t *lo,
+                        uint32_t *hi, bool *store)
+{
+    const mcontext_t *mc = &((ucontext_t *)ucontext)->uc_mcontext;
+    Access a;
+    uint32_t first;
+    const uint32_t insn = *(const uint32_t *)(uintptr_t)mc->pc;
+    if (!decode(insn, &a) || a.prefetch || !ram_first(vm, info, mc, insn, &a, &first)) {
+        return false;
+    }
+    const uint32_t n = a.count * a.bytes, p0 = nc_vm_phys(vm, first);
+    if (p0 == UINT32_MAX || (p0 & (NC_PAGE - 1)) + n > NC_PAGE || (uint64_t)p0 + n > vm->ram_size) {
+        return false;
+    }
+    *lo = p0;
+    *hi = p0 + n;
+    *store = a.store;
+    return true;
+}
+
+bool nc_ram_emulate(NcVm *vm, const siginfo_t *info, void *ucontext,
+                    void (*stored)(uint32_t pa, uint32_t n))
+{
+    ucontext_t *uc = ucontext;
+    mcontext_t *mc = &uc->uc_mcontext;
+    Access a;
+    uint32_t first;
+    const uint32_t insn = *(const uint32_t *)(uintptr_t)mc->pc;
+    if (!decode(insn, &a) || a.prefetch || !ram_first(vm, info, mc, insn, &a, &first)) {
+        return false;
+    }
+    struct fpsimd_context *fp = a.fp ? fpsimd(uc) : NULL;
+    const uint32_t n = a.count * a.bytes, pa = nc_vm_phys(vm, first);
+    if ((a.fp && !fp) || pa == UINT32_MAX || (pa & (NC_PAGE - 1)) + n > NC_PAGE ||
+        (uint64_t)pa + n > vm->ram_size) {
+        return false;
+    }
+    for (unsigned e = 0; e < a.count; e++) {
+        const unsigned rt = e ? a.rt2 : a.rt;
+        const uint32_t at = pa + e * a.bytes;
+        uint8_t *m = vm->phys + at;
+        if (a.bytes == 16) {
+            if (a.store) {
+                stored(at, 16);
+                memcpy(m, &fp->vregs[rt], 16);
+            } else {
+                memcpy(&fp->vregs[rt], m, 16);
+            }
+            continue;
+        }
+        if (a.store) {
+            const uint64_t v = a.fp ? (uint64_t)fp->vregs[rt] : rt == 31 ? 0 : mc->regs[rt];
+            stored(at, a.bytes);
+            memcpy(m, &v, a.bytes);     /* little-endian: the low bytes */
+            continue;
+        }
+        uint64_t v = 0;
+        memcpy(&v, m, a.bytes);
+        if (a.fp) {
+            fp->vregs[rt] = (__uint128_t)v; /* a scalar load clears the rest */
+        } else if (rt != 31) {
+            uint64_t r = v;
+            if (a.sign) {
+                const int64_t sv = sext(v, 8 * a.bytes);
+                r = a.to64 ? (uint64_t)sv : (uint32_t)sv;
+            }
+            mc->regs[rt] = r;
+        }
+    }
+    if (a.wb) {
+        uint64_t *rn = a.rn == 31 ? (uint64_t *)&mc->sp : (uint64_t *)&mc->regs[a.rn];
+        *rn += a.imm;
+    }
+    mc->pc += 4;
+    return true;
+}
+
 /* nc_mmio_access's store may run again (nc_mmio_retry); one was asked for */
 static __thread bool t_retry_ok, t_retry;
 

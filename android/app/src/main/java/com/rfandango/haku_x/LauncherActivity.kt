@@ -18,6 +18,7 @@ import com.rfandango.haku_x.data.Game
 import com.rfandango.haku_x.data.PreviousVersion
 import com.rfandango.haku_x.data.SaveStateStore
 import com.rfandango.haku_x.data.Storage
+import com.rfandango.haku_x.data.hdd.Dashboard
 import com.rfandango.haku_x.data.hdd.HddStore
 import com.rfandango.haku_x.input.InputCapture
 import com.rfandango.haku_x.ui.HakuXApp
@@ -50,6 +51,9 @@ class LauncherActivity : ComponentActivity() {
       return
     }
 
+    // Insignia's setup started the Setup Assistant or the dashboard, now closed: it opens again
+    val openInsignia = prefs.insigniaWizardResume.also { if (it) prefs.insigniaWizardResume = false }
+
     AppTheme.load(this)
     var windowDark = AppTheme.isDark(this)
     windowTheme(windowDark)
@@ -79,6 +83,21 @@ class LauncherActivity : ComponentActivity() {
             startCore(game.uri, game.relativePath, game.title, launchedExternally = false,
                       state = store.state(slot).absolutePath)
           },
+          onLaunchDashboard = {
+            Log.i(TAG, "launch: the dashboard")
+            /* not remembered as the last game: no disc */
+            startActivity(Intent(this, NativeCoreActivity::class.java)
+              .putExtra(NativeCoreActivity.EXTRA_DVD_URI, Dashboard.URI))
+            finish()
+          },
+          onLaunchSetup = { uri: Uri ->
+            Log.i(TAG, "launch: $uri (Insignia's setup)")
+            /* not a library game: not remembered as the last one */
+            startActivity(Intent(this, NativeCoreActivity::class.java)
+              .putExtra(NativeCoreActivity.EXTRA_DVD_URI, uri.toString()))
+            finish()
+          },
+          openInsignia = openInsignia,
         )
       }
     }

@@ -28,6 +28,7 @@ import com.rfandango.haku_x.ui.common.ConfirmDialog
 import com.rfandango.haku_x.ui.controls.ControlsEditorScreen
 import com.rfandango.haku_x.ui.driver.GpuDriverScreen
 import com.rfandango.haku_x.ui.hdd.HddScreen
+import com.rfandango.haku_x.ui.insignia.InsigniaWizard
 import com.rfandango.haku_x.ui.library.LibraryScreen
 import com.rfandango.haku_x.ui.mods.ModsScreen
 import com.rfandango.haku_x.ui.settings.GameSettingsScreen
@@ -48,6 +49,8 @@ private object Routes {
   const val CONTROLLERS = "controllers"
   const val HDD = "hdd"
   const val GPU_DRIVER = "gpu_driver"
+  /** Insignia's setup wizard (Xbox Live). */
+  const val INSIGNIA = "insignia"
   /** One controller's mapping: its input device id. */
   const val MAPPING = "mapping/{id}"
 
@@ -73,6 +76,12 @@ fun HakuXApp(
   onLaunchGame: (Game) -> Unit,
   /** Start a game right into one of its savestates (the library's Load state). */
   onLaunchState: (Game, SaveStateStore, Int) -> Unit,
+  /** Start the dashboard (installed on C:), with no disc. */
+  onLaunchDashboard: () -> Unit,
+  /** Start a disc image that isn't a library game (Insignia's Setup Assistant). */
+  onLaunchSetup: (Uri) -> Unit,
+  /** Insignia's setup started a game that has closed: the setup opens again, over the library. */
+  openInsignia: Boolean = false,
 ) {
   val nav = rememberNavController()
   // A newer release on GitHub, looked for once as the app's screens start: told in a toast, the
@@ -87,6 +96,9 @@ fun HakuXApp(
     needsMigration -> Routes.MIGRATE
     needsSetup -> Routes.SETUP
     else -> Routes.LIBRARY
+  }
+  LaunchedEffect(Unit) {
+    if (openInsignia && start == Routes.LIBRARY) nav.navigate(Routes.INSIGNIA)
   }
   NavHost(nav, startDestination = start) {
     composable(Routes.MIGRATE) {
@@ -125,6 +137,7 @@ fun HakuXApp(
       LibraryScreen(
         onLaunch = onLaunchGame,
         onLoadState = onLaunchState,
+        onDashboard = onLaunchDashboard,
         onOpenSettings = { nav.navigate(Routes.SETTINGS) },
         onGameSettings = { game, disc ->
           val key = GameOverrides.gameKey(disc?.titleId ?: 0L, disc?.version ?: 0L, game.relativePath)
@@ -157,6 +170,14 @@ fun HakuXApp(
         onHardDisk = { nav.navigate(Routes.HDD) },
         onGpuDriver = { nav.navigate(Routes.GPU_DRIVER) },
         onMigrate = { nav.navigate(Routes.MIGRATE_AGAIN) },
+        onInsignia = { nav.navigate(Routes.INSIGNIA) },
+      )
+    }
+    composable(Routes.INSIGNIA) {
+      InsigniaWizard(
+        onBack = { nav.popBackStack() },
+        onLaunchDashboard = onLaunchDashboard,
+        onLaunchSetup = onLaunchSetup,
       )
     }
     composable(Routes.GPU_DRIVER) {

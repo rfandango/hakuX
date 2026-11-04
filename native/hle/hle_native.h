@@ -64,7 +64,7 @@ void nc_hle_after_sysop(NcKernel *k);
 
 /* Guest-write tracking (dirty.c), from any thread's SIGSEGV/SIGBUS: a write
  * to a page protected for tracking. Returns false if it isn't one. */
-bool nc_hle_dirty_fault(const siginfo_t *info);
+bool nc_hle_dirty_fault(const siginfo_t *info, void *ucontext);
 
 /* debug: NC_WATCHPA="pa:len[:seconds]" (hex, then decimal), stores to that
  * guest RAM logged (hakuX-native-watch), armed after the seconds: a guest

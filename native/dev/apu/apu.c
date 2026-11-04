@@ -123,6 +123,22 @@ static uint32_t gscnt_now(void)
     return (uint32_t)(nc_ke_now_ns() * 6 / 125000);        /* 48000 / 1e9 */
 }
 
+/* A hold left time out of the guest's while the APU went on (a pause stops
+ * both): the count goes on as the APU's time did, as DirectMusic's synth
+ * clock, kept beside a buffer the APU plays, needs. In the register, so
+ * that a savestate keeps it. */
+void nc_dev_apu_time_held(uint64_t ns)
+{
+    static uint64_t held_ns;
+    static uint32_t counted;
+    held_ns += ns;
+    const uint32_t s = (uint32_t)(held_ns * 6 / 125000);
+    if (g_state) {
+        apu_st(&g_state->regs[NV_PAPU_XGSCNT], apu_ld(&g_state->regs[NV_PAPU_XGSCNT]) - (s - counted));
+    }
+    counted = s;
+}
+
 static uint64_t mcpx_apu_read(MCPXAPUState *d, uint32_t addr, unsigned int size)
 {
     uint64_t r = 0;

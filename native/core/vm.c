@@ -128,6 +128,8 @@ bool nc_vm_map(NcVm *vm, uint32_t va, uint32_t pa, uint32_t len)
 }
 
 void (*nc_vm_write_hook)(uint32_t va, uint32_t len);
+void (*nc_vm_read_hook)(uint32_t va, uint32_t len);
+void (*nc_vm_free_hook)(uint32_t pa, uint32_t len);
 NcVmDma nc_vm_dma;
 
 /* Pages [page, page + n)'s guest views (the contiguous and GPU windows, the
@@ -174,16 +176,29 @@ void nc_vm_protect_pages(NcVm *vm, uint32_t pa, uint32_t n, bool ro)
             __atomic_store_n(&vm->wp[page + i], NC_WP_CLEAN, __ATOMIC_RELEASE);
         }
     }
-    prot_views(vm, page, n, prot);
+    /* pages without access stay so (nc_vm_noaccess): only the runs between
+     * them change, none opened even for a moment (a guest store there
+     * would go untracked); one closed meanwhile is closed again after */
+    for (uint32_t i = 0; i < n;) {
+        if (g_na && __atomic_load_n(&g_na[page + i], __ATOMIC_ACQUIRE)) {
+            i++;
+            continue;
+        }
+        uint32_t k = 1;
+        while (i + k < n && !(g_na && __atomic_load_n(&g_na[page + i + k], __ATOMIC_ACQUIRE))) {
+            k++;
+        }
+        prot_views(vm, page + i, k, prot);
+        for (uint32_t j = i; g_na && j < i + k; j++) {
+            if (__atomic_load_n(&g_na[page + j], __ATOMIC_ACQUIRE)) {
+                prot_views(vm, page + j, 1, PROT_NONE);
+            }
+        }
+        i += k;
+    }
     if (!ro) {
         for (uint32_t i = 0; i < n; i++) {
             __atomic_store_n(&vm->wp[page + i], 0, __ATOMIC_RELEASE);
-        }
-    }
-    /* pages without access stay so (nc_vm_noaccess) */
-    for (uint32_t i = 0; g_na && i < n; i++) {
-        if (__atomic_load_n(&g_na[page + i], __ATOMIC_ACQUIRE)) {
-            prot_views(vm, page + i, 1, PROT_NONE);
         }
     }
 }
@@ -337,6 +352,9 @@ void nc_vm_free_phys(NcVm *vm, uint32_t pa, uint32_t len)
         }
         memset(vm->page_used + pa / NC_PAGE, 0, pages);
         memset(vm->pin + pa / NC_PAGE, 0, pages);
+        if (nc_vm_free_hook) {
+            nc_vm_free_hook(pa, pages * NC_PAGE);
+        }
     }
 }
 
@@ -584,7 +602,8 @@ static uint32_t smallest_run(const NcVm *vm, uint32_t first, uint32_t last, uint
  * long-lived allocations (page tables) fill holes and leave the
  * large runs whole for MmAllocateContiguousMemory; from the top end of the
  * run, the highest of equals, so the kernel's own memory stays high (low RAM
- * is the title's: nc_vm_alloc_at). */
+ * is the title's: nc_vm_alloc_at; the pool's first range sits just above
+ * the kernel, kernel.c POOL_BASE). */
 uint32_t nc_vm_alloc_phys(NcVm *vm, uint32_t len, uint32_t lo, uint32_t hi)
 {
     const uint32_t pages = nc_align_up(len ? len : 1, NC_PAGE) / NC_PAGE;

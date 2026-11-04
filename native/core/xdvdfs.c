@@ -405,14 +405,19 @@ bool nc_disc_read_orig(const NcDisc *d, const NcDiscFile *f, uint64_t off, void 
            pread_all(d->fd, buf, len, d->part_off + (uint64_t)f->sector * NC_XDVDFS_SECTOR + off);
 }
 
-bool nc_disc_read(const NcDisc *d, const NcDiscFile *f, uint64_t off, void *buf, size_t len)
+bool nc_disc_read_file(const NcDisc *d, const NcDiscFile *f, uint64_t off, void *buf, size_t len)
 {
     if (off + len > f->size) {
         return false;
     }
-    const bool ok = f->sector >= NC_DISC_OVERLAY
-                        ? ov_read(d, f, off, buf, len)
-                        : pread_all(d->fd, buf, len, d->part_off + (uint64_t)f->sector * NC_XDVDFS_SECTOR + off);
+    return f->sector >= NC_DISC_OVERLAY
+               ? ov_read(d, f, off, buf, len)
+               : pread_all(d->fd, buf, len, d->part_off + (uint64_t)f->sector * NC_XDVDFS_SECTOR + off);
+}
+
+bool nc_disc_read(const NcDisc *d, const NcDiscFile *f, uint64_t off, void *buf, size_t len)
+{
+    const bool ok = nc_disc_read_file(d, f, off, buf, len);
     if (ok && d->ov) {
         for (unsigned i = 0; i < d->ov->np; i++) {
             const OvPatch *p = &d->ov->p[i];

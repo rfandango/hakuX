@@ -34,11 +34,6 @@ static bool mesa_turnip(const HleDriver *d)
     return d->drv.driverID == VK_DRIVER_ID_MESA_TURNIP;
 }
 
-static bool not_turnip(const HleDriver *d)
-{
-    return !mesa_turnip(d);
-}
-
 static bool arm_proprietary(const HleDriver *d)
 {
     return d->drv.driverID == VK_DRIVER_ID_ARM_PROPRIETARY;
@@ -73,6 +68,83 @@ static bool mali_g615(const HleDriver *d)
     return mali(d) && strstr(d->props.deviceName, "Mali-G615") != NULL;
 }
 
+static bool mali_g57(const HleDriver *d)
+{
+    return mali(d) && strstr(d->props.deviceName, "Mali-G57") != NULL;
+}
+
+/* malisx2 reports Arm's vendor and driver IDs; "malisx2" in driverInfo tells
+ * it apart. Some Arm quirks are blob bugs and must not apply to it. */
+static bool malisx2(const HleDriver *d)
+{
+    return mali(d) && strstr(d->drv.driverInfo, "malisx2") != NULL;
+}
+
+/* Arm's own Mali driver. */
+static bool arm_blob(const HleDriver *d)
+{
+    return arm_proprietary(d) && !malisx2(d);
+}
+
+/* A G615 run by Arm's blob, not malisx2. */
+static bool mali_g615_blob(const HleDriver *d)
+{
+    return mali_g615(d) && !malisx2(d);
+}
+
+/* Arm's own driver's release, from its driverInfo ("v1.r34p0-01eac0.<build>":
+ * 34); 0 for another driver (malisx2 too) or info that names none */
+static unsigned arm_release(const HleDriver *d)
+{
+    const char *r = arm_blob(d) ? d->drv.driverInfo : NULL;
+    while (r && (r = strstr(r, ".r")) != NULL) {
+        unsigned n = 0;
+        for (r += 2; *r >= '0' && *r <= '9' && n < 1000; r++) {
+            n = n * 10 + (unsigned)(*r - '0');
+        }
+        if (n && *r == 'p') {
+            return n;
+        }
+    }
+    return 0;
+}
+
+/* Arm's own driver before r40: its host wait on a timeline semaphore loses
+ * the device (no_sem_wait) */
+static bool arm_before_r40(const HleDriver *d)
+{
+    const unsigned r = arm_release(d);
+    return r && r < 40;
+}
+
+/* A Mali-G52 under Arm's own driver (the r34p0 build of an Anbernic RG Vita,
+ * Unisoc T618, showed the quirks below; PanVK, malisx2 and other drivers for
+ * the same GPU are not it: their measurements were the blob's). */
+static bool mali_g52_arm(const HleDriver *d)
+{
+    return arm_blob(d) && strstr(d->props.deviceName, "Mali-G52") != NULL;
+}
+
+/* The present CPU wait works around Qualcomm's driver, whose present holds
+ * the queue's lock for 3-6 ms while it waits; the Mali-G52's (Arm's r34p0,
+ * Vulkan 1.1, 2026-10-30) returns at once, so the wait only cost there: the
+ * presenter spent 620-730 ms/s waiting for its passes, without it 0.3 ms/s,
+ * the picture the same (Sega GT 2002, Beyond Good & Evil). Arm's other GPUs
+ * and releases are untested, so they keep it. */
+static bool not_turnip_not_g52_arm(const HleDriver *d)
+{
+    return !mesa_turnip(d) && !mali_g52_arm(d);
+}
+
+/* Timestamp queries that never resolve: ARMSX2's Mali-G615, and the G52's
+ * r34p0 measured the same way (a 60 s profile armed both query pools, the
+ * pass histogram logged every second, and not one pass or whole-buffer GPU
+ * time came back). Without the quirk the profiler silently produces nothing. */
+static bool no_timestamps_on(const HleDriver *d)
+{
+    return mali_g615_blob(d) || mali_g52_arm(d);
+}
+
 /* Seen on (driver, version, what showed it). */
 static const HleQuirk k_quirks[] = {
     /* Adreno 840 stock driver 0x8034a02c: Forza's menu text picks its glyph
@@ -95,8 +167,9 @@ static const HleQuirk k_quirks[] = {
      * its depth-only shadow pass, and the scene flickered (2026-10-23). */
     { HLE_QUIRK_BLEND_CONST_RESET, "blend_const_reset", mesa_turnip },
     /* ARMSX2 (GSDeviceVK.cpp): "Arm's Mali blob crashes in
-     * vkCmdPushDescriptorSetKHR even where it advertises the extension" */
-    { HLE_QUIRK_NO_PUSH_DESC, "no_push_desc", arm_proprietary },
+     * vkCmdPushDescriptorSetKHR even where it advertises the extension".
+     * malisx2 is not the blob: it serves push descriptors, so it keeps them. */
+    { HLE_QUIRK_NO_PUSH_DESC, "no_push_desc", arm_blob },
     /* ARMSX2 after PPSSPP: depth vs stencil load ops that differ corrupt on Mali */
     { HLE_QUIRK_DS_SAME_LOAD, "ds_same_load", mali },
     /* ARMSX2 (tfx.glsl GPU_PROFILE_MALI) after PPSSPP's EQUAL_WZ_CORRUPTS_DEPTH */
@@ -104,13 +177,46 @@ static const HleQuirk k_quirks[] = {
     { HLE_QUIRK_FRESH_CLEAR, "fresh_clear", not_adreno },
     /* ARMSX2 (VKSwapChain.cpp) after PPSSPP: older PowerVR swapchain widths */
     { HLE_QUIRK_SWAP_W32, "swap_w32", powervr_old },
-    /* ARMSX2: "Mali-G615's timestamp queries never resolve" */
-    { HLE_QUIRK_NO_TIMESTAMPS, "no_timestamps", mali_g615 },
+    /* ARMSX2: "Mali-G615's timestamp queries never resolve" under Arm's
+     * blob (malisx2 reports the same device name but resolves them); the
+     * Mali-G52's r34p0 too (no_timestamps_on) */
+    { HLE_QUIRK_NO_TIMESTAMPS, "no_timestamps", no_timestamps_on },
     /* Qualcomm's driver: a present waiting on the pass's semaphore waited
      * 3-6 ms a refresh in the driver, the queue's lock held (Halo 2).
-     * Turnip's makes a sync file and returns (Mesa vk_android.c); the other
-     * drivers are untested, so they keep the wait. */
-    { HLE_QUIRK_PRESENT_CPU_WAIT, "present_cpu_wait", not_turnip },
+     * Turnip's makes a sync file and returns (Mesa vk_android.c), and the
+     * Mali-G52's under Arm's driver returns too (not_turnip_not_g52_arm,
+     * measured); the other drivers are untested, so they keep the wait. */
+    { HLE_QUIRK_PRESENT_CPU_WAIT, "present_cpu_wait", not_turnip_not_g52_arm },
+    /* Mali-G57 MC2, Arm's r54p1 (an Infinix X6858 user's diag log,
+     * 2026-10-26): Mortal Kombat Shaolin Monks' meshes exploded; its vertices
+     * are 18 bytes, two floats at offset 10, and the diag build counted 7.8
+     * million misaligned attribute fetches in 230 s, nothing else wrong.
+     * The driver has no VK_EXT_legacy_vertex_attributes. */
+    { HLE_QUIRK_VB_ALIGN, "vb_align", mali_g57 },
+    /* Mali-G57 MC4, Arm's r40p0 (Anbernic RG556, Unisoc T820, GammaOS;
+     * 2026-10-31): Morrowind lost the device 0.2 s into its loading screen,
+     * every time, the kernel log "JS: Job Hard-Stopped (took more than 10
+     * ticks)" and "GPU fault 0x4002 from job slot 0" (fragment). Its fixed-
+     * function draws are W-buffered (ZENABLE 2); HAKUX_HLE_DBGFLAGS=8 alone
+     * (W-buffering off) ran it at 60 fps, 4, 16 and 1|2|32 still hung, and
+     * caps -bindless,-bda,-ahb,-vk13 and -cbc changed nothing. */
+    { HLE_QUIRK_NO_WBUF, "no_wbuf", mali_g57 },
+    /* Mali-G52 MP2, Arm's r34p0 (an Anbernic RG Vita, Unisoc T618, Vulkan
+     * 1.1, 2026-10-30): the host wait on the timeline semaphore returned
+     * VK_ERROR_DEVICE_LOST mid-game ("vkWaitSemaphores", hle_tl_wait), across
+     * titles and at random moments, while the GPU had run everything up to
+     * the call. The counter query never failed, so the waits poll it
+     * (hle_tl_sem_wait): no loss in ~40 minutes of play after, where before
+     * a session lost the device several times. The watcher's wait, for a
+     * value already submitted (back.c counts it after vkQueueSubmit2), lost
+     * it too: not a wait before its signal. Mali-G57, the same r34p0 (a
+     * Galaxy A03 user's diag log, 2026-10-26): JSRF lost the device at its
+     * title screen in every run the same way, in the decoder's wait, every
+     * submitted command buffer done and the GPU idle for 251 ms. r40p0 (the
+     * RG556's, no_wbuf above) and r54p1 (the X6858's) ran without it and the
+     * releases between are untested, so on for Arm's driver before r40;
+     * HAKUX_HLE_QUIRKS=+no_sem_wait tries it elsewhere. */
+    { HLE_QUIRK_NO_SEM_WAIT, "no_sem_wait", arm_before_r40 },
     /* Xclipse 940, SPAL 25.3.3: MK Shaolin Monks' fighters (bones by
      * c[A0 + n]) as large flat planes while the scenery (constant indices)
      * was right; the same block as a storage buffer drew them right

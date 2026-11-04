@@ -16,6 +16,8 @@ import com.rfandango.haku_x.data.Game
 import com.rfandango.haku_x.data.GameScanner
 import com.rfandango.haku_x.data.Storage
 import com.rfandango.haku_x.data.XisoConverter
+import com.rfandango.haku_x.data.hdd.Dashboard
+import com.rfandango.haku_x.data.hdd.HddStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -27,6 +29,15 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
+
+/** The dashboard's install from the library: done of total bytes, what it is at; finished, with error or not. */
+data class DashboardInstall(
+  val done: Long = 0,
+  val total: Long = 1,
+  val what: String = "",
+  val finished: Boolean = false,
+  val error: String? = null,
+)
 
 data class LibraryState(
   val folderReady: Boolean = false,
@@ -44,6 +55,10 @@ data class LibraryState(
   val icons: Map<Uri, ImageBitmap> = emptyMap(),
   /** A conversion to XISO: asked, under way, or its outcome. */
   val conversion: Conversion? = null,
+  /** The dashboard is on the hard disk's C: (Dashboard): its button starts it, else installs it. */
+  val dashboard: Boolean = false,
+  /** The dashboard's install from its zip: under way (done of total), or its outcome. */
+  val dashboardInstall: DashboardInstall? = null,
 ) {
   val visibleGames: List<Game>
     get() {
@@ -106,6 +121,7 @@ data class Conversion(
 class LibraryViewModel(app: Application) : AndroidViewModel(app) {
   private val prefs = AppPrefs(app)
   private val discInfo = DiscInfoCache(app)
+  private val hddRoot = HddStore(app).root
   private var scanJob: Job? = null
 
   private val _state = MutableStateFlow(LibraryState())
@@ -115,11 +131,41 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     refresh()
   }
 
-  /** Back on screen: the games folders may have changed in the settings. */
+  /** Back on screen: the games folders may have changed in the settings, the dashboard come or gone (Hard disk). */
   fun onResume() {
     if (prefs.gamesFolders != scannedFolders) {
       refresh()
     }
+    _state.update { it.copy(dashboard = Dashboard.installed(hddRoot)) }
+  }
+
+  /** The dashboard's files from the zip at uri onto C: (the library's dashboard button, none installed). */
+  fun installDashboard(uri: Uri) {
+    if (_state.value.dashboardInstall?.finished == false) return
+    _state.update { it.copy(dashboardInstall = DashboardInstall()) }
+    val app = getApplication<Application>()
+    viewModelScope.launch {
+      val r = withContext(Dispatchers.IO) {
+        runCatching {
+          Dashboard.install({ app.contentResolver.openInputStream(uri)!! }, hddRoot) { d, t, w ->
+            _state.update { s -> s.copy(dashboardInstall = s.dashboardInstall?.copy(done = d, total = t, what = w)) }
+          }
+        }
+      }
+      _state.update {
+        it.copy(
+          dashboard = Dashboard.installed(hddRoot),
+          dashboardInstall = it.dashboardInstall?.copy(
+            finished = true,
+            error = r.exceptionOrNull()?.let { e -> e.message ?: e.javaClass.simpleName },
+          ),
+        )
+      }
+    }
+  }
+
+  fun dismissDashboardInstall() {
+    if (_state.value.dashboardInstall?.finished == true) _state.update { it.copy(dashboardInstall = null) }
   }
 
   private var scannedFolders: List<Uri> = emptyList()

@@ -33,6 +33,8 @@ bool nc_option(NcOptions *o, const char *arg)
         o->uncap = true;
     } else if (!strcmp(arg, "relaunch")) {
         nc_core_set_relaunch(true);
+    } else if (!strcmp(arg, "dash")) {
+        nc_core_set_dashboard(true);            /* no disc: the disc argument is "none" */
     } else if ((v = value(arg, "loadstate="))) {
         nc_core_set_loadstate(v);
         nc_log("hakuX-app", "savestate %s", v);
@@ -47,6 +49,8 @@ bool nc_option(NcOptions *o, const char *arg)
         o->async_pipe = atoi(v) != 0;
     } else if ((v = value(arg, "prebuild="))) {
         o->prebuild = atoi(v) != 0;
+    } else if ((v = value(arg, "devtime="))) {
+        nc_io_set_device_time(atoi(v) != 0);    /* console timing (native/kernel/io.c) */
     } else if ((v = value(arg, "pads="))) {
         setenv("NC_PAD_MASK", v, 1);            /* read by the USB at boot (ohci.c) */
     } else if ((v = value(arg, "video="))) {

@@ -34,6 +34,17 @@ typedef struct HleCpu {
 HleCpu *hle_host_cpu(void);
 /* Makes the guest CPU leave its JIT code at the next block. */
 void hle_host_kick(void);
+/* The guest's CPU waits on its own thread for the host (on: from here; off:
+ * to here; nested), for GPU work or the decoder at a store or an access the
+ * HLE holds: the guest's time (its clocks, its timers) goes on for the
+ * wait's first 8 ms (one the console's CPU would have waited for its GPU
+ * too) and stands still beyond, the rest left out, since the guest takes
+ * no interrupt while it waits. A title timing itself with them (Def
+ * Jam: Fight for NY's 60 Hz D3D timer callback, re-armed for its period
+ * less how late it came) saw one come later than its period, asked for a
+ * time already past, and its logic stopped for good. Other threads:
+ * nothing. */
+void hle_host_guest_hold(bool on);
 /* The JIT's code for guest code is stale (probes changed). */
 void hle_host_code_changed(void);
 /* How many times hle_host_code_changed took effect (diagnostics). */
@@ -52,12 +63,25 @@ void hle_va_store(uint32_t va, uint32_t len);
 
 /* Written since the last test_and_clear (the page not tracked: written). */
 bool hle_host_mem_dirty(uint32_t pa);
+/* The page not tracked (written open: the guest's stores to it go unseen
+ * till a test_and_clear or rearm protects it again; not one without guest
+ * access, whose stores fault). */
+bool hle_host_mem_open(uint32_t pa);
 /* Whether [pa, pa + len) was written since the last call, and from now on
  * tracked again (the guest's next write to each page is seen:
  * hle_mem_first_write in mem/barrier.c). */
 bool hle_host_mem_test_and_clear(uint32_t pa, uint32_t len);
-/* [pa, pa + len) written by a device or the host: dirty. */
+/* [pa, pa + len) written by a device or the host: dirty (and newer than the
+ * images of the targets guarded over it: their guards go). */
 void hle_host_mem_set_dirty(uint32_t pa, uint32_t len);
+/* ... by a target's image landing there: dirty, its guard kept (the
+ * barrier drops it when the guest takes the memory), the pages' protection
+ * left as it is. */
+void hle_host_mem_landed(uint32_t pa, uint32_t len);
+/* [pa, pa + len) protected again, so the guest's next store to a page is
+ * seen (hle_mem_first_write), the pages still dirty for test_and_clear if
+ * they were. */
+void hle_host_mem_rearm(uint32_t pa, uint32_t len);
 /* [pa, pa + len)'s pages without guest access (on), reads included: the
  * guest's next access faults to hle_mem_stale_access (mem/barrier.c); off:
  * back to what write tracking wants. The host's own view keeps its access. */

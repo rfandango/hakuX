@@ -124,6 +124,9 @@ fun HddScreen(onBack: () -> Unit, vm: HddViewModel = viewModel()) {
   val pickSaves = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
     if (uri != null) vm.planSaveImport(uri)
   }
+  val pickDashboard = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+    if (uri != null) vm.installDashboard(uri)
+  }
   val saveZip = { which: String, name: String ->
     exportSaves = which
     createZip.launch(name.replace(Regex("[\\\\/:*?\"<>|]"), "_") + ".zip")
@@ -336,6 +339,17 @@ fun HddScreen(onBack: () -> Unit, vm: HddViewModel = viewModel()) {
           modifier = Modifier.clickable(enabled = ready) { pickImage.launch(arrayOf("*/*")) },
         )
       }
+
+      item { Section(stringResource(R.string.hdd_dashboard)) }
+      item {
+        ListItem(
+          headlineContent = { Text(stringResource(R.string.hdd_dashboard_install)) },
+          supportingContent = {
+            Text(stringResource(if (c.dashboard) R.string.hdd_dashboard_installed else R.string.hdd_dashboard_desc))
+          },
+          modifier = Modifier.clickable { pickDashboard.launch(arrayOf("application/zip", "application/x-zip-compressed")) },
+        )
+      }
       item { Spacer(Modifier.height(24.dp)) }
     }
   }
@@ -472,6 +486,9 @@ private fun JobDialog(j: HddViewModel.Job, size: (Long) -> String, names: (Colle
             if (j.error != null) R.string.hdd_backup_failed else if (j.finished) R.string.hdd_backup_done else R.string.hdd_backing_up
           HddViewModel.Kind.RESTORE ->
             if (j.error != null) R.string.hdd_restore_failed else if (j.finished) R.string.hdd_restore_done else R.string.hdd_restoring
+          HddViewModel.Kind.DASHBOARD ->
+            if (j.error != null) R.string.hdd_dashboard_failed else if (j.finished) R.string.hdd_dashboard_done
+            else R.string.hdd_dashboard_installing
         }
       ))
     },

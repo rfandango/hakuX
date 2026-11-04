@@ -17,8 +17,11 @@ extern "C" {
 
 #define NC_IRQ_LINES 16
 
-/* The CPU whose doorbell asserted lines ring (set once it exists). */
+/* The CPU whose doorbell asserted lines ring (set once it exists), on its
+ * host thread. */
 void nc_irq_attach(NcCpu *cpu);
+/* Whether the caller is that thread (the guest CPU's). */
+bool nc_irq_cpu_thread(void);
 void nc_irq_set(unsigned line, bool level);
 /* Bit n set: line n asserted. */
 uint32_t nc_irq_lines(void);

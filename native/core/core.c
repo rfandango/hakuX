@@ -20,6 +20,7 @@
 
 static NcThread *g_boot;
 static bool g_relaunch;
+static bool g_dashboard;        /* boot the dashboard (nc_core_set_dashboard) */
 static char g_loadstate[512];   /* boot into this savestate (nc_core_set_loadstate) */
 static bool g_loaded;
 
@@ -28,11 +29,68 @@ void nc_core_set_relaunch(bool on)
     g_relaunch = on;
 }
 
+void nc_core_set_dashboard(bool on)
+{
+    g_dashboard = on;
+}
+
 void nc_core_set_loadstate(const char *path)
 {
     snprintf(g_loadstate, sizeof(g_loadstate), "%s", path ? path : "");
 }
 static bool core_hook_query(void *opaque, uint32_t eip);
+
+/* An XBE header's certificate: the title ID and version. */
+static bool xbe_title(const uint8_t *h, size_t len, uint32_t *tid, uint32_t *ver)
+{
+    if (len < 0x180 || memcmp(h, "XBEH", 4)) {
+        return false;
+    }
+    const uint32_t cert = nc_rd32(h + 0x118) - nc_rd32(h + 0x104);
+    if (cert > len - 0xB0) {
+        return false;
+    }
+    *tid = nc_rd32(h + cert + 0x08);
+    *ver = nc_rd32(h + cert + 0xAC);
+    return true;
+}
+
+/* An Xbox Live title update of a disc XBE (path "\default.xbe" or
+ * "\Device\CdRom0\default.xbe"): as the Xbox kernel does, the file of that
+ * name in E:\TDATA\<title ID>\$u boots instead when it is the same title's
+ * and no older (the title's updater installs it there, then relaunches the
+ * disc). Its path in out; false when there is none. */
+static bool title_update(const NcDisc *disc, const char *path, char *out, size_t n)
+{
+    static const char cd[] = "\\Device\\CdRom0\\";
+    const char *rel = !strncasecmp(path, cd, sizeof(cd) - 1)                ? path + sizeof(cd) - 1
+                      : path[0] == '\\' && strncasecmp(path, "\\Device\\", 8) ? path + 1
+                                                                            : NULL;
+    NcDiscFile f;
+    uint8_t h[0x1000], u[0x1000];
+    uint32_t tid, ver, utid, uver;
+    if (!rel || strchr(rel, '\\') || !nc_disc_find(disc, rel, &f) || f.size < sizeof(h) ||
+        !nc_disc_read(disc, &f, 0, h, sizeof(h)) || !xbe_title(h, sizeof(h), &tid, &ver)) {
+        return false;
+    }
+    char host[512];
+    snprintf(out, n, "\\Device\\Harddisk0\\Partition1\\TDATA\\%08x\\$u\\%s", tid, rel);
+    if (!nc_io_host_file(out, host, sizeof(host))) {
+        return false;
+    }
+    FILE *fp = fopen(host, "rb");
+    const bool read = fp && fread(u, 1, sizeof(u), fp) == sizeof(u);
+    if (fp) {
+        fclose(fp);
+    }
+    if (!read || !xbe_title(u, sizeof(u), &utid, &uver) || utid != tid || uver < ver) {
+        nc_log("hakuX-native-frontier", "title update %s: not this title's newer version (title %08x version %x, "
+               "the disc's %08x %x): the disc's boots", out, read ? utid : 0, read ? uver : 0, tid, ver);
+        return false;
+    }
+    nc_log("hakuX-native-frontier", "title update: %s (version %x, the disc's %x) boots for %s", out, uver, ver, path);
+    return true;
+}
 
 /* The title can't start: why, for the activity's dialog (NC_FATAL_BOOT). */
 static bool boot_failed(const char *why)
@@ -48,6 +106,9 @@ bool nc_core_boot(NcCore *c, int disc_fd)
     /* NC_RAM_MB=128 (debug kit size): a dev switch for memory investigations. */
     const char *mb = getenv("NC_RAM_MB");
     const uint32_t ram = mb && atoi(mb) == 128 ? 128u << 20 : NC_RAM_RETAIL;
+    /* a savestate's kernel objects are where its boot made them (KERN v3
+     * moved the pool's first range) */
+    nc_kernel_pool_for(g_loadstate[0] ? nc_kern_state_kprocess(g_loadstate) : 0);
     if (!nc_vm_init(&c->vm, ram) || !nc_kernel_init(&c->kernel, &c->vm)) {
         return boot_failed("The emulated console couldn't be set up.");
     }
@@ -62,29 +123,39 @@ bool nc_core_boot(NcCore *c, int disc_fd)
     nc_net_start();          /* the network the NIC finds, before it */
     nc_dev_nvnet_init(&c->vm);
     nc_dev_misc_init();
-    if (disc_fd < 0) {
+    /* The dashboard boots with no disc (the tray empty); a title from the
+     * disc, or the dashboard relaunched from one, has it. */
+    if (disc_fd >= 0) {
+        if (!nc_disc_open(&c->disc, disc_fd)) {
+            close(disc_fd);
+            return boot_failed("The game's file isn't an Xbox disc image.");
+        }
+        nc_mods_install(&c->disc);      /* the mods' files and XBE patches, the cheats */
+    } else if (!g_dashboard && !g_loadstate[0]) {
         return boot_failed("The game's file can't be opened.");
     }
-    if (!nc_disc_open(&c->disc, disc_fd)) {
-        close(disc_fd);
-        return boot_failed("The game's file isn't an Xbox disc image.");
-    }
-    nc_mods_install(&c->disc);          /* the mods' files and XBE patches, the cheats */
     /* A relaunch (XLaunchNewImage, NativeCoreActivity starts the core again):
      * the XBE the saved launch data page names, and the page for the title. */
     static uint8_t page[NC_LAUNCH_PAGE];
     bool have_page = false;
     char xbe_path[NC_LAUNCH_PAGE] = "\\default.xbe";
+    if (g_dashboard) {
+        snprintf(xbe_path, sizeof(xbe_path), "%s", NC_DASHBOARD_PATH);
+        snprintf(c->kernel.image_path, sizeof(c->kernel.image_path), "%s", NC_DASHBOARD_PATH);
+    }
     if (g_loadstate[0]) {
-        /* a savestate: the XBE it was running (a relaunched title's own) */
+        /* a savestate: the XBE it was running (a relaunched title's own, the
+         * dashboard's) */
         NcStateInfo info;
         static const char cd[] = "\\Device\\CdRom0";
+        static const char hd[] = "\\Device\\Harddisk0\\";
         if (!nc_state_read_info(g_loadstate, &info)) {
             nc_hle_set_fatal(NC_FATAL_STATE, "the savestate can't be read");
             return false;
         }
-        if (!strncasecmp(info.xbe_path, cd, sizeof(cd) - 1) && info.xbe_path[sizeof(cd) - 1] == '\\') {
-            snprintf(xbe_path, sizeof(xbe_path), "%s", info.xbe_path + sizeof(cd) - 1);
+        if ((!strncasecmp(info.xbe_path, cd, sizeof(cd) - 1) && info.xbe_path[sizeof(cd) - 1] == '\\') ||
+            !strncasecmp(info.xbe_path, hd, sizeof(hd) - 1)) {
+            snprintf(xbe_path, sizeof(xbe_path), "%s", info.xbe_path);
             snprintf(c->kernel.image_path, sizeof(c->kernel.image_path), "%s", info.xbe_path);
         }
         nc_log("hakuX-native-frontier", "savestate: booting %s for %s", xbe_path, g_loadstate);
@@ -98,22 +169,36 @@ bool nc_core_boot(NcCore *c, int disc_fd)
             unlink(file);
         }
         if (have_page && nc_kernel_launch_xbe(page, xbe_path, sizeof(xbe_path))) {
-            snprintf(c->kernel.image_path, sizeof(c->kernel.image_path), "\\Device\\CdRom0%s", xbe_path);
+            snprintf(c->kernel.image_path, sizeof(c->kernel.image_path), "%s", xbe_path);
             nc_log("hakuX-native-frontier", "relaunch: %s (launch type %u)", c->kernel.image_path,
                    *(const uint32_t *)page);
         } else {
-            nc_log("hakuX-native-frontier", "relaunch: no launch data page, booting the disc's default.xbe");
             have_page = false;
-            snprintf(xbe_path, sizeof(xbe_path), "%s", "\\default.xbe");
+            snprintf(xbe_path, sizeof(xbe_path), "%s", g_dashboard ? NC_DASHBOARD_PATH : "\\default.xbe");
+            snprintf(c->kernel.image_path, sizeof(c->kernel.image_path), "%s", g_dashboard ? NC_DASHBOARD_PATH : "");
+            nc_log("hakuX-native-frontier", "relaunch: no launch data page, booting %s", xbe_path);
         }
     }
+    /* a disc XBE with a title update installed: the update (a savestate's
+     * memory is the XBE it ran, booted as it was) */
+    static char update[NC_LAUNCH_PAGE];
+    if (!g_loadstate[0] && disc_fd >= 0 && title_update(&c->disc, xbe_path, update, sizeof(update))) {
+        snprintf(xbe_path, sizeof(xbe_path), "%s", update);
+        snprintf(c->kernel.image_path, sizeof(c->kernel.image_path), "%s", update);
+    }
     if (!nc_xbe_load(&c->vm, &c->disc, xbe_path, &c->kernel, &c->xbe)) {
-        char why[256];
+        char why[256], host[512];
+        if (!strcasecmp(xbe_path, NC_DASHBOARD_PATH) && !nc_io_host_file(xbe_path, host, sizeof(host))) {
+            return boot_failed("The dashboard isn't installed: its files (xboxdash.xbe and its folders) go on "
+                               "the hard disk's C: drive.");
+        }
+        const char *name = strrchr(xbe_path, '\\');
         snprintf(why, sizeof(why), "The game's program (%s) can't be loaded: it's damaged, or hakuX doesn't support "
-                 "it yet.", xbe_path[0] == '\\' ? xbe_path + 1 : xbe_path);
+                 "it yet.", name ? name + 1 : xbe_path);
         return boot_failed(why);
     }
-    nc_kernel_title_loaded(&c->kernel, &c->disc, &c->xbe.file, c->xbe.info.base, c->xbe.info.sizeof_image);
+    nc_kernel_title_loaded(&c->kernel, &c->disc, &c->xbe.file, c->xbe.fd, c->xbe.info.base,
+                           c->xbe.info.sizeof_image);
     if (have_page) {
         nc_kernel_launch_page_restore(&c->kernel, page);
     }
@@ -157,6 +242,7 @@ bool nc_core_boot(NcCore *c, int disc_fd)
             nc_hle_set_fatal(NC_FATAL_STATE, why);
             return false;
         }
+        nc_kernel_loaded_fixups(&c->kernel);
         nc_mods_after_load(&c->kernel, c->kernel.image_path);
         g_loaded = true;
     }
@@ -323,7 +409,7 @@ bool nc_core_fault(NcCore *c, int sig, siginfo_t *info, void *ucontext)
             }
         }
     }
-    if (nc_hle_dirty_fault(info)) {
+    if (nc_hle_dirty_fault(info, ucontext)) {
         __atomic_fetch_add(&g_nc_faults_dirty, 1, __ATOMIC_RELAXED);
         return true;
     }

@@ -20,6 +20,18 @@ void hle_barrier_arm(uint32_t pa, uint32_t len, uint64_t value);
  * cleaned and invalidated, so neither a dirty line written back later nor a
  * stale clean one hides what the GPU wrote. */
 void hle_barrier_arm_landing(uint32_t pa, uint32_t len, uint64_t value);
+/* GPU work up to `value` (a landing, a copy that reads the range) has the
+ * pages wholly inside [pa, pa+len) wait for it: the first CPU write waits
+ * (an overlapped read into them too), their dirty bits kept for the
+ * trackers (host.h hle_host_mem_rearm); a page the range shares, never (a
+ * neighbour's stores there). gpu: the GPU writes the range in place (its
+ * lines cleaned and invalidated). hle_mem_cache_inval: the range's CPU
+ * cache lines cleaned and invalidated (after the GPU wrote it). */
+void hle_barrier_arm_keep(uint32_t pa, uint32_t len, uint64_t value, bool gpu);
+/* ... a copy queued to read [pa, pa+len) when it lands: every page of it
+ * waits (no guard covers a copy's source) */
+void hle_barrier_arm_src(uint32_t pa, uint32_t len, uint64_t value);
+void hle_mem_cache_inval(uint32_t pa, uint32_t len);
 /* [pa, pa+len) is older than an image over it, until fill(pa, len) puts the
  * image there (push-buffer mode's frame on screen, which the GPU drew into
  * its own image): the guest's first access to a page of it, a read or a
@@ -27,9 +39,46 @@ void hle_barrier_arm_landing(uint32_t pa, uint32_t len, uint64_t value);
  * hle_host_mem_noaccess), calls fill on the guest's thread, once, then waits
  * for what fill armed. One range at a time; len 0 drops it. */
 void hle_barrier_set_stale(uint32_t pa, uint32_t len, void (*fill)(uint32_t pa, uint32_t len));
-/* The host, at a guest access to a page without access (hle_barrier_set_stale):
- * the fill, then the pages' access back. */
+/* Guards: [pa, pa + len) is older than the image a render target's draws
+ * made (push-buffer mode): its pages lose guest access (arming again a range
+ * armed already: drawn into again). The guest's first access to its bytes,
+ * a read or a write, waits for the image's landing, the one asked for with
+ * hle_barrier_guard_landing or else one the fill (hle_barrier_set_guard_fill:
+ * on the guest's thread, read: the guest reads; the landing's value, 0 if
+ * there is nothing to land) asks for, then has the memory: the guard goes
+ * (the pages protected for write tracking first: the guest's stores from
+ * then on are seen). Armed again while the guest waited, the pages are
+ * given back anyway till the next arming. The guest's own bytes on a page a
+ * target only shares are reached for it by the host (native/hle/dirty.c,
+ * hle_mem_stale_neighbour), the page kept closed.
+ * hle_barrier_set_stale(.., NULL) drops these too; hle_barrier_unguard one
+ * (the image is going); hle_barrier_unguard_range every guard over
+ * [pa, pa + len): memory there written by the host or a device (newer than
+ * any image) or freed. hle_barrier_guard_drops: a count of guards dropped or
+ * given back, for a caller that keeps its own note of what it guarded. */
+enum { HLE_GUARD_NONE, HLE_GUARD_ARMED, HLE_GUARD_LANDING, HLE_GUARD_OPEN };
+void hle_barrier_set_guard_fill(uint64_t (*fill)(uint32_t pa, uint32_t len, bool read));
+void hle_barrier_guard(uint32_t pa, uint32_t len);
+void hle_barrier_guard_landing(uint32_t pa, uint32_t len, uint64_t v);
+int hle_barrier_guard_state(uint32_t pa, uint32_t len, uint64_t *v);
+void hle_barrier_unguard(uint32_t pa, uint32_t len);
+void hle_barrier_unguard_range(uint32_t pa, uint32_t len);
+uint32_t hle_barrier_guard_drops(void);
+/* Whether guest bytes [lo, hi) (on one page) are the guest's own beside a
+ * guard's: a page a guard closed, none of its bytes a target's or a frame's.
+ * 0: not; 1: they are (the host reaches them for the guest); 2: such
+ * accesses come often there, and the page is given back (hot: no guard
+ * closes it as its edge page from now on, the access runs again).
+ * hle_barrier_guard_stats: the accesses served so, the pages made hot. */
+int hle_mem_stale_neighbour(uint32_t lo, uint32_t hi);
+void hle_barrier_guard_stats(uint64_t *neighbours, uint64_t *hot);
+/* Guest memory freed (native/core/vm.c): the guards over it dropped, its
+ * pages hot no more */
+void hle_barrier_freed(uint32_t pa, uint32_t len);
+/* The host, at a guest access to a page without access (hle_barrier_set_stale,
+ * a guard; write: a store, or not known): the image in, the access back. */
 void hle_mem_stale_access(uint32_t pa);
+void hle_mem_stale_access_rw(uint32_t pa, bool write);
 /* Guest RAM the host wrote through the RAM view (device models, HLE copies:
  * host.h hle_host_mem_set_dirty): its pages' cache lines are cleaned before
  * the GPU next reads them in place. */
@@ -41,6 +90,18 @@ bool hle_mem_written(uint32_t pa, uint32_t len);
 /* Guest RAM written by the emulated GPU (a copy the decode performs): the
  * next hle_mem_written() over it sees the write. */
 void hle_mem_mark_written(uint32_t pa, uint32_t len);
+/* ... by a target's image landing there: the same, the target's guard kept
+ * (host.h hle_host_mem_landed). */
+void hle_mem_mark_landed(uint32_t pa, uint32_t len);
+/* Writes reported to [pa, pa + len)'s pages (first-write faults, host
+ * writes), summed, and those of its first and last pages: a range written
+ * since an earlier look has a larger sum (0: not counted, HAKUX_HLE_NO_CLEAN). */
+uint64_t hle_mem_wseq_sum(uint32_t pa, uint32_t len, uint32_t *first, uint32_t *last);
+/* ... the same counted by blocks of 64 pages over the range (a coarse look:
+ * unchanged, no page of it was written) */
+uint64_t hle_mem_wseq_blocks(uint32_t pa, uint32_t len);
+/* A count of the writes reported anywhere: unchanged, no sum above moved. */
+uint32_t hle_mem_write_epoch(void);
 /* GPU progress source (back end, Task 13). */
 void hle_barrier_set_waiter(uint64_t (*completed)(void), void (*wait)(uint64_t));
 /* Before a first write waits for `value`: the producer that may still hold

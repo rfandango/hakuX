@@ -17,6 +17,8 @@ uint32_t hle_draw_arena_alloc16(uint32_t len, uint8_t **ptr);
  * span of guest memory they came from. */
 uint32_t hle_draw_tex_define(uint32_t id, const uint32_t h5[5], const uint32_t *pal, uint32_t npal,
                              uint32_t *bytes);
+/* The span of guest memory header words h5's texels take (0: not a texture) */
+uint32_t hle_draw_tex_bytes(const uint32_t h5[5]);
 /* The video overlay's surface (header words h5, YUY2 / UYVY) as B8G8R8A8 in
  * the arena: its offset, HLE_ARENA_FULL = none. */
 uint32_t hle_draw_overlay_upload(const uint32_t h5[5], uint32_t *w, uint32_t *h);
@@ -40,6 +42,13 @@ void hle_res_upload(uint32_t id, uint32_t pa, uint32_t pitch, uint32_t n,
  * copy land at rb->pa once the GPU reaches value. */
 uint32_t hle_res_rb_fb(uint32_t len);
 void hle_res_rb_land(HleCmdReadback *rb, uint32_t fb, uint32_t len, uint64_t value);
+/* len bytes of the landing buffer (the arena without one) for a packed
+ * readback (HLE_RB_PACKED): its fb (offset + 1), 0 if there's no room;
+ * reserved before the command's value is taken (hle_fe_next_value). */
+uint32_t hle_res_land_alloc(uint32_t len);
+/* Whether the GPU writes guest RAM in place (zero-copy): a direct readback
+ * needs no hle_res_rb_fb then. */
+bool hle_res_ram_direct(void);
 /* The depth word's byte for each channel (HleCmdZRead.map) of a 32-bit
  * linear colour format read over a D24S8 buffer; false for other formats. */
 bool hle_res_zread_map(uint32_t xfmt, uint8_t map[4]);

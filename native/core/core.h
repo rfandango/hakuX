@@ -33,6 +33,9 @@ void nc_core_set_loadstate(const char *path);
 /* The next boot is a relaunch: it boots the XBE the saved launch data page
  * names (nc_kernel_relaunch_file) instead of default.xbe. */
 void nc_core_set_relaunch(bool on);
+/* The next boot is the dashboard's (C:\xboxdash.xbe), with no disc: the app's
+ * Dashboard, where Xbox Live accounts are made. */
+void nc_core_set_dashboard(bool on);
 
 /* Runs the guest until it stops; logs the frontier summary. */
 void nc_core_run(NcCore *c);

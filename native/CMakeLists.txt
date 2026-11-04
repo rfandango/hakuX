@@ -27,6 +27,32 @@ get_filename_component(NC_REPO "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/fex.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/hle.cmake")
 
+# libslirp (NC_DEPS/libslirp, 4.7.0, unmodified): the NAT backend's TCP/IP
+# stack (net/nat.c), on the GLib subset plus net/slirp/glib.h. Its public
+# header is copied beside the generated version header, so the core's
+# include path gets only those two.
+set(NC_SLIRP "${NC_DEPS}/libslirp/src")
+set(SLIRP_MAJOR_VERSION 4)
+set(SLIRP_MINOR_VERSION 7)
+set(SLIRP_MICRO_VERSION 0)
+set(SLIRP_VERSION_STRING "\"4.7.0\"")
+configure_file("${NC_SLIRP}/libslirp-version.h.in" "${CMAKE_BINARY_DIR}/slirp/libslirp-version.h" @ONLY)
+configure_file("${NC_SLIRP}/libslirp.h" "${CMAKE_BINARY_DIR}/slirp/libslirp.h" COPYONLY)
+add_library(nc_slirp STATIC
+  net/slirp/glib.c
+  "${NC_SLIRP}/arp_table.c" "${NC_SLIRP}/bootp.c" "${NC_SLIRP}/cksum.c" "${NC_SLIRP}/dhcpv6.c"
+  "${NC_SLIRP}/dnssearch.c" "${NC_SLIRP}/if.c" "${NC_SLIRP}/ip6_icmp.c" "${NC_SLIRP}/ip6_input.c"
+  "${NC_SLIRP}/ip6_output.c" "${NC_SLIRP}/ip_icmp.c" "${NC_SLIRP}/ip_input.c" "${NC_SLIRP}/ip_output.c"
+  "${NC_SLIRP}/mbuf.c" "${NC_SLIRP}/misc.c" "${NC_SLIRP}/ncsi.c" "${NC_SLIRP}/ndp_table.c"
+  "${NC_SLIRP}/sbuf.c" "${NC_SLIRP}/slirp.c" "${NC_SLIRP}/socket.c" "${NC_SLIRP}/state.c"
+  "${NC_SLIRP}/stream.c" "${NC_SLIRP}/tcp_input.c" "${NC_SLIRP}/tcp_output.c" "${NC_SLIRP}/tcp_subr.c"
+  "${NC_SLIRP}/tcp_timer.c" "${NC_SLIRP}/tftp.c" "${NC_SLIRP}/udp.c" "${NC_SLIRP}/udp6.c"
+  "${NC_SLIRP}/util.c" "${NC_SLIRP}/version.c" "${NC_SLIRP}/vmstate.c")
+target_include_directories(nc_slirp BEFORE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/net/slirp" "${NC_REPO}")
+target_include_directories(nc_slirp PUBLIC "${CMAKE_BINARY_DIR}/slirp")
+target_link_libraries(nc_slirp PRIVATE nc_glib)
+target_compile_options(nc_slirp PRIVATE -w)
+
 add_library(hakux_native STATIC
   core/log.c
   core/jmp.c
@@ -83,7 +109,7 @@ target_include_directories(hakux_native PUBLIC "${NC_REPO}")
 target_include_directories(hakux_native PRIVATE "${HAKUX_FEX_DIR}/External/xxhash")
 # The HLE layer's pure modules build without QEMU in this mode.
 target_compile_definitions(hakux_native PRIVATE HLE_HOST_TEST)
-target_link_libraries(hakux_native PUBLIC nc_fex hakux_hle hakux_apu log z)
+target_link_libraries(hakux_native PUBLIC nc_fex hakux_hle hakux_apu nc_slirp log z)
 target_compile_options(hakux_native PRIVATE -Wall -Wno-unused-parameter)
 
 # xboxrun's custom Vulkan driver ("vkdriver="): the app's code for it
@@ -92,6 +118,7 @@ target_compile_options(hakux_native PRIVATE -Wall -Wno-unused-parameter)
 add_executable(xboxrun run/xboxrun.c run/capture.c app/vkdriver.c app/vklayer.c)
 target_link_libraries(xboxrun PRIVATE hakux_native hakux_hle z log)
 target_link_libraries(hakux_hle PUBLIC hakux_native)
+target_link_libraries(nc_slirp PRIVATE hakux_native)   # nc_log
 
 # The hakuX app's native core library (native/app, cmake/app.cmake).
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/app.cmake")

@@ -7,3 +7,8 @@ author: hakuX
 # 0x1DA4A0 (TWO_OR_IMMEDIATE -> ONE_OR_IMMEDIATE) and the frame time the
 # game steps by at 0x1D9660 (vblanks / refresh rate, 2/60 -> 1/60 s).
 0x00554944: 02 -> 01
+
+[$u\default.xbe]
+# Xbox Live's title update (version 0x301): the same variable at 0x555224,
+# read at 0x1DAE0B and by the frame time at 0x1D9F80.
+0x00555224: 02 -> 01

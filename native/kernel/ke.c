@@ -74,12 +74,14 @@ static uint64_t coarse_ns(void)
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
-/* The emulation paused (nc_kernel_pause_point): the guest's time stops where
- * the pause began and goes on from there, the time paused left out (g_off,
+/* The emulation paused (nc_kernel_pause_point), or the guest's CPU held by
+ * the host (nc_ke_hold_begin): the guest's time stands still from a host
+ * time on (g_tstill_raw: a pause's start; a hold's, HOLD_RUN_NS after it)
+ * and goes on from there at the end, the time it stood left out (g_off,
  * host ns). A seqlock: the guest's CPU writes, any thread reads. */
 static uint32_t g_tseq;
-static bool g_tpaused;
-static uint64_t g_tpause_raw, g_off;
+static bool g_tstill;
+static uint64_t g_tstill_raw, g_off;
 
 static uint64_t raw_ns(void)
 {
@@ -88,54 +90,110 @@ static uint64_t raw_ns(void)
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
-static uint64_t guest_of_raw(uint64_t raw)
+/* The time's state, read whole with the host's time: whether it stands
+ * still (or will), from when (host ns), the time left out so far. The
+ * host's time read inside, so that a reader late across a whole hold
+ * doesn't take the time from before it for now. */
+static bool time_read(uint64_t *still_raw, uint64_t *off, uint64_t *raw)
 {
     for (;;) {
         const uint32_t s = __atomic_load_n(&g_tseq, __ATOMIC_ACQUIRE);
         if (s & 1) {
             continue;                   /* the guest's CPU is writing it */
         }
-        const bool p = __atomic_load_n(&g_tpaused, __ATOMIC_RELAXED);
-        const uint64_t pr = __atomic_load_n(&g_tpause_raw, __ATOMIC_RELAXED);
-        const uint64_t off = __atomic_load_n(&g_off, __ATOMIC_RELAXED);
+        const bool p = __atomic_load_n(&g_tstill, __ATOMIC_RELAXED);
+        *still_raw = __atomic_load_n(&g_tstill_raw, __ATOMIC_RELAXED);
+        *off = __atomic_load_n(&g_off, __ATOMIC_RELAXED);
+        *raw = raw_ns();
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
         if (__atomic_load_n(&g_tseq, __ATOMIC_RELAXED) == s) {
-            return (p ? pr : raw) - off;
+            return p;
         }
     }
 }
 
-static void time_write(bool paused)
+static uint64_t guest_now(void)
+{
+    uint64_t sr, off, raw;
+    const bool p = time_read(&sr, &off, &raw);
+    return (p && raw > sr ? sr : raw) - off;
+}
+
+/* The time to stand still keep ns from now (still), or to go on: the time
+ * it stood left out. Returns that (ns). */
+static uint64_t time_write(bool still, uint64_t keep)
 {
     const uint64_t raw = raw_ns();
+    uint64_t out = 0;
     __atomic_fetch_add(&g_tseq, 1, __ATOMIC_ACQ_REL);
-    if (paused) {
-        __atomic_store_n(&g_tpause_raw, raw, __ATOMIC_RELAXED);
+    if (still) {
+        __atomic_store_n(&g_tstill_raw, raw + keep, __ATOMIC_RELAXED);
     } else {
-        __atomic_store_n(&g_off, g_off + (raw - g_tpause_raw), __ATOMIC_RELAXED);
+        out = raw > g_tstill_raw ? raw - g_tstill_raw : 0;
+        __atomic_store_n(&g_off, g_off + out, __ATOMIC_RELAXED);
     }
-    __atomic_store_n(&g_tpaused, paused, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_tstill, still, __ATOMIC_RELAXED);
     __atomic_fetch_add(&g_tseq, 1, __ATOMIC_RELEASE);
     g_entry_ns = 0;
+    return out;
 }
 
 void nc_ke_pause_begin(void)
 {
-    time_write(true);
+    time_write(true, 0);
 }
 
 uint64_t nc_ke_pause_end(void)
 {
-    const uint64_t was = g_off;
-    time_write(false);
-    return g_off - was;
+    return time_write(false, 0);
+}
+
+/* A hold's first HOLD_RUN_NS go on as the guest's time: a wait for the GPU
+ * the console had too (a title GPU-bound at its stores) keeps its pace, a
+ * short one changes nothing; beyond, the time stands still, so that an
+ * interrupt the guest times itself with comes at most that late (under a
+ * 60 Hz period). */
+#define HOLD_RUN_NS 8000000ull
+
+/* The holds, for the stats (the guest's CPU's thread alone) */
+static uint64_t g_hold_raw, g_held_out_ns, g_held_max_ns;
+static unsigned g_holds;
+
+bool nc_ke_hold_begin(void)
+{
+    if (g_tstill) {
+        return false;                   /* paused (a hold in a pause's work): nothing to leave out */
+    }
+    g_hold_raw = raw_ns();
+    time_write(true, HOLD_RUN_NS);
+    return true;
+}
+
+uint64_t nc_ke_hold_end(uint64_t *held_ns)
+{
+    const uint64_t out = time_write(false, 0);
+    *held_ns = raw_ns() - g_hold_raw;
+    g_held_out_ns += out;
+    g_held_max_ns = *held_ns > g_held_max_ns ? *held_ns : g_held_max_ns;
+    g_holds++;
+    return out;
+}
+
+unsigned nc_ke_held(uint64_t *out_ns, uint64_t *max_ns)
+{
+    const unsigned n = g_holds;
+    *out_ns = g_held_out_ns;
+    *max_ns = g_held_max_ns;
+    g_held_out_ns = g_held_max_ns = 0;
+    g_holds = 0;
+    return n;
 }
 
 void nc_ke_state(uint64_t *boot_ns, uint64_t *time_offset, uint64_t *guest_ns)
 {
     *boot_ns = g_boot_ns;
     *time_offset = g_time_offset;
-    *guest_ns = guest_of_raw(raw_ns());
+    *guest_ns = guest_now();
 }
 
 /* A savestate's: the guest's time goes on from guest_ns, now. */
@@ -146,15 +204,23 @@ void nc_ke_state_set(uint64_t boot_ns, uint64_t time_offset, uint64_t guest_ns)
     const uint64_t raw = raw_ns();
     __atomic_fetch_add(&g_tseq, 1, __ATOMIC_ACQ_REL);
     __atomic_store_n(&g_off, raw - guest_ns, __ATOMIC_RELAXED);
-    __atomic_store_n(&g_tpause_raw, raw, __ATOMIC_RELAXED);
-    __atomic_store_n(&g_tpaused, false, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_tstill_raw, raw, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_tstill, false, __ATOMIC_RELAXED);
     __atomic_fetch_add(&g_tseq, 1, __ATOMIC_RELEASE);
     g_entry_ns = 0;
 }
 
 uint64_t nc_ke_host_ns(uint64_t guest_ns)
 {
-    return guest_ns + __atomic_load_n(&g_off, __ATOMIC_RELAXED);
+    uint64_t sr, off, raw;
+    if (!time_read(&sr, &off, &raw) || guest_ns + off <= sr) {
+        return guest_ns + off;          /* going on, or due before it stands still */
+    }
+    /* due after it stands still: when it comes if the time goes on at once
+     * (a deadline from the time going on, past by then, had a thread spin
+     * through a hold), a millisecond at least while it stands */
+    const uint64_t at = raw > sr ? raw : sr, d = guest_ns + off - sr;
+    return at + (raw > sr && d < 1000000u ? 1000000u : d);
 }
 
 uint64_t nc_ke_now_ns(void)
@@ -164,7 +230,7 @@ uint64_t nc_ke_now_ns(void)
     if (mine && g_entry_ns && coarse_ns() == g_entry_coarse) {
         return g_entry_ns;
     }
-    const uint64_t v = guest_of_raw(raw_ns());
+    const uint64_t v = guest_now();
     if (mine) {
         g_entry_ns = v;
         g_entry_coarse = coarse_ns();
@@ -987,6 +1053,97 @@ static uint64_t RtlTryEnterCriticalSection(NcKernel *k, NcFrame *f, const uint32
     return 0;
 }
 
+/* ---------------------------------------------------- read/write locks */
+
+/* ERWLOCK { LockCount (-1 free), WritersWaitingCount, ReadersWaitingCount,
+ * ReadersEntryCount, KEVENT WriterEvent, KSEMAPHORE ReaderSemaphore }: the
+ * Xbox kernel's algorithm (the dashboard's); the guest's one CPU runs a call
+ * whole, as its kernel does with interrupts off. */
+#define RW_LOCK_COUNT     0x00
+#define RW_WRITERS_WAIT   0x04
+#define RW_READERS_WAIT   0x08
+#define RW_READERS_ENTRY  0x0C
+#define RW_WRITER_EVENT   0x10
+#define RW_READER_SEM     0x20
+
+static void rw_add(NcKernel *k, uint32_t va, int32_t d)
+{
+    nc_vm_wr32(k->vm, va, nc_vm_rd32(k->vm, va) + (uint32_t)d);
+}
+
+/* ExInitializeReadWriteLock(ReadWriteLock) */
+static uint64_t ExInitializeReadWriteLock(NcKernel *k, NcFrame *f, const uint32_t *a)
+{
+    nc_vm_wr32(k->vm, a[0] + RW_LOCK_COUNT, 0xFFFFFFFFu);
+    nc_vm_wr32(k->vm, a[0] + RW_WRITERS_WAIT, 0);
+    nc_vm_wr32(k->vm, a[0] + RW_READERS_WAIT, 0);
+    nc_vm_wr32(k->vm, a[0] + RW_READERS_ENTRY, 0);
+    init_header(k, a[0] + RW_WRITER_EVENT, OBJ_SYNCHRONIZATION_EVENT, 4, 0);
+    init_header(k, a[0] + RW_READER_SEM, OBJ_SEMAPHORE, 5, 0);
+    nc_vm_wr32(k->vm, a[0] + RW_READER_SEM + SEMAPHORE_LIMIT, 0x7FFFFFFFu);
+    return 0;
+}
+
+/* ExAcquireReadWriteLockExclusive(ReadWriteLock) */
+static uint64_t ExAcquireReadWriteLockExclusive(NcKernel *k, NcFrame *f, const uint32_t *a)
+{
+    rw_add(k, a[0] + RW_LOCK_COUNT, 1);
+    if (nc_vm_rd32(k->vm, a[0] + RW_LOCK_COUNT) != 0) {
+        rw_add(k, a[0] + RW_WRITERS_WAIT, 1);
+        const uint32_t ev = a[0] + RW_WRITER_EVENT;
+        wait(k, &ev, 1, false, 0, 0, false);
+    }
+    return 0;
+}
+
+/* ExAcquireReadWriteLockShared(ReadWriteLock): readers wait while a writer
+ * holds it or one waits for it */
+static uint64_t ExAcquireReadWriteLockShared(NcKernel *k, NcFrame *f, const uint32_t *a)
+{
+    const bool held = (int32_t)nc_vm_rd32(k->vm, a[0] + RW_LOCK_COUNT) >= 0;
+    const bool must_wait = held && (nc_vm_rd32(k->vm, a[0] + RW_READERS_ENTRY) == 0 ||
+                                    nc_vm_rd32(k->vm, a[0] + RW_WRITERS_WAIT) != 0);
+    rw_add(k, a[0] + RW_LOCK_COUNT, 1);
+    if (must_wait) {
+        rw_add(k, a[0] + RW_READERS_WAIT, 1);
+        const uint32_t sem = a[0] + RW_READER_SEM;
+        wait(k, &sem, 1, false, 0, 0, false);
+    } else {
+        rw_add(k, a[0] + RW_READERS_ENTRY, 1);
+    }
+    return 0;
+}
+
+/* ExReleaseReadWriteLock(ReadWriteLock): a writer leaving lets every waiting
+ * reader in, else the next writer; the last reader leaving lets a writer in */
+static uint64_t ExReleaseReadWriteLock(NcKernel *k, NcFrame *f, const uint32_t *a)
+{
+    const uint32_t l = a[0];
+    rw_add(k, l + RW_LOCK_COUNT, -1);
+    if ((int32_t)nc_vm_rd32(k->vm, l + RW_LOCK_COUNT) == -1) {
+        nc_vm_wr32(k->vm, l + RW_READERS_ENTRY, 0);
+        return 0;
+    }
+    if (nc_vm_rd32(k->vm, l + RW_READERS_ENTRY) == 0) {
+        const uint32_t readers = nc_vm_rd32(k->vm, l + RW_READERS_WAIT);
+        if (readers) {
+            nc_vm_wr32(k->vm, l + RW_READERS_WAIT, 0);
+            nc_vm_wr32(k->vm, l + RW_READERS_ENTRY, readers);
+            uint32_t status;
+            release_semaphore(k, l + RW_READER_SEM, (int32_t)readers, &status);
+            return 0;
+        }
+    } else {
+        rw_add(k, l + RW_READERS_ENTRY, -1);
+        if (nc_vm_rd32(k->vm, l + RW_READERS_ENTRY) != 0) {
+            return 0;
+        }
+    }
+    rw_add(k, l + RW_WRITERS_WAIT, -1);
+    set_event(k, l + RW_WRITER_EVENT);
+    return 0;
+}
+
 /* KeEnterCriticalRegion() / KeLeaveCriticalRegion(): kernel APCs are not delivered yet. */
 static uint64_t KeCriticalRegion(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
@@ -1268,6 +1425,10 @@ void nc_ke_register(NcKernel *k)
     nc_kernel_impl(k, "RtlEnterCriticalSection", RtlEnterCriticalSection);
     nc_kernel_impl(k, "RtlLeaveCriticalSection", RtlLeaveCriticalSection);
     nc_kernel_impl(k, "RtlTryEnterCriticalSection", RtlTryEnterCriticalSection);
+    nc_kernel_impl(k, "ExInitializeReadWriteLock", ExInitializeReadWriteLock);
+    nc_kernel_impl(k, "ExAcquireReadWriteLockExclusive", ExAcquireReadWriteLockExclusive);
+    nc_kernel_impl(k, "ExAcquireReadWriteLockShared", ExAcquireReadWriteLockShared);
+    nc_kernel_impl(k, "ExReleaseReadWriteLock", ExReleaseReadWriteLock);
     nc_kernel_impl(k, "KeEnterCriticalRegion", KeCriticalRegion);
     nc_kernel_impl(k, "KeLeaveCriticalRegion", KeCriticalRegion);
 

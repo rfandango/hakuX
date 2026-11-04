@@ -1,0 +1,52 @@
+section KERN
+record NcHandle
+  object U32 x1 since 1
+  type U32 x1 since 1
+record NcRange
+  va U32 x1 since 1
+  len U32 x1 since 1
+record NcKernel
+  xbe_base U32 x1 since 1
+  xbe_size U32 x1 since 1
+  kprocess U32 x1 since 1
+  code_next U32 x1 since 1
+  defer_replayed U64 x1 since 1
+  apu_spins U64 x1 since 1
+  cr2 U32 x1 since 1
+  page_faults U64 x1 since 1
+  vm_commits U64 x1 since 1
+  vm_decommits U64 x1 since 1
+  pool_free rec NcRange x8192 since 1
+  pool_nfree U32 x1 since 1
+  pool_ex U32 x1 since 1
+  pool_ob U32 x1 since 1
+  pool_lost U32 x1 since 1
+  handles rec NcHandle x4096 since 1
+  handles_more rec NcHandle x12288 since 2
+  threads_hi U32 x1 since 1
+  resched BOOL x1 since 1
+  next_stack_va U32 x1 since 1
+  next_thread_id U32 x1 since 1
+  timer_due_ns U64 x1 since 1
+  wait_due_ns U64 x1 since 1
+  slice_due_ns U64 x1 since 1
+  ready_clock U64 x1 since 1
+  in_dpc BOOL x1 since 1
+  dpc_saved_irql U8 x1 since 1
+  irq_obj U32 x16 since 1
+  in_isr BOOL x1 since 1
+  isr_saved_irql U8 x1 since 1
+  force_switch BOOL x1 since 1
+  interrupts U64 x1 since 1
+  calls U64 x1 since 1
+  first_ordinal U32 x1 since 1
+record NcKState
+  boot_ns U64 x1 since 1
+  time_offset U64 x1 since 1
+  guest_ns U64 x1 since 1
+  guest_cycles U64 x1 since 1
+  x87_single BOOL x1 since 1
+  av_saved U32 x1 since 1
+  isr_line U8 x1 since 1
+  irq_enabled U32 x1 since 1
+  irq_lines U32 x1 since 1

@@ -2026,7 +2026,7 @@ static void cmd_swap_present(const HleCmdSwap *c)
 
 /* A GPU-rendered texture subresource the CPU locks (swizzled textures,
  * levels, faces: PGR2 reads its light probe back this way) into the arena. */
-static bool readback_arena(const HleCmdReadback *c)
+static bool readback_packed(const HleCmdReadback *c, VkBuffer buf, VkDeviceSize at)
 {
     HleVkSurf *s = hle_surf_get(c->surf);
     if (!s || !hle_surf_ensure(s) || !(s->aspect & VK_IMAGE_ASPECT_COLOR_BIT)) {
@@ -2055,10 +2055,10 @@ static bool readback_arena(const HleCmdReadback *c)
         level = layer = 0;
     }
     VkBufferImageCopy r = {
-        .bufferOffset = c->arena_off,
+        .bufferOffset = at,
         .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, level, layer, 1 },
         .imageExtent = { c->w, c->h, 1 } };
-    T.vkCmdCopyImageToBuffer(cb, img, il, g_harena.buf, 1, &r);
+    T.vkCmdCopyImageToBuffer(cb, img, il, buf, 1, &r);
     VkMemoryBarrier2 mb = {
         .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
         .srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
@@ -2075,8 +2075,20 @@ static bool readback_arena(const HleCmdReadback *c)
 static void cmd_readback(const HleCmdReadback *c)
 {
     close_pass();
+    if (c->arena_off == HLE_RB_PACKED) {
+        /* into the landing buffer at fb - 1, swizzled into guest memory when
+         * the GPU reaches the value (hle_tl_land_swz): recorded or dropped */
+        if (c->fb && readback_packed(c, g_hland.buf ? g_hland.buf : g_harena.buf, c->fb - 1)) {
+            hle_tl_land_copied(c->fb - 1, 0, 0, 0);
+            g_back.st.readbacks++;
+        } else {
+            g_back.st.readback_skips++;
+        }
+        submit(c->value);
+        return;
+    }
     if (c->arena_off != HLE_RB_DIRECT) {
-        if (readback_arena(c)) {
+        if (readback_packed(c, g_harena.buf, c->arena_off)) {
             g_back.st.readbacks++;
         } else {
             g_back.st.readback_skips++;

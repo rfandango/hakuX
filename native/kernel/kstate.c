@@ -106,6 +106,25 @@ bool nc_kern_state_load(NcRd *r, unsigned v)
     return true;
 }
 
+static bool kprocess_of(NcRd *r, unsigned v, void *ctx)
+{
+    NcKernel *k = calloc(1, sizeof(*k));
+    if (!k) {
+        return false;
+    }
+    nc_rec_get(r, &nc_rec_NcKernel, k, v);
+    *(uint32_t *)ctx = r->fail ? 0 : k->kprocess;
+    free(k);
+    return true;
+}
+
+uint32_t nc_kern_state_kprocess(const char *path)
+{
+    uint32_t kprocess = 0;
+    nc_state_read_section(path, NC_TAG('K', 'E', 'R', 'N'), kprocess_of, &kprocess);
+    return kprocess;
+}
+
 /* ------------------------------------------------------------------ THRD */
 
 static int32_t slot_of(const NcKernel *k, const NcThread *t)
