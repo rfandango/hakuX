@@ -54,6 +54,18 @@ jobs:
           chmod +x tools/fetch_deps.sh
           tools/fetch_deps.sh ../deps
 
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            # strip leading 'v': v1.3.0 → 1.3.0
+            echo "kantaix=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            echo "pkg=${GITHUB_REF_NAME}"       >> "$GITHUB_OUTPUT"
+          else
+            echo "kantaix=0.0.0-dev"            >> "$GITHUB_OUTPUT"
+            echo "pkg=${GITHUB_SHA}"            >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Configure
         run: |
           cmake -S native -B build -G Ninja \
@@ -63,7 +75,8 @@ jobs:
             -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld" \
             -DCMAKE_C_COMPILER_LAUNCHER=sccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
-            -DNC_DEPS=../deps
+            -DNC_DEPS=../deps \
+            -DKANTAIX_VERSION="${{ steps.ver.outputs.kantaix }}"
 
       - name: Build
         run: cmake --build build --target hakux
@@ -74,8 +87,7 @@ jobs:
       - name: Package AppImage
         run: |
           chmod +x tools/release/package_linux.sh
-          VERSION=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
-          tools/release/package_linux.sh build dist "$VERSION"
+          tools/release/package_linux.sh build dist "${{ steps.ver.outputs.pkg }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
