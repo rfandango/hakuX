@@ -68,6 +68,18 @@ jobs:
             echo "pkg=${GITHUB_SHA}"            >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Brand check
+        run: |
+          # Reject bare "xbased" UI strings (upstream attribution URLs are fine).
+          bad=$(grep -rn '"xbased"' \
+                  native/app/ui/i18n_strings.h \
+                  native/app/ui/dash.c || true)
+          if [ -n "$bad" ]; then
+            echo "ERROR: upstream 'xbased' branding found in UI strings:"
+            echo "$bad"
+            exit 1
+          fi
+
       - name: Configure
         run: |
           cmake -S native -B build -G Ninja \

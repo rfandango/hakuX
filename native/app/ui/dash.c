@@ -961,7 +961,7 @@ static void scr_main(void)
     const float orb_r = tall ? fminf(H * 0.11f, W * 0.18f) : H * 0.13f;
     ui_orb(ox, oy, orb_r, 0);
     /* the logo, over the orb */
-    ui_text(ox, oy - orb_r * 0.36f, "xbased", orb_r * 0.56f, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_CENTER);
+    ui_text(ox, oy - orb_r * 0.36f, "kantaiX", orb_r * 0.56f, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_CENTER);
     /* the items: green capsules fanned on the orb's right */
     for (int i = 0; i < n; i++) {
         const float t = ease(D.anim * 3 - i * 0.12f);
@@ -1244,7 +1244,7 @@ static void scr_about(void)
     ui_text(W / 2, H * 0.52f, "kantaiX", 54, UI_FONT_BOLD, UI_GREEN_HI, UI_ALIGN_CENTER);
     ui_text(W / 2, H * 0.62f, v, 22, UI_FONT_REGULAR, UI_WHITE, UI_ALIGN_CENTER);
     ui_text_fit(W / 2, H * 0.67f, T(S_BASED_ON), 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_CENTER, W - 80);
-    ui_text(W / 2, H * 0.715f, "github.com/crazyriddler/xbased", 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_CENTER);
+    ui_text(W / 2, H * 0.715f, "github.com/rfandango/hakuX  \xc2\xb7  github.com/crazyriddler/xbased", 16, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_CENTER);
     ui_text(W / 2, H * 0.77f, "Fonts: Play (SIL OFL). Box art: libretro-thumbnails.", 18, UI_FONT_REGULAR, UI_GREY,
             UI_ALIGN_CENTER);
     if (D.in.back || D.in.ok) {
