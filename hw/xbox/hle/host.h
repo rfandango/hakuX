@@ -86,6 +86,9 @@ void hle_host_mem_rearm(uint32_t pa, uint32_t len);
  * guest's next access faults to hle_mem_stale_access (mem/barrier.c); off:
  * back to what write tracking wants. The host's own view keeps its access. */
 void hle_host_mem_noaccess(uint32_t pa, uint32_t len, bool on);
+/* How often the pages of [pa, pa + len) were freed so far (a count that
+ * moves when the guest frees any of them: the memory has a new owner). */
+uint32_t hle_host_mem_frees(uint32_t pa, uint32_t len);
 
 /* ---- the GPU device: the display timing ----------------------------------- */
 

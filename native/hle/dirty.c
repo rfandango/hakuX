@@ -31,6 +31,8 @@ static NcVm *g_vm;
  * test_and_clear still reports (a page's protection is its dirty bit
  * otherwise: protected <=> clean) */
 static uint8_t *g_hdirty;
+/* Per page: how often it was freed (hle_host_mem_frees) */
+static uint32_t *g_frees;
 
 
 /* A page without access, given it back the way a guest access's fault does
@@ -76,15 +78,30 @@ static void unguard_written(uint32_t pa, uint32_t len)
 static void freed(uint32_t pa, uint32_t len)
 {
     if (g_vm) {
+        for (uint64_t p = pa / NC_PAGE; g_frees && p < ((uint64_t)pa + len + NC_PAGE - 1) / NC_PAGE &&
+                                        p < g_vm->ram_size / NC_PAGE; p++) {
+            __atomic_add_fetch(&g_frees[p], 1, __ATOMIC_RELEASE);
+        }
         hle_tl_land_forget(pa, len);    /* nothing the GPU drew lands in it later */
         hle_barrier_freed(pa, len);
     }
+}
+
+uint32_t hle_host_mem_frees(uint32_t pa, uint32_t len)
+{
+    uint32_t n = 0;
+    for (uint64_t p = pa / NC_PAGE; g_vm && g_frees && p < ((uint64_t)pa + len + NC_PAGE - 1) / NC_PAGE &&
+                                    p < g_vm->ram_size / NC_PAGE; p++) {
+        n += __atomic_load_n(&g_frees[p], __ATOMIC_ACQUIRE);
+    }
+    return n;
 }
 
 void nc_hle_dirty_init(NcVm *vm)
 {
     g_vm = vm; /* every page starts dirty (unprotected) */
     g_hdirty = calloc(vm->ram_size / NC_PAGE, 1);
+    g_frees = calloc(vm->ram_size / NC_PAGE, sizeof(*g_frees));
     nc_vm_write_hook = hle_va_store;
     nc_vm_read_hook = va_load;
     nc_vm_free_hook = freed;
