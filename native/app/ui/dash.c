@@ -18,7 +18,7 @@
 #endif
 
 #ifndef KANTAIX_VERSION
-#define KANTAIX_VERSION "1.3.0"
+#define KANTAIX_VERSION "0.1.0"
 #endif
 
 Dash D;
