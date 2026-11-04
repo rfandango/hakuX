@@ -16,6 +16,7 @@
 
 #include "hw/xbox/hle/host.h"
 #include "hw/xbox/hle/mem/barrier.h"
+#include "hw/xbox/hle/vk/back.h"
 #include "native/core/mmio.h"
 
 #include <dlfcn.h>
@@ -75,6 +76,7 @@ static void unguard_written(uint32_t pa, uint32_t len)
 static void freed(uint32_t pa, uint32_t len)
 {
     if (g_vm) {
+        hle_tl_land_forget(pa, len);    /* nothing the GPU drew lands in it later */
         hle_barrier_freed(pa, len);
     }
 }

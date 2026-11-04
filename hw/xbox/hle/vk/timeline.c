@@ -46,6 +46,7 @@ typedef struct LandEnt {
     uint64_t value;
     uint8_t kind;
     bool copied;                        /* ROWS, SWZ: the back end recorded the GPU's copy */
+    bool dropped;                       /* its memory freed since it was queued (hle_tl_land_forget) */
     uint32_t off, pa, len;              /* from off (the landing buffer; COPY: guest RAM) to pa */
     uint32_t pitch, row, rows;          /* ROWS: as the GPU wrote them; COPY: the source's pitch */
     uint32_t w, h, bpp;                 /* SWZ */
@@ -143,6 +144,42 @@ void hle_tl_land_copied(uint32_t arena_off, uint32_t pitch, uint32_t row, uint32
     hle_mutex_unlock(&g_land.lock);
 }
 
+/* Guest memory [pa, pa + len) freed: the landings queued into it are
+ * dropped. A landing waits for the host GPU, which can be well behind the
+ * guest's view of the NV2A: a small target's writeback at its unbind waits
+ * for the next submission, and a title that saves the image, frees the
+ * target and commits heap pages meanwhile got the old image over the heap's
+ * new pages when that submission finished. Top Spin's Player Creator
+ * renders the player's name into a 112 x 23 target as it starts a career,
+ * and crashed in its heap a few saves later (a free entry's links gone). */
+void hle_tl_land_forget(uint32_t pa, uint32_t len)
+{
+    if (!len || !hle_atomic_read(&g_land.n)) {
+        return;
+    }
+    const uint64_t lo = pa, hi = (uint64_t)pa + len;
+    unsigned n = 0;
+    hle_mutex_lock(&g_land.lock);
+    for (unsigned i = 0; i < g_land.n; i++) {
+        LandEnt *e = &g_land.q[i];
+        uint64_t elo = e->pa, ehi = elo;
+        if (e->kind == LAND_ROWS || e->kind == LAND_SWZ) {
+            ehi += e->len;
+        } else if (e->kind == LAND_COPY && e->rows) {
+            ehi += (uint64_t)e->dpitch * (e->rows - 1) + e->row;
+        }
+        if (!e->dropped && elo < hi && lo < ehi) {
+            e->dropped = true;
+            n++;
+        }
+    }
+    hle_mutex_unlock(&g_land.lock);
+    static unsigned s_logged;
+    if (n && s_logged++ < 8) {
+        hle_log("hakuX-hle-back", "memory %08x+%x freed: %u landing(s) into it dropped", pa, len, n);
+    }
+}
+
 /* The landing buffer's bytes [off, off + len) as the GPU wrote them */
 static const uint8_t *land_src(uint32_t off, uint32_t len)
 {
@@ -161,7 +198,9 @@ static const uint8_t *land_src(uint32_t off, uint32_t len)
 static void land_one(const LandEnt *e)
 {
     bool landed = e->kind == LAND_NOTE;
-    if (e->kind == LAND_ROWS || e->kind == LAND_SWZ) {
+    if (e->dropped) {
+        /* nothing goes into memory the guest freed (its new owner's now) */
+    } else if (e->kind == LAND_ROWS || e->kind == LAND_SWZ) {
         uint8_t *dst = e->copied ? hle_pa_ptr(e->pa, e->len) : NULL;
         const uint8_t *src = dst ? land_src(e->off, e->len) : NULL;
         if (dst && e->kind == LAND_ROWS) {
