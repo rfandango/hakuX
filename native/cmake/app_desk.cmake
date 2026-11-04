@@ -25,7 +25,7 @@ target_link_libraries(hakux PRIVATE hakux_native hakux_hle SDL3::SDL3)
 target_include_directories(hakux PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../third_party/stb")  # public domain, vendored
 # KANTAIX_VERSION is set by CI from the git tag; fall back to the in-source default for local builds.
 if(NOT DEFINED KANTAIX_VERSION)
-  set(KANTAIX_VERSION "1.3.0")
+  set(KANTAIX_VERSION "0.1.0")
 endif()
 target_compile_definitions(hakux PRIVATE KANTAIX_VERSION="${KANTAIX_VERSION}")
 target_compile_options(hakux PRIVATE -Wall -Wno-unused-parameter -Wno-unused-function)
