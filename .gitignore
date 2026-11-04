@@ -40,8 +40,6 @@ profile-out-*/
 /android/app/src/main/jniLibs/arm64-v8a/libgsl_alloc_hook.so
 /android/app/src/main/jniLibs/arm64-v8a/libhook_impl.so
 
-# local agent instructions (not versioned)
-/CLAUDE.md
 
 # Local dev tools (not versioned), but for the core's (its app libraries,
 # the savestate lock, device runs) and the mods' generators (mods/README.md)
