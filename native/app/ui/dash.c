@@ -17,8 +17,8 @@
 #include <windows.h>
 #endif
 
-#ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.11"
+#ifndef KANTAIX_VERSION
+#define KANTAIX_VERSION "1.3.0"
 #endif
 
 Dash D;
@@ -1004,7 +1004,7 @@ static void scr_main(void)
         dash_push(SCR_ABOUT);
     }
     char v[64];
-    snprintf(v, sizeof(v), "xbased %s", XBASED_VERSION);
+    snprintf(v, sizeof(v), "kantaiX %s", KANTAIX_VERSION);
     ui_text(W - 60, H - 52, v, 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_RIGHT);
     draw_hints(T(S_SELECT), NULL, NULL, T(S_ABOUT));
 }
@@ -1240,8 +1240,8 @@ static void scr_about(void)
     draw_header(T(S_ABOUT), NULL);
     ui_orb(W / 2, H * 0.36f, 60, 0);
     char v[96];
-    snprintf(v, sizeof(v), "%s %s", T(S_VERSION), XBASED_VERSION);
-    ui_text(W / 2, H * 0.52f, "xbased", 54, UI_FONT_BOLD, UI_GREEN_HI, UI_ALIGN_CENTER);
+    snprintf(v, sizeof(v), "%s %s", T(S_VERSION), KANTAIX_VERSION);
+    ui_text(W / 2, H * 0.52f, "kantaiX", 54, UI_FONT_BOLD, UI_GREEN_HI, UI_ALIGN_CENTER);
     ui_text(W / 2, H * 0.62f, v, 22, UI_FONT_REGULAR, UI_WHITE, UI_ALIGN_CENTER);
     ui_text_fit(W / 2, H * 0.67f, T(S_BASED_ON), 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_CENTER, W - 80);
     ui_text(W / 2, H * 0.715f, "github.com/crazyriddler/xbased", 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_CENTER);
@@ -1345,7 +1345,7 @@ static void update_poll(void)
     case UPD_AVAILABLE:
         if (!asked && !D.ask && dash_top() == SCR_MAIN) {
             asked = true;
-            snprintf(msg, sizeof(msg), T(S_UPDATE_AVAILABLE), upd_version(), XBASED_VERSION);
+            snprintf(msg, sizeof(msg), T(S_UPDATE_AVAILABLE), upd_version(), KANTAIX_VERSION);
             const char *choices[3] = {T(S_UPDATE_NOW), T(S_NOT_NOW), T(S_DONT_ASK)};
             dash_choose(msg, choices, 3, update_chosen);
         }
@@ -1403,7 +1403,7 @@ int dash_run(SDL_Window *win, const char *exe)
     i18n_set(cfg_get(&D.global, "ui.lang"));
     upd_cleanup();
     if (cfg_bool(&D.global, "update.check", true)) {
-        upd_check_start(XBASED_VERSION);
+        upd_check_start(KANTAIX_VERSION);
     }
     char fonts[1200];
     snprintf(fonts, sizeof(fonts), "%sfonts/", cfg_exe_dir());
