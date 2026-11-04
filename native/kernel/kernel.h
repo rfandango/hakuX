@@ -321,6 +321,12 @@ void nc_kernel_frame_chain(NcKernel *k, NcFrame *f, char *buf, size_t len);
 /* ObfDereferenceObject: an object no one holds any more is freed (ob.c). */
 void nc_ob_dereference(NcKernel *k, uint32_t object);
 uint32_t nc_ob_create(NcKernel *k, enum NcObType type, uint32_t body_size);
+/* nc_ob_create with ObjectAttributes' name (none: as nc_ob_create): a new
+ * object (*fresh, to be initialised), the one already of that name and type
+ * with OBJ_OPENIF (*status STATUS_OBJECT_NAME_EXISTS), or 0 with the error
+ * in *status. */
+uint32_t nc_ob_create_named(NcKernel *k, enum NcObType type, uint32_t body_size, uint32_t oa, uint32_t *status,
+                            bool *fresh);
 uint32_t nc_ob_handle(NcKernel *k, uint32_t object, enum NcObType type);
 uint32_t nc_ob_lookup(NcKernel *k, uint32_t handle, enum NcObType *type);
 bool nc_ob_close(NcKernel *k, uint32_t handle);
