@@ -16,7 +16,7 @@
 #include "hw/xbox/hle/vk/back.h"
 #include "hw/xbox/hle/vk/display.h"
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
 #include <sys/system_properties.h>
 #endif
 
@@ -214,6 +214,13 @@ bool hle_pb_flip_waiting(void)
     return __atomic_load_n(&g_pb.flip_wait, __ATOMIC_ACQUIRE);
 }
 
+static void (*g_flip_wait_cb)(void);
+
+void hle_pb_on_flip_wait(void (*cb)(void))
+{
+    g_flip_wait_cb = cb;
+}
+
 static const uint32_t *fetch(void *ctx, uint32_t pa, uint32_t n)
 {
     return (const uint32_t *)hle_pa_ptr(pa, 4 * n);
@@ -316,9 +323,12 @@ static int kelvin(uint32_t m, uint32_t v)
     case NV097_FLIP_STALL:
         if (!flip_done()) {
             hle_host_gpu_trace(HLE_GTR_FLIP_STALL, surf_get(SURF_READ) << 4 | surf_get(SURF_WRITE));
-            g_pb.flip_wait = true;
+            __atomic_store_n(&g_pb.flip_wait, true, __ATOMIC_RELEASE);
             g_pb.flip_wait_ns = hle_now_ns();
             g_pb.flip_mark = hle_host_gpu_trace_mark();
+            if (g_flip_wait_cb) {
+                g_flip_wait_cb();
+            }
             return HLE_PB_STALL;
         }
         break;
@@ -408,7 +418,7 @@ static void pblog_poll(void)
         const char *e = getenv("HAKUX_HLE_PBLOG");
         g_pblog = e ? atoi(e) : 0;
     }
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     static HleProp prop;
     static unsigned polls;
     char v[PROP_VALUE_MAX];
@@ -1592,7 +1602,7 @@ void hle_pb_diag(void)
         g_pb.dumped = true;                 /* once a run */
         hle_host_gpu_trace_dump("flip stall over 100 ms", g_pb.flip_mark);
     }
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     {   /* debug: a new value of debug.hakux.pbtrace dumps the last GPU events */
         static HleProp prop;
         char v[PROP_VALUE_MAX];

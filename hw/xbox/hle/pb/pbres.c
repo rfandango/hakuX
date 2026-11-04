@@ -380,7 +380,7 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
             const char *e = getenv("HAKUX_HLE_TEXDUMP");
             want = e ? atoll(e) : -1;
         }
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
         {   /* on demand: a new value of debug.hakux.texdump=<id>, its next upload */
             static HleProp prop;
             char v[PROP_VALUE_MAX];

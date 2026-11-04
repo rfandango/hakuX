@@ -1724,9 +1724,14 @@ static void get_multipass_samples(MCPXAPUState *d, uint8_t *c,
     }
 }
 
+/* 5.1 out (g_apu_out_channels 6): the VP's own mix to the six speakers, the
+ * frame's (the shares' added in, voice_work_share) */
+static float g_vp_sample6[NUM_SAMPLES_PER_FRAME][6];
+
 static void voice_process(MCPXAPUState *d, uint8_t *c,
                           float mixbins[NUM_MIXBINS][NUM_SAMPLES_PER_FRAME],
                           float sample_buf[NUM_SAMPLES_PER_FRAME][2],
+                          float sample6[NUM_SAMPLES_PER_FRAME][6],
                           uint16_t v, int voice_list)
 {
     assert(v < MCPX_HW_MAX_VOICES);
@@ -2060,6 +2065,33 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
             sample_buf[i][0] += g*samples[i][0];
             sample_buf[i][1] += g*samples[i][1];
         }
+        if (g_apu_out_channels == 6) {
+            /* 5.1: each of the voice's speaker mixbins (DirectSound's 0-5:
+             * FL FR C LFE BL BR) at its own volume. One in none of them (a
+             * submix, an effect's send: the DSP's, not run here) plays in
+             * the front pair, as in stereo. */
+            bool spoke = false;
+            for (int b = 0; b < 8; b++) {
+                if (bin[b] == mp_bin || bin[b] < 0 || bin[b] > 5) {
+                    continue;
+                }
+                const float hr = (v < MCPX_HW_MAX_3D_VOICES && b < 4) ? (float)(1 << d->vp.hrtf_headroom)
+                                                                    : (float)(1 << d->vp.submix_headroom[bin[b]]);
+                const float gb = ea_value * attenuate(vol[b]) / hr;
+                if (gb <= 0) {
+                    continue;
+                }
+                spoke = true;
+                const float *src = channel_buf[b % channels];
+                for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+                    sample6[i][bin[b]] += gb * src[i];
+                }
+            }
+            for (int i = 0; !spoke && i < NUM_SAMPLES_PER_FRAME; i++) {
+                sample6[i][0] += g * samples[i][0];
+                sample6[i][1] += g * samples[i][1];
+            }
+        }
     }
 }
 
@@ -2138,6 +2170,9 @@ static void voice_work_share(MCPXAPUState *d, VoiceWorker *self)
          * the share: its group is scheduled together */
         memset(self->mixbins[MULTIPASS_BIN], 0, sizeof(self->mixbins[0]));
         memset(self->sample_buf, 0, sizeof(self->sample_buf));
+        if (g_apu_out_channels == 6) {
+            memset(self->sample6, 0, sizeof(self->sample6));
+        }
     } else {
         memset(self->mixbins, 0, sizeof(self->mixbins));
     }
@@ -2146,7 +2181,7 @@ static void voice_work_share(MCPXAPUState *d, VoiceWorker *self)
     {
         uint8_t *c = vwd->table;
         for (int i = 0; i < self->queue_len; i++) {
-            voice_process(d, c, self->mixbins, self->sample_buf,
+            voice_process(d, c, self->mixbins, self->sample_buf, self->sample6,
                           self->queue[i].voice, self->queue[i].list);
         }
     }
@@ -2164,6 +2199,11 @@ static void voice_work_share(MCPXAPUState *d, VoiceWorker *self)
         for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
             d->vp.sample_buf[i][0] += self->sample_buf[i][0];
             d->vp.sample_buf[i][1] += self->sample_buf[i][1];
+        }
+        for (int i = 0; g_apu_out_channels == 6 && i < NUM_SAMPLES_PER_FRAME; i++) {
+            for (int ch = 0; ch < 6; ch++) {
+                g_vp_sample6[i][ch] += self->sample6[i][ch];
+            }
         }
     }
 
@@ -2601,6 +2641,16 @@ void mcpx_apu_vp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_P
 
         memset(d->vp.sample_buf, 0, sizeof(d->vp.sample_buf));
         memset(mixbins, 0, sizeof(float[32][32]));
+        if (g_apu_out_channels == 6) {
+            for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+                for (int ch = 0; ch < 6; ch++) {
+                    const float s = fminf(fmaxf(g_vp_sample6[i][ch], -1.0f), 1.0f);
+                    const int acc = g_apu_frame6[off + i][ch] + (int)lrintf(s * 32767.0f);
+                    g_apu_frame6[off + i][ch] = (int16_t)(acc > 32767 ? 32767 : acc < -32768 ? -32768 : acc);
+                }
+            }
+            memset(g_vp_sample6, 0, sizeof(g_vp_sample6));
+        }
     }
 }
 

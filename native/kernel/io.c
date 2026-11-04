@@ -27,7 +27,7 @@
 #include <sys/statvfs.h>
 #include <time.h>
 #include <unistd.h>
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
 #include "hw/xbox/hle/prop.h"
 #endif
 
@@ -42,6 +42,7 @@
 #define STATUS_OBJECT_NAME_COLLISION  0xC0000035u
 #define STATUS_OBJECT_PATH_NOT_FOUND  0xC000003Au
 #define STATUS_DELETE_PENDING         0xC0000056u
+#define STATUS_SHARING_VIOLATION      0xC0000043u
 #define STATUS_MEDIA_WRITE_PROTECTED  0xC00000A2u
 #define STATUS_NO_MEDIA_IN_DEVICE     0xC0000013u
 #define STATUS_FILE_IS_A_DIRECTORY    0xC00000BAu
@@ -93,6 +94,11 @@ typedef struct NcFile {
      * one a dead process left behind is swept at the next overwrite. */
     char old_path[320];  /* "" = none */
     uint64_t old_size;
+    /* Share access, as IoCheckShareAccess keeps it (F_HOST files): the
+     * reading, writing and deleting this handle was granted (SHARE_*), and
+     * which of them it lets other handles have (its ShareAccess). 0 granted:
+     * it takes no part (attributes only). */
+    uint8_t share_granted, share_allowed;
     bool wrote;          /* written through this handle: synced when it closes */
     /* A directory's enumeration works on a snapshot taken when it starts:
      * XDeleteSaveGame deletes each file as the listing returns it, and a live
@@ -129,6 +135,32 @@ typedef struct NcFile {
                        0x40000000u /* GENERIC_WRITE */ | 0x10000000u /* GENERIC_ALL */ |       \
                        0x02000000u /* MAXIMUM_ALLOWED */)
 
+/* The share bits (FILE_SHARE_READ, _WRITE, _DELETE) a DesiredAccess counts
+ * for, as IoCheckShareAccess has them: reading or executing the data,
+ * writing or appending it, deleting the file. */
+#define SHARE_READ   1u
+#define SHARE_WRITE  2u
+#define SHARE_DELETE 4u
+
+static uint8_t share_granted(uint32_t access)
+{
+    uint8_t g = 0;
+    if (access & (0x00000001u /* FILE_READ_DATA */ | 0x00000020u /* FILE_EXECUTE */ | 0x80000000u /* GENERIC_READ */ |
+                  0x20000000u /* GENERIC_EXECUTE */)) {
+        g |= SHARE_READ;
+    }
+    if (access & (0x00000002u /* FILE_WRITE_DATA */ | 0x00000004u /* FILE_APPEND_DATA */ | 0x40000000u /* GENERIC_WRITE */)) {
+        g |= SHARE_WRITE;
+    }
+    if (access & 0x00010000u /* DELETE */) {
+        g |= SHARE_DELETE;
+    }
+    if (access & (0x10000000u /* GENERIC_ALL */ | 0x02000000u /* MAXIMUM_ALLOWED: all of it granted */)) {
+        g |= SHARE_READ | SHARE_WRITE | SHARE_DELETE;
+    }
+    return g;
+}
+
 /* Open files at once: the handle table's size. Fatal Frame opens most of its
  * disc's 1821 files as it boots and keeps them open; at 1024 the rest failed
  * (insufficient resources), and the load waited for one forever. Untouched
@@ -157,6 +189,12 @@ static NcFile g_files[MAX_FILES];
 static struct FsCache {
     uint64_t lo, hi;
 } g_fs_cache[MAX_FILES];
+/* Each open file's I/O completion port (FileCompletionInformation): its
+ * object and key, where its reads and writes queue a packet as they
+ * complete; not kept in states. */
+static struct FilePort {
+    uint32_t port, key;
+} g_file_port[MAX_FILES];
 typedef struct NcLink {
     char name[64];
     char target[256];
@@ -408,9 +446,32 @@ static NcFile *file_new(void)
         if (!g_files[i].used) {
             memset(&g_files[i], 0, sizeof(g_files[i]));
             g_fs_cache[i] = (struct FsCache){0};
+            g_file_port[i] = (struct FilePort){0};
             g_files[i].used = true;
             g_files[i].fd = -1;
             return &g_files[i];
+        }
+    }
+    return NULL;
+}
+
+/* An open handle on the host file whose share access the new one's
+ * (granted, allowed) conflicts with, or NULL: either wants what the other
+ * doesn't share (IoCheckShareAccess). Mission: Impossible - Operation Surma
+ * copies its levels to the Z: cache in the background, each copy's file
+ * held open unshared until it is complete, and reads a level from the cache
+ * only when it can open it: from the disc while its copy goes on. Opened
+ * regardless, the copy's empty file was the level, a dirty-disc screen. */
+static NcFile *share_conflict(const char *host, uint8_t granted, uint8_t allowed)
+{
+    if (!granted) {
+        return NULL;
+    }
+    for (int i = 0; i < MAX_FILES; i++) {
+        NcFile *o = &g_files[i];
+        if (o->used && o->kind == F_HOST && !o->is_dir && o->share_granted && !strcmp(o->host, host) &&
+            ((granted & ~o->share_allowed) || (o->share_granted & ~allowed))) {
+            return o;
         }
     }
     return NULL;
@@ -591,6 +652,17 @@ static void io_status(NcKernel *k, uint32_t iosb, uint32_t status, uint32_t info
     }
 }
 
+/* The port an I/O call's completion goes to, or NULL: as NT's
+ * IopCompleteRequest, an overlapped one on a file associated with a port,
+ * with no APC routine and an ApcContext (XAPI passes the OVERLAPPED there,
+ * NULL for an event handle with its low bit set). */
+static const struct FilePort *file_port(NcKernel *k, const uint32_t *a)
+{
+    const NcFile *nf = a[2] || !a[3] ? NULL : file_of(k, a[0]);
+    const struct FilePort *fp = nf ? &g_file_port[nf - g_files] : NULL;
+    return fp && fp->port && nf->async ? fp : NULL;
+}
+
 /* An I/O call finished: a[] is (FileHandle, Event, ApcRoutine, ApcContext,
  * IoStatusBlock, ...), as NtReadFile and its siblings take it. The event is
  * set; the APC routine runs as ApcRoutine(ApcContext, IoStatusBlock, 0) when
@@ -615,6 +687,10 @@ static void complete(NcKernel *k, const uint32_t *a)
     if (a[2] && k->current) {
         const NcApc apc = {.normal = a[2], .ctx = a[3], .a1 = a[4], .a2 = 0};
         nc_apc_queue(k, k->current, &apc);
+    }
+    const struct FilePort *fp = file_port(k, a);
+    if (fp && a[4]) {
+        nc_ke_port_queue(k, fp->port, fp->key, a[3], nc_vm_rd32(k->vm, a[4]), nc_vm_rd32(k->vm, a[4] + 4));
     }
 }
 
@@ -666,7 +742,7 @@ void nc_io_set_device_time(bool on)
 {
     g_devtime = on;
     const char *e = getenv("NC_DEVTIME");
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     char v[PROP_VALUE_MAX];
     if (!e && hle_prop_get("debug.hakux.devtime", v) > 0) {
         e = v;
@@ -709,6 +785,7 @@ typedef struct DiscJob {
     uint32_t va, n;
     uint32_t dev_us;         /* the drive's time for it (console timing), 0: none */
     uint32_t iosb, event, apc, apc_ctx;
+    uint32_t port, port_key; /* its completion port's packet (file_port), port 0: none */
     NcThread *thread;
     uint32_t thread_id;      /* its id then: the slot may hold another thread by the end */
     bool sync;               /* a synchronous handle's: the thread waits for it (nc_ke_block) */
@@ -829,6 +906,11 @@ static bool disc_read_later(NcKernel *k, const NcFile *nf, const uint32_t *a, co
                  .dev_us = dev_us, .iosb = a[4], .event = event, .apc = a[2], .apc_ctx = a[3],
                  .thread = k->current, .thread_id = k->current ? k->current->id : 0, .sync = sync};
     snprintf(j.path, sizeof(j.path), "%s", nf->path);
+    const struct FilePort *fp = file_port(k, a);
+    if (fp) {
+        j.port = fp->port;
+        j.port_key = fp->key;
+    }
     size_t segs = 0;
     for (unsigned r = 0; r < nrun; r++) {
         segs += run[r].len / NC_PAGE + 2;
@@ -923,6 +1005,9 @@ static void disc_read_done(NcKernel *k, const DiscJob *j)
         j->thread->state != NC_T_TERMINATED) {
         const NcApc apc = {.normal = j->apc, .ctx = j->apc_ctx, .a1 = j->iosb, .a2 = 0};
         nc_apc_queue(k, j->thread, &apc);
+    }
+    if (j->port) {
+        nc_ke_port_queue(k, j->port, j->port_key, j->apc_ctx, st, n);
     }
 }
 
@@ -1031,8 +1116,140 @@ static uint32_t dir_mismatch(const char *path, uint32_t options, uint32_t st)
     return st;
 }
 
-static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t attrs, uint32_t disposition, uint32_t options,
-                        uint32_t *handle, uint32_t *info)
+/* A disc path in a language the disc hasn't (a console set to Spanish, a
+ * game without it, or a dump with its other languages taken out): the same
+ * path in English, the language every title has, when that's there. A path
+ * component (or a file name's stem) naming a language is what's swapped. */
+static bool lang_fallback(const NcDisc *disc, const char *rel, char *out, size_t n, NcDiscFile *df)
+{
+    static const char *const names[][2] = {
+        {"french", "english"}, {"german", "english"}, {"italian", "english"}, {"spanish", "english"},
+        {"japanese", "english"}, {"korean", "english"}, {"chinese", "english"}, {"portuguese", "english"},
+        {"fre", "eng"}, {"fra", "eng"}, {"ger", "eng"}, {"deu", "eng"}, {"ita", "eng"}, {"spa", "eng"},
+        {"esp", "eng"}, {"jpn", "eng"}, {"jap", "eng"}, {"kor", "eng"}, {"chi", "eng"}, {"por", "eng"},
+        {"fr", "en"}, {"de", "en"}, {"it", "en"}, {"es", "en"}, {"ja", "en"}, {"ko", "en"}, {"zh", "en"}, {"pt", "en"},
+    };
+    const size_t len = strlen(rel);
+    if (len + 8 >= n) {
+        return false;
+    }
+    for (size_t start = 0; start < len;) {
+        size_t end = start;
+        while (end < len && rel[end] != '\\') {
+            end++;
+        }
+        size_t stem = start;
+        while (stem < end && rel[stem] != '.') {
+            stem++;
+        }
+        for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+            const size_t nl = strlen(names[i][0]);
+            if (stem - start != nl || strncasecmp(rel + start, names[i][0], nl)) {
+                continue;
+            }
+            /* the same case as the disc's: ENGLISH, English or english */
+            char rep[16];
+            const size_t rl = strlen(names[i][1]);
+            const bool all_up = isupper((unsigned char)rel[start]) && (nl < 2 || isupper((unsigned char)rel[start + 1]));
+            for (size_t c = 0; c < rl; c++) {
+                const bool up = all_up || (c == 0 && isupper((unsigned char)rel[start]));
+                rep[c] = up ? (char)toupper((unsigned char)names[i][1][c]) : names[i][1][c];
+            }
+            snprintf(out, n, "%.*s%.*s%s", (int)start, rel, (int)rl, rep, rel + stem);
+            if (nc_disc_find(disc, out, df)) {
+                return true;
+            }
+        }
+        start = end + 1;
+    }
+    return false;
+}
+
+/* Folder names for XC_LANGUAGE's values (1 English ... 9 Portuguese). */
+static const char *const k_lang_dirs[10][4] = {
+    {NULL},
+    {"english", "eng", "en", NULL},
+    {"japanese", "jpn", "jap", "ja"},
+    {"german", "ger", "deu", "de"},
+    {"french", "fre", "fra", "fr"},
+    {"spanish", "spa", "esp", "es"},
+    {"italian", "ita", "it", NULL},
+    {"korean", "kor", "ko", NULL},
+    {"chinese", "chi", "zh", NULL},
+    {"portuguese", "por", "pt", NULL},
+};
+
+static bool lang_named(const uint8_t *e, int lang)
+{
+    for (int i = 0; i < 4 && k_lang_dirs[lang][i]; i++) {
+        const size_t n = strlen(k_lang_dirs[lang][i]);
+        if (e[13] == n && !strncasecmp((const char *)e + 14, k_lang_dirs[lang][i], n)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+typedef struct LangScan {
+    int lang;
+    bool english, other;
+    NcDiscFile sub[16]; /* folders to look in next */
+    unsigned nsub;
+} LangScan;
+
+static bool lang_scan_entry(void *ctx, const uint8_t *e)
+{
+    LangScan *s = ctx;
+    if (!(e[12] & 0x10)) {
+        return false;
+    }
+    s->english |= lang_named(e, 1);
+    s->other |= lang_named(e, s->lang);
+    if (s->nsub < 16) {
+        s->sub[s->nsub++] = (NcDiscFile){nc_rd32(e + 4), nc_rd32(e + 8), e[12]};
+    }
+    return false;
+}
+
+bool nc_io_disc_lacks_language(const NcDisc *disc, int lang)
+{
+    if (lang < 2 || lang > 9 || !disc || disc->fd < 0) {
+        return false;
+    }
+    /* The disc's first three levels of folders, breadth first, up to 64. */
+    NcDiscFile queue[64];
+    unsigned depth[64], head = 0, tail = 0;
+    queue[tail] = (NcDiscFile){disc->root_sector, disc->root_size, 0x10};
+    depth[tail++] = 0;
+    bool lacks = false;
+    while (head < tail) {
+        const NcDiscFile d = queue[head];
+        const unsigned dd = depth[head++];
+        if (!d.size || d.size > 0x40000) {
+            continue;
+        }
+        uint8_t *buf = malloc(d.size);
+        if (!buf || !nc_disc_read_orig(disc, &d, 0, buf, d.size)) {
+            free(buf);
+            continue;
+        }
+        LangScan s = {lang, false, false, {{0}}, 0};
+        nc_disc_dir_each(buf, d.size, lang_scan_entry, &s);
+        free(buf);
+        if (s.english && s.other) {
+            return false;
+        }
+        lacks |= s.english;
+        for (unsigned i = 0; i < s.nsub && dd < 2 && tail < 64; i++) {
+            queue[tail] = s.sub[i];
+            depth[tail++] = dd + 1;
+        }
+    }
+    return lacks;
+}
+
+static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t share, uint32_t attrs, uint32_t disposition,
+                        uint32_t options, uint32_t *handle, uint32_t *info)
 {
     char name[512], path[512];
     ansi(k, nc_vm_rd32(k->vm, attrs + 4), name, sizeof(name));
@@ -1071,9 +1288,14 @@ static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t attrs, uint32_t d
             return STATUS_MEDIA_WRITE_PROTECTED;
         }
         NcDiscFile df;
+        char alt[512];
         if (!nc_disc_find(k->disc, rel, &df)) {
-            nc_log("hakuX-native-io", "open %s: not on the disc", path);
-            return STATUS_OBJECT_NAME_NOT_FOUND;
+            if (!lang_fallback(k->disc, rel, alt, sizeof(alt), &df)) {
+                nc_log("hakuX-native-io", "open %s: not on the disc", path);
+                return STATUS_OBJECT_NAME_NOT_FOUND;
+            }
+            nc_log("hakuX-native-io", "open %s: not on the disc, its English one instead (%s)", path, alt);
+            rel = alt;
         }
         const bool dir = df.attr & 0x10;
         if ((options & FILE_DIRECTORY_FILE) && !dir) {
@@ -1124,6 +1346,12 @@ static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t attrs, uint32_t d
         }
         if (exists && disposition == FILE_CREATE) {
             return STATUS_OBJECT_NAME_COLLISION;
+        }
+        if (exists && !is_dir && share_conflict(host, share_granted(access), (uint8_t)(share & 7))) {
+            if (g_trace_io) {
+                nc_log("hakuX-native-io", "open %s: sharing violation", path);
+            }
+            return STATUS_SHARING_VIOLATION;
         }
         if (!exists && (disposition == FILE_OPEN || disposition == FILE_OVERWRITE)) {
             if (g_trace_io) {
@@ -1191,6 +1419,10 @@ static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t attrs, uint32_t d
         snprintf(nf->old_path, sizeof(nf->old_path), "%s", old_path);
         nf->old_size = old_size;
         snprintf(nf->host, sizeof(nf->host), "%s", host);
+        if (!is_dir) {
+            nf->share_granted = share_granted(access);
+            nf->share_allowed = (uint8_t)(share & 7);
+        }
     }
     snprintf(nf->path, sizeof(nf->path), "%s", path);
     nf->async = !(options & FILE_SYNCHRONOUS_IO);
@@ -1208,7 +1440,7 @@ static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t attrs, uint32_t d
 static uint64_t NtCreateFile(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
     uint32_t h = 0, info = 0;
-    uint32_t st = do_open(k, a[1], a[2], a[7], a[8], &h, &info);
+    uint32_t st = do_open(k, a[1], a[6], a[2], a[7], a[8], &h, &info);
     io_status(k, a[3], st, info);
     if (st == NC_STATUS_SUCCESS) {
         nc_vm_wr32(k->vm, a[0], h);
@@ -1220,7 +1452,7 @@ static uint64_t NtCreateFile(NcKernel *k, NcFrame *f, const uint32_t *a)
 static uint64_t NtOpenFile(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
     uint32_t h = 0, info = 0;
-    uint32_t st = do_open(k, a[1], a[2], FILE_OPEN, a[5], &h, &info);
+    uint32_t st = do_open(k, a[1], a[4], a[2], FILE_OPEN, a[5], &h, &info);
     io_status(k, a[3], st, info);
     if (st == NC_STATUS_SUCCESS) {
         nc_vm_wr32(k->vm, a[0], h);
@@ -1437,9 +1669,9 @@ static bool read_run_again(NcKernel *k, const NcFile *nf, uint64_t o, uint32_t v
     bool ok = tmp && (nf->kind == F_DISC ? nc_disc_read_file(k->disc, &nf->disc, o, tmp, len)
                                          : pread(nf->fd, tmp, len, (off_t)o) == (ssize_t)len);
     for (uint32_t done = 0; ok && done < len;) {
-        const uint32_t a2 = va + done, room = NC_PAGE - (a2 & (NC_PAGE - 1));
+        const uint32_t a = va + done, room = NC_PAGE - (a & (NC_PAGE - 1));
         const uint32_t chunk = len - done < room ? len - done : room;
-        const uint32_t pa = nc_vm_phys(k->vm, a2);
+        const uint32_t pa = nc_vm_phys(k->vm, a);
         if (pa != UINT32_MAX && (uint64_t)pa + chunk <= k->vm->ram_size) {
             const uint64_t gpu = nc_vm_dma.fence ? nc_vm_dma.fence(pa, chunk) : 0;
             if (gpu && nc_vm_dma.wait) {
@@ -1450,8 +1682,8 @@ static bool read_run_again(NcKernel *k, const NcFile *nf, uint64_t o, uint32_t v
                 nc_vm_dma.wrote(pa, chunk);
             }
         } else {
-            nc_vm_will_write(a2, chunk);
-            memcpy(nc_vm_host(k->vm, a2), tmp + done, chunk);
+            nc_vm_will_write(a, chunk);
+            memcpy(nc_vm_host(k->vm, a), tmp + done, chunk);
         }
         done += chunk;
     }
@@ -1830,6 +2062,13 @@ static uint64_t NtQueryInformationFile(NcKernel *k, NcFrame *f, const uint32_t *
     case 34: /* FileNetworkOpenInformation */
         len = 0x38;
         network_open_info(nf, o);
+        if (g_trace_io) {
+            uint64_t v[7];
+            memcpy(v, o, sizeof(v));
+            nc_log("hakuX-native-io", "network open info %s: times %llx %llx %llx %llx alloc %llx size %llx attrs %x",
+                   nf->path, (unsigned long long)v[0], (unsigned long long)v[1], (unsigned long long)v[2],
+                   (unsigned long long)v[3], (unsigned long long)v[4], (unsigned long long)v[5], (unsigned)v[6]);
+        }
         break;
     case 17: /* FileAlignmentInformation */
         len = 4;
@@ -1904,6 +2143,16 @@ static uint64_t NtSetInformationFile(NcKernel *k, NcFrame *f, const uint32_t *a)
             if (v > was) {
                 regrow(nf, was, v);
             }
+        }
+        break;
+    }
+    case 30: { /* FileCompletionInformation: Port, Key (CreateIoCompletionPort) */
+        enum NcObType type;
+        const uint32_t port = nc_ob_lookup(k, nc_rd32(in), &type);
+        if (!port || type != NC_OB_IOCOMPLETION) {
+            st = NC_STATUS_INVALID_HANDLE;
+        } else {
+            g_file_port[nf - g_files] = (struct FilePort){port, nc_rd32(in + 4)};
         }
         break;
     }
@@ -2106,6 +2355,14 @@ static uint64_t NtQueryVolumeInformationFile(NcKernel *k, NcFrame *f, const uint
     }
     uint32_t len;
     const uint32_t st = volume_info(k, nf, a[4], a[2], &len);
+    if (g_trace_io && (a[4] == 3 || a[4] == 7)) {
+        const uint8_t *o = nc_vm_host(k->vm, a[2]);
+        uint64_t total, avail;
+        memcpy(&total, o, 8);
+        memcpy(&avail, o + 8, 8);
+        nc_log("hakuX-native-io", "volume size of %s: %llu units, %llu free, %u sectors a unit", nf->path,
+               (unsigned long long)total, (unsigned long long)avail, nc_rd32(o + (a[4] == 3 ? 0x10 : 0x18)));
+    }
     io_status(k, a[1], st, len);
     return st;
 }
@@ -2137,31 +2394,28 @@ typedef struct DirEntry {
     bool dir;
 } DirEntry;
 
-static void disc_dir_walk(const uint8_t *dir, uint32_t size, uint32_t off, DirEntry *out, unsigned *n, unsigned cap,
-                          unsigned depth)
+/* A disc directory's entries (nc_disc_dir_each: its tree in order, then what
+ * the tree doesn't reach) */
+typedef struct DiscList {
+    DirEntry *out;
+    unsigned *n, cap;
+} DiscList;
+
+static bool disc_list_entry(void *ctx, const uint8_t *e)
 {
-    if (off + 14 > size || depth > 64 || *n >= cap) {
-        return;
-    }
-    const uint8_t *e = dir + off;
-    const uint16_t left = nc_rd16(e), right = nc_rd16(e + 2);
-    if (left == 0xFFFF && right == 0xFFFF && e[12] == 0xFF) {
-        return;
-    }
-    if (left && left != 0xFFFF) { /* 0: no subtree */
-        disc_dir_walk(dir, size, left * 4u, out, n, cap, depth + 1);
+    DiscList *l = ctx;
+    if (*l->n >= l->cap) {
+        return true;
     }
     const uint8_t nlen = e[13];
-    if (*n < cap && off + 14 + nlen <= size && nlen < sizeof(out->name)) {
-        DirEntry *d = &out[(*n)++];
+    if (nlen < sizeof(l->out->name)) {
+        DirEntry *d = &l->out[(*l->n)++];
         memcpy(d->name, e + 14, nlen);
         d->name[nlen] = 0;
         d->size = nc_rd32(e + 8);
         d->dir = e[12] & 0x10;
     }
-    if (right && right != 0xFFFF) {
-        disc_dir_walk(dir, size, right * 4u, out, n, cap, depth + 1);
-    }
+    return false;
 }
 
 /* A mod's file or folder in a disc folder's listing (nc_disc_overlay_list):
@@ -2196,7 +2450,8 @@ static unsigned list_dir(NcKernel *k, const NcFile *nf, DirEntry *out, unsigned 
         if (nf->disc.size && nf->disc.sector < NC_DISC_OVERLAY) {
             uint8_t *dir = malloc(nf->disc.size);
             if (dir && nc_disc_read(k->disc, &nf->disc, 0, dir, nf->disc.size)) {
-                disc_dir_walk(dir, nf->disc.size, 0, out, &n, cap, 0);
+                DiscList l = {out, &n, cap};
+                nc_disc_dir_each(dir, nf->disc.size, disc_list_entry, &l);
             }
             free(dir);
         }
@@ -2318,7 +2573,7 @@ static uint64_t NtQueryDirectoryFile(NcKernel *k, NcFrame *f, const uint32_t *a)
 static uint64_t NtQueryFullAttributesFile(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
     uint32_t h = 0, info = 0;
-    uint32_t st = do_open(k, 0, a[0], FILE_OPEN, 0, &h, &info);
+    uint32_t st = do_open(k, 0, 7, a[0], FILE_OPEN, 0, &h, &info);
     if (st != NC_STATUS_SUCCESS) {
         return st;
     }
@@ -2761,10 +3016,12 @@ typedef struct NcFileState {
 
 const char *nc_io_state_drain(NcKernel *k, uint64_t timeout_ns)
 {
-    /* the game's own save on E: half written: not a state to come back to */
+    /* the game's own save on E: half written: not a state to come back to
+     * (E:\CACHE aside: Live's cache, written once and held open all the run) */
     for (unsigned i = 0; i < MAX_FILES; i++) {
         const NcFile *nf = &g_files[i];
-        if (nf->used && nf->kind == F_HOST && nf->partition == 1 && nf->wrote) {
+        if (nf->used && nf->kind == F_HOST && nf->partition == 1 && nf->wrote &&
+            !strstr(nf->path, "\\partition1\\CACHE\\") && !strstr(nf->path, "\\Partition1\\CACHE\\")) {
             nc_log("hakuX-native-state", "%s is being written", nf->path);
             return "the game is writing its save; try again in a moment";
         }
@@ -2791,6 +3048,63 @@ const char *nc_io_state_drain(NcKernel *k, uint64_t timeout_ns)
     return NULL;
 }
 
+/* A state keeps the host files (NcFile.host, old_path) by their place in
+ * the hdd folder ("Partition1/CACHE/LocalCache00.bin", ".overwrite/12-3"),
+ * so it loads from a copy of the folder elsewhere, or on another system;
+ * FILE v1..v3 states hold the absolute path of the folder they were made in. */
+static bool is_sep(char c)
+{
+    return c == '/' || c == '\\';
+}
+
+/* The part of an absolute host path under its hdd folder: from the folder's
+ * own child (PartitionN, .overwrite) on, or NULL. */
+static const char *hdd_child(const char *p)
+{
+    for (const char *s = p; *s; s++) {
+        if (!is_sep(*s)) {
+            continue;
+        }
+        const char *c = s + 1;
+        if ((!strncmp(c, "Partition", 9) && isdigit((unsigned char)c[9]) && (!c[10] || is_sep(c[10]))) ||
+            (!strncmp(c, ".overwrite", 10) && is_sep(c[10]))) {
+            return c;
+        }
+    }
+    return NULL;
+}
+
+static void host_to_state(const char *host, char *out, size_t cap)
+{
+    const size_t n = strlen(g_hdd_root);
+    const char *rel = !strncmp(host, g_hdd_root, n) && is_sep(host[n]) ? host + n + 1 : hdd_child(host);
+    memset(out, 0, cap);                /* no trace of the folder past the name */
+    snprintf(out, cap, "%s", rel ? rel : host);
+}
+
+/* The host path of a state's file in this run's hdd folder; false if it
+ * doesn't fit. */
+static bool host_from_state(char *p, size_t cap)
+{
+    const bool abs = is_sep(p[0]) || (isalpha((unsigned char)p[0]) && p[1] == ':');
+    const char *rel = abs ? hdd_child(p) : p;
+    if (!p[0] || !rel) {
+        return true;                    /* kept as it is */
+    }
+    char out[600];
+    const int n = snprintf(out, sizeof(out), "%s/%s", g_hdd_root, rel);
+    if (n < 0 || (size_t)n >= cap) {
+        return false;
+    }
+    for (char *c = out + strlen(g_hdd_root) + 1; *c; c++) {
+        if (*c == '\\') {
+            *c = '/';
+        }
+    }
+    memcpy(p, out, (size_t)n + 1);
+    return true;
+}
+
 bool nc_file_state_save(NcBuf *b)
 {
     NcFileState st = {0};
@@ -2804,8 +3118,11 @@ bool nc_file_state_save(NcBuf *b)
         if (!nf->used) {
             continue;
         }
+        NcFile out = *nf;
+        host_to_state(nf->host, out.host, sizeof(out.host));
+        host_to_state(nf->old_path, out.old_path, sizeof(out.old_path));
         nc_buf_u32(b, i);
-        nc_rec_put(b, &nc_rec_NcFile, nf);
+        nc_rec_put(b, &nc_rec_NcFile, &out);
         nc_recs_put(b, &nc_rec_DirEntry, nf->listing, sizeof(DirEntry), nf->listing ? nf->nlisting : 0);
     }
     return true;
@@ -2853,8 +3170,28 @@ bool nc_file_state_load(NcRd *r, unsigned v)
             nc_recs_get(r, &nc_rec_DirEntry, nf->listing, sizeof(DirEntry), nf->nlisting, v);
         }
         nf->fd = -1;
+        if (!host_from_state(nf->host, sizeof(nf->host)) || !host_from_state(nf->old_path, sizeof(nf->old_path))) {
+            nc_state_fail("the hdd folder's path is too long for %s", nf->path);
+            ok = false;
+            break;
+        }
         if (nf->kind == F_HOST && !nf->is_dir) {
             nf->fd = open(nf->host, O_RDWR | O_CLOEXEC);
+            int err = errno;
+            const char *rel;
+            char host[512];
+            if (nf->fd < 0 && err == ENOENT && device_of(nf->path, &rel) == nf->partition && *rel &&
+                host_path(nf->partition, rel, host, sizeof(host)) == 1 && strcmp(host, nf->host)) {
+                /* the game's own path, its names matched as the drive has them
+                 * (a state from Windows on Linux, whose names are case-sensitive) */
+                nf->fd = open(host, O_RDWR | O_CLOEXEC);
+                if (nf->fd >= 0) {
+                    snprintf(nf->host, sizeof(nf->host), "%s", host);
+                } else {
+                    err = errno;
+                }
+            }
+            errno = err;
             if (nf->fd < 0 && errno == ENOENT && nf->partition >= 3 && v < 2) {
                 /* not on the drive as saved (CACHE, restored first): deleted
                  * with this handle open, in a state from before deletes waited
@@ -2892,7 +3229,8 @@ bool nc_file_state_load(NcRd *r, unsigned v)
             }
         }
         if (nc_state_trace()) {
-            nc_log("hakuX-native-state", "file %u: %s at %llu", i, nf->path, (unsigned long long)nf->pos);
+            nc_log("hakuX-native-state", "file %u: %s%s%s%s at %llu", i, nf->path, nf->host[0] ? " (" : "",
+                   nf->host, nf->host[0] ? ")" : "", (unsigned long long)nf->pos);
         }
     }
     return ok && !r->fail;

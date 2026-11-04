@@ -7,6 +7,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 static void trim(char *s)
 {
@@ -23,8 +26,14 @@ static void trim(char *s)
 
 void cfg_load(Config *c, const char *path)
 {
+    /* path may be c's own (a reload: cfg_load(c, c->path)): kept before
+     * c is cleared. Cleared first, it read as "", the dashboard showed the
+     * defaults after each game, and saved its settings nowhere. */
+    char p[sizeof(c->path)];
+    snprintf(p, sizeof(p), "%s", path);
     memset(c, 0, sizeof(*c));
-    snprintf(c->path, sizeof(c->path), "%s", path);
+    snprintf(c->path, sizeof(c->path), "%s", p);
+    path = c->path;
     FILE *f = fopen(path, "rb");
     if (!f) {
         return;
@@ -65,8 +74,8 @@ bool cfg_save(const Config *c)
         return false;
     }
     /* the header (hakuX's earlier one becomes xbased's) */
-    const char *head = "# kantaiX options, one a line (the command line's come after and win)\n";
-    fputs(c->comments[0] && strncmp(c->comments, "# kantaiX options", 17) ? c->comments : head, f);
+    const char *head = "# xbased options, one a line (the command line's come after and win)\n";
+    fputs(c->comments[0] && strncmp(c->comments, "# hakuX options", 15) ? c->comments : head, f);
     for (int i = 0; i < c->n; i++) {
         if (c->flag[i]) {
             fprintf(f, "%s\n", c->key[i]);
@@ -197,7 +206,7 @@ const char *cfg_data_dir(void)
      * Documents) let nothing be created there: the hdd, a game's cache and
      * saves failed, and games showed their disc error. Then the user's own
      * application data folder. */
-    snprintf(probe, sizeof(probe), "%s.kantaiX-write-test", exe);
+    snprintf(probe, sizeof(probe), "%s.xbased-write-test", exe);
     SDL_IOStream *t = SDL_IOFromFile(probe, "wb");
     const bool writable = t && SDL_WriteIO(t, "x", 1) == 1;
     if (t) {
@@ -207,7 +216,7 @@ const char *cfg_data_dir(void)
     if (writable) {
         snprintf(dir, sizeof(dir), "%s", exe);
     } else {
-        char *p = SDL_GetPrefPath("", "kantaiX");
+        char *p = SDL_GetPrefPath("", "xbased");
         snprintf(dir, sizeof(dir), "%s", p ? p : exe);
         SDL_free(p);
     }
@@ -215,10 +224,78 @@ const char *cfg_data_dir(void)
     if (SDL_GetPathInfo(probe, NULL)) {
         snprintf(dir, sizeof(dir), "%s", exe);
     } else {
-        char *p = SDL_GetPrefPath("", "kantaiX");
+        char *p = SDL_GetPrefPath("", "xbased");
         snprintf(dir, sizeof(dir), "%s", p ? p : exe);
         SDL_free(p);
     }
 #endif
     return dir;
+}
+
+bool cfg_run(const char *const *args)
+{
+#ifdef _WIN32
+    /* SDL's processes open a console window for a console program (curl
+     * and tar flashed one at each start), and its windowless "background"
+     * ones give no exit code: CreateProcess with CREATE_NO_WINDOW. The
+     * command line quoted as the C runtime reads it back. */
+    char cmd[8192];
+    size_t n = 0;
+    for (int i = 0; args[i] && n < sizeof(cmd) - 4; i++) {
+        if (i) {
+            cmd[n++] = ' ';
+        }
+        cmd[n++] = '"';
+        for (const char *a = args[i]; *a && n < sizeof(cmd) - 4; a++) {
+            size_t bs = 0;
+            while (a[bs] == '\\') {
+                bs++;
+            }
+            if (a[bs] == '"' || a[bs] == 0) {
+                /* backslashes before a quote, or the closing one, doubled */
+                for (size_t k = 0; k < bs * 2 && n < sizeof(cmd) - 4; k++) {
+                    cmd[n++] = '\\';
+                }
+                a += bs;
+                if (!*a) {
+                    break;
+                }
+                cmd[n++] = '\\';
+                cmd[n++] = '"';
+            } else {
+                for (size_t k = 0; k < bs && n < sizeof(cmd) - 4; k++) {
+                    cmd[n++] = '\\';
+                }
+                a += bs;
+                cmd[n++] = *a;
+            }
+        }
+        cmd[n++] = '"';
+    }
+    cmd[n] = 0;
+    wchar_t wcmd[8192];
+    if (!MultiByteToWideChar(CP_UTF8, 0, cmd, -1, wcmd, 8192)) {
+        return false;
+    }
+    STARTUPINFOW si = {.cb = sizeof(si)};
+    PROCESS_INFORMATION pi;
+    if (!CreateProcessW(NULL, wcmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        return false;
+    }
+    CloseHandle(pi.hThread);
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD code = 1;
+    GetExitCodeProcess(pi.hProcess, &code);
+    CloseHandle(pi.hProcess);
+    return code == 0;
+#else
+    SDL_Process *p = SDL_CreateProcess(args, false);
+    if (!p) {
+        return false;
+    }
+    int code = -1;
+    SDL_WaitProcess(p, true, &code);
+    SDL_DestroyProcess(p);
+    return code == 0;
+#endif
 }

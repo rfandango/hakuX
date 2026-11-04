@@ -26,7 +26,7 @@ typedef struct In {
 
 enum Screen {
     SCR_MAIN, SCR_GAMES, SCR_GAME, SCR_GAME_SETTINGS, SCR_MODS, SCR_STATES, SCR_SETTINGS, SCR_CONTROLS,
-    SCR_REMAP, SCR_MEMORY, SCR_MEMORY_TITLE, SCR_ONLINE, SCR_ABOUT, SCR_INGAME, SCR_INGAME_SLOTS, SCR_COUNT
+    SCR_REMAP, SCR_MEMORY, SCR_MEMORY_TITLE, SCR_ONLINE, SCR_ABOUT, SCR_INGAME, SCR_INGAME_SLOTS, SCR_STICKS, SCR_COUNT
 };
 
 typedef struct Dash {
@@ -40,9 +40,13 @@ typedef struct Dash {
     int tab;                    /* the settings' tab */
     int player;                 /* the controls' player (0-3) */
     bool editing_game;          /* lists edit the game's file over the global one */
-    /* a question (yes/no), its callback */
+    /* a question (yes/no), its callback; or one with choices (dash_choose) */
     const char *ask;
     void (*on_yes)(struct Dash *);
+    const char *choices[3];
+    int nchoices;                               /* 0: yes/no */
+    void (*on_choice)(struct Dash *, int);      /* the choice, -1 backed out */
+    char ask_buf[256];
     char toast[256];
     double toast_until;
     char exe[1024];
@@ -65,7 +69,12 @@ void dash_pop(void);
 enum Screen dash_top(void);
 void dash_toast(const char *msg);
 void dash_ask(const char *question, void (*on_yes)(Dash *));
+/* A question with 2 or 3 answers, the first one selected; the question is
+ * copied. */
+void dash_choose(const char *question, const char *const *choices, int n, void (*on_choice)(Dash *, int));
 void dash_save_cfg(void);
+/* the gamepad used last (its sticks shown), NULL when none */
+SDL_Gamepad *dash_active_pad(void);
 
 /* the lists: a panel of rows, the current screen's selection and scroll */
 typedef struct List {
@@ -100,6 +109,7 @@ float ease(float t);
 void scr_settings(void);
 void scr_controls(void);
 void scr_remap(void);
+void scr_sticks(void);
 void scr_memory(void);
 void scr_memory_title(void);
 void scr_online(void);

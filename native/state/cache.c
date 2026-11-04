@@ -89,10 +89,23 @@ typedef struct IndexEntry {
 static IndexEntry *g_idx;
 static unsigned g_nidx, g_capidx;
 
+/* The last path separator in p (Windows paths have either), NULL if none. */
+static char *last_sep(char *p)
+{
+    char *s = strrchr(p, '/');
+#ifdef _WIN32
+    char *b = strrchr(p, '\\');
+    if (b > s) {
+        s = b;
+    }
+#endif
+    return s;
+}
+
 static void blob_dir(char *out, size_t n)
 {
     snprintf(out, n, "%s", nc_state_path());
-    char *slash = strrchr(out, '/');
+    char *slash = last_sep(out);
     snprintf(slash ? slash + 1 : out, n - (size_t)(slash ? slash + 1 - out : 0), "blobs");
 }
 
@@ -511,12 +524,22 @@ static void walk(const char *root, const char *rel, Walk *w)
                 w->ctime = ctime;
                 w->capf = cap;
             }
+#ifdef _WIN32
+            uint64_t mt_ns = 0, ct_ns = 0;
+            nc_stat_ns(full, &mt_ns, &ct_ns);
+            w->ctime[w->nfiles] = ct_ns;
+#else
             w->ctime[w->nfiles] = ts_ns(&sb.st_ctim);
+#endif
             NcCacheFile *f = &w->files[w->nfiles++];
             memset(f, 0, sizeof(*f));
             snprintf(f->path, sizeof(f->path), "%s", sub);
             f->size = (uint64_t)sb.st_size;
+#ifdef _WIN32
+            f->mtime_ns = mt_ns;
+#else
             f->mtime_ns = ts_ns(&sb.st_mtim);
+#endif
         }
     }
     closedir(d);
@@ -691,7 +714,13 @@ static bool restore_drive(int p, const NcCacheDir *dirs, unsigned ndirs, const N
                                            {(time_t)(f->mtime_ns / 1000000000ull), (long)(f->mtime_ns % 1000000000ull)}};
             utimensat(AT_FDCWD, full, ts, 0);
             struct stat now;
+#ifdef _WIN32
+            uint64_t ct_ns = 0;
+            index_set(key, f->size, f->mtime_ns, stat(full, &now) == 0 && !nc_stat_ns(full, NULL, &ct_ns) ? ct_ns : 0,
+                      f->hash);
+#else
             index_set(key, f->size, f->mtime_ns, stat(full, &now) == 0 ? ts_ns(&now.st_ctim) : 0, f->hash);
+#endif
             *copied += f->size;
         } else {
             nc_state_fail("the game's cache file %s can't be written back (%s)", f->path, strerror(errno));
@@ -800,7 +829,7 @@ void nc_cache_gc(const char *state_path)
 {
     char dir[600];
     snprintf(dir, sizeof(dir), "%s", state_path);
-    char *slash = strrchr(dir, '/');
+    char *slash = last_sep(dir);
     if (!slash) {
         return;
     }

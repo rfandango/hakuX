@@ -1,25 +1,41 @@
-# Mods and cheats
+# Patches, mods and cheats
 
-The mods and cheats the app ships, one folder per game. The build packs this
-folder into the APK (`android/app/build.gradle.kts`, task `syncModAssets`);
-the library's long-press menu shows **Mods & cheats** for a game that has a
-folder here, and the in-game menu's **Cheats** turns cheats on and off while
-playing. This file is not packed.
+xbased lists a game's patches under **Games > (a game) > Mods & patches**, each
+one switched on or off for that game; they apply when the game starts. They
+come from two places:
+
+- `mods/` beside the executable: the ones xbased ships (this folder).
+- `mods/` in your data folder (`~/.local/share/xbased/mods` on Linux, beside
+  the executable on Windows): your own. Put patches you download there.
 
 ```
 mods/
-  <TITLE ID>.<VERSION>/    the disc's game key (54430006.6)
-    cheats.txt             its cheats (optional)
-    <mod>/                 one mod per folder (the folder name is its id)
+  <TITLE ID>.<VERSION>/    one disc release (54430006.6)
+  <TITLE ID>/              any release of the game (54430006)
+    <name>.ips             an IPS patch of default.xbe (the usual format)
+    <mod>/                 a mod (the folder name is its id)
       mod.txt              its name, description and XBE patches
       files/               disc files it replaces or adds (optional)
+    cheats.txt             its cheats (optional, the shipped folder's)
 ```
 
-A folder is one disc release: its title ID (8 hex digits) and its
-certificate version (decimal), as the app keys a game's settings and
-savestates. Dead or Alive Ultimate's two discs are 54430006.5 and
-54430006.6; a patch or a cheat's addresses hold for one release only.
+The title ID (8 hex digits) and version are shown under a game's box art
+(Title ID 4D530051, v2: the folder `4D530051.2`). A release's folder is the
+safe choice: a patch's offsets hold for the release it was made for. Dead
+or Alive Ultimate's two discs are 54430006.5 and 54430006.6.
 
+## IPS patches
+
+The 60 fps, widescreen and other patches shared online for Xbox games are
+mostly IPS files made for the game's `default.xbe` (as Lunar IPS or FLIPS
+apply them to the extracted file). Copy one into the game's folder and it
+appears in Mods & patches under its file name (`Widescreen_16x9.ips`:
+"Widescreen 16x9"). xbased patches the executable as the game loads it; the
+disc image stays as it is. A patch made for another release of the game
+does nothing useful (or breaks it): match the title ID and version.
+
+`tools/mods/ips2mod.py` turns an IPS patch into a `mod.txt`, checking each
+record's bytes against the disc, for one that should refuse the wrong disc.
 Text files are UTF-8. A line whose first non-blank character is `#` is a
 comment. Numbers are hexadecimal with `0x`, else decimal.
 

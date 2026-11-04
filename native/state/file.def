@@ -1,5 +1,6 @@
 /* The open files (native/kernel/io.c): reopened by path on load; the disc's
- * by their directory entry; the host's by their host path. */
+ * by their directory entry; the host's by their path in the hdd folder
+ * (FILE v4; before, the host's absolute path). */
 NC_SECTION(FILE)
 
 NC_REC(NcDiscFile, 12)

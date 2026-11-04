@@ -1,0 +1,9 @@
+name: 60 fps
+description: The game presents every vblank (50 or 60 fps) instead of every other one (25-30), and beyond the display's rate with the frame rate uncapped.
+author: icup321 (XboxGraphicalPatches); hakuX port
+
+# Splinter Cell: Double Agent (USA, Europe; version 2). The device's
+# presentation interval (the D3DPRESENT_PARAMETERS field it fills at
+# 0x2E3385) is 1 instead of 2. Converted by tools/mods/ips2mod.py.
+[default.xbe]
+0x002E3387: 02 -> 01

@@ -18,7 +18,7 @@
 #include "hw/xbox/hle/vk/pipeasync.h"
 #include "hw/xbox/hle/vk/vkdev.h"
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
 #include <sys/system_properties.h>
 #include "hw/xbox/hle/prop.h"
 #endif
@@ -107,7 +107,7 @@ static int debug_switch(const char *env, const char *prop)
     if (e && *e) {
         return atoi(e) != 0;
     }
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     char v[PROP_VALUE_MAX] = "";
     if (hle_prop_get(prop, v) > 0 && (v[0] == '0' || v[0] == '1')) {
         return v[0] == '1';
@@ -156,6 +156,8 @@ static void lower_priority(void)
 {
 #ifdef __linux__
     setpriority(PRIO_PROCESS, (id_t)syscall(SYS_gettid), 10);
+#elif defined(_WIN32)
+    nc_win_thread_priority(-1);
 #endif
 }
 

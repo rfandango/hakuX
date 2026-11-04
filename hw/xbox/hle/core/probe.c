@@ -77,7 +77,7 @@ void hle_probe_hit(const HleCpu *c)
         e = getenv("HAKUX_HLE_PROBE_WORD");
         word_va = e ? (uint32_t)strtoul(e, NULL, 16) : 0;
     }
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     /* debug.hakux.probe, a new value: each probe logs its first hits again
      * (a scene reached after the boot spent them) */
     static HleProp prop;

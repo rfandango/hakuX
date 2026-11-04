@@ -1,11 +1,12 @@
-/*
- * hakuX front end — the dashboard (dash.h): its loop, input, lists, and
+﻿/*
+ * hakuX front end â€” the dashboard (dash.h): its loop, input, lists, and
  * the main, games and game screens. Settings, controls, memory and online
  * are in dash_settings.c, dash_memory.c.
  */
 #include "native/app/ui/dash.h"
 #include "native/app/ui/dash_int.h"
 #include "native/app/ui/sound.h"
+#include "native/app/ui/update.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -16,8 +17,8 @@
 #include <windows.h>
 #endif
 
-#ifndef KANTAIX_VERSION
-#define KANTAIX_VERSION "1.0.2"
+#ifndef XBASED_VERSION
+#define XBASED_VERSION "1.0.11"
 #endif
 
 Dash D;
@@ -26,8 +27,44 @@ static SDL_Texture *g_layer, *g_prev;   /* this screen's foreground, the last on
 static float g_trans = 1;               /* the transition's progress, 0-1 */
 static int g_trans_dir = 1;
 static SDL_Gamepad *g_pads[8];
+static SDL_JoystickID g_last_pad;
+
+SDL_Gamepad *dash_active_pad(void)
+{
+    for (int i = 0; i < 8; i++) {
+        if (g_pads[i] && SDL_GetGamepadID(g_pads[i]) == g_last_pad) {
+            return g_pads[i];
+        }
+    }
+    for (int i = 0; i < 8; i++) {
+        if (g_pads[i]) {
+            return g_pads[i];
+        }
+    }
+    /* in game the controllers were opened before the menu: one of them */
+    int n = 0;
+    SDL_JoystickID *ids = SDL_GetGamepads(&n);
+    SDL_Gamepad *g = n > 0 ? SDL_OpenGamepad(ids[0]) : NULL;
+    SDL_free(ids);
+    if (g) {
+        g_pads[0] = g;
+    }
+    return g;
+}
 
 /* ------------------------------------------------------------ screens */
+
+/* Snapdragon GSR became AMD FSR 1 (1.0.11): a setting that chose it chooses FSR,
+ * written so; true when it changed. */
+static bool upscale_migrate(Config *c)
+{
+    const char *v = cfg_get(c, "upscale");
+    if (v && !strcmp(v, "sgsr")) {
+        cfg_set(c, "upscale", "fsr");
+        return true;
+    }
+    return false;
+}
 
 void dash_push(enum Screen s)
 {
@@ -69,6 +106,18 @@ void dash_ask(const char *q, void (*on_yes)(Dash *))
 {
     D.ask = q;
     D.on_yes = on_yes;
+    D.nchoices = 0;
+}
+
+void dash_choose(const char *q, const char *const *choices, int n, void (*on_choice)(Dash *, int))
+{
+    snprintf(D.ask_buf, sizeof(D.ask_buf), "%s", q);
+    D.ask = D.ask_buf;
+    D.nchoices = n < 2 ? 2 : n > 3 ? 3 : n;
+    for (int i = 0; i < D.nchoices; i++) {
+        D.choices[i] = choices[i];
+    }
+    D.on_choice = on_choice;
 }
 
 void dash_save_cfg(void)
@@ -113,6 +162,21 @@ static void press(int dir)
     D.in.any = true;
 }
 
+static double g_cursor_at;  /* when the pointer showed; 0 hidden */
+
+static void cursor(bool show)
+{
+    if (show) {
+        if (g_cursor_at <= 0) {
+            SDL_ShowCursor();
+        }
+        g_cursor_at = ui_time();
+    } else if (g_cursor_at > 0) {
+        SDL_HideCursor();
+        g_cursor_at = 0;
+    }
+}
+
 static void poll_input(void)
 {
     static float ax[2];
@@ -121,11 +185,6 @@ static void poll_input(void)
     memset(in, 0, sizeof(*in));
     in->pad = pad;
     in->pad_button = -1;
-    float mx, my;
-    SDL_GetMouseState(&mx, &my);
-    float dpi = SDL_GetWindowPixelDensity(g_win);
-    in->mx = mx * dpi / ui_scale();
-    in->my = my * dpi / ui_scale();
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
         switch (e.type) {
@@ -134,6 +193,7 @@ static void poll_input(void)
             break;
         case SDL_EVENT_KEY_DOWN: {
             in->pad = false;
+            cursor(false);
             in->key = e.key.key;
             in->any = true;
             const SDL_Keycode k = e.key.key;
@@ -166,11 +226,16 @@ static void poll_input(void)
             in->text = e.text.text;
             break;
         case SDL_EVENT_MOUSE_MOTION:
-            in->moved = true;
-            in->pad = false;
+            /* a real move, not the window appearing under the pointer */
+            if (fabsf(e.motion.xrel) + fabsf(e.motion.yrel) >= 2) {
+                in->moved = true;
+                in->pad = false;
+                cursor(true);
+            }
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
             in->pad = false;
+            cursor(true);
             in->any = true;
             if (e.button.button == SDL_BUTTON_LEFT) {
                 in->click = true;
@@ -183,6 +248,7 @@ static void poll_input(void)
             break;
         case SDL_EVENT_MOUSE_WHEEL:
             in->wheel += e.wheel.y;
+            cursor(true);
             break;
         case SDL_EVENT_GAMEPAD_ADDED:
             for (int i = 0; i < 8; i++) {
@@ -203,7 +269,9 @@ static void poll_input(void)
         case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
         case SDL_EVENT_GAMEPAD_BUTTON_UP: {
             const bool down = e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+            g_last_pad = e.gbutton.which;
             in->pad = true;
+            cursor(false);
             if (down) {
                 in->pad_button = e.gbutton.button;
                 in->any = true;
@@ -229,7 +297,11 @@ static void poll_input(void)
             if (fabsf(v) > 0.5f) {
                 in->pad_axis = (e.gaxis.axis + 1) * (v < 0 ? -1 : 1);
             }
-            if (e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTX || e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY) {
+            g_last_pad = e.gaxis.which;
+            in->pad |= dash_top() == SCR_STICKS && fabsf(v) > 0.5f; /* its hints: the gamepad's */
+            /* the sticks' screen: the stick is being looked at, not steering */
+            if (dash_top() != SCR_STICKS &&
+                (e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTX || e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY)) {
                 const int a = e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY;
                 const float was = ax[a];
                 ax[a] = v;
@@ -248,6 +320,21 @@ static void poll_input(void)
         default:
             break;
         }
+    }
+    /* the pointer: hidden until the mouse moves, hidden again by the
+     * keyboard or a gamepad or after a few still seconds; nothing points
+     * while it's hidden */
+    if (g_cursor_at > 0 && ui_time() - g_cursor_at > 3) {
+        cursor(false);
+    }
+    float mx, my;
+    SDL_GetMouseState(&mx, &my);
+    float dpi = SDL_GetWindowPixelDensity(g_win);
+    in->mx = g_cursor_at > 0 ? mx * dpi / ui_scale() : -1;
+    in->my = g_cursor_at > 0 ? my * dpi / ui_scale() : -1;
+    if (g_cursor_at <= 0) {
+        in->moved = in->click = in->rclick = false;
+        in->wheel = 0;
     }
     if (g_rep_dir && ui_time() >= g_rep_at) {
         press(g_rep_dir);
@@ -313,6 +400,25 @@ static void auto_poll(void)
             in->rb = true;
         } else if (!strcmp(line, "PAD")) {
             in->pad = true;
+        } else if (!strncmp(line, "STICKS ", 7)) {
+            /* a virtual gamepad's sticks (SDL's values: lx ly rx ry, down
+             * positive), plugged in the first time */
+            static SDL_Joystick *vj;
+            int v[4] = {0};
+            if (sscanf(line + 7, "%d %d %d %d", &v[0], &v[1], &v[2], &v[3]) >= 2) {
+                if (!vj) {
+                    SDL_VirtualJoystickDesc d;
+                    SDL_INIT_INTERFACE(&d);
+                    d.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+                    d.naxes = SDL_GAMEPAD_AXIS_COUNT;
+                    d.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+                    d.name = "xbased virtual gamepad";
+                    vj = SDL_OpenJoystick(SDL_AttachVirtualJoystick(&d));
+                }
+                for (int a = 0; vj && a < 4; a++) {
+                    SDL_SetJoystickVirtualAxis(vj, a, (Sint16)(v[a] > 32767 ? 32767 : v[a] < -32768 ? -32768 : v[a]));
+                }
+            }
         } else if (!strncmp(line, "shot ", 5)) {
             const char *dir = getenv("HAKUX_AUTO_DIR");
             snprintf(g_shot_req, sizeof(g_shot_req), "%s/shot_%s.bmp", dir ? dir : ".", line + 5);
@@ -828,6 +934,7 @@ static void wait_child(void)
     SDL_ShowWindow(g_win);
     SDL_RaiseWindow(g_win);
     cfg_load(&D.global, D.global.path);     /* the game may have changed settings */
+    upscale_migrate(&D.global);
     g_auto_off = -1;    /* the scripted commands meanwhile were the game's */
 }
 
@@ -854,7 +961,7 @@ static void scr_main(void)
     const float orb_r = tall ? fminf(H * 0.11f, W * 0.18f) : H * 0.13f;
     ui_orb(ox, oy, orb_r, 0);
     /* the logo, over the orb */
-    ui_text(ox, oy - orb_r * 0.36f, "kantaiX", orb_r * 0.56f, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_CENTER);
+    ui_text(ox, oy - orb_r * 0.36f, "xbased", orb_r * 0.56f, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_CENTER);
     /* the items: green capsules fanned on the orb's right */
     for (int i = 0; i < n; i++) {
         const float t = ease(D.anim * 3 - i * 0.12f);
@@ -897,7 +1004,7 @@ static void scr_main(void)
         dash_push(SCR_ABOUT);
     }
     char v[64];
-    snprintf(v, sizeof(v), "kantaiX %s", KANTAIX_VERSION);
+    snprintf(v, sizeof(v), "xbased %s", XBASED_VERSION);
     ui_text(W - 60, H - 52, v, 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_RIGHT);
     draw_hints(T(S_SELECT), NULL, NULL, T(S_ABOUT));
 }
@@ -936,6 +1043,7 @@ static void open_game(LibGame *g)
     char p[1200];
     game_cfg_path(g, p, sizeof(p));
     cfg_load(&D.game, p);
+    upscale_migrate(&D.game);
     D.sel[SCR_GAME] = 0;
     dash_push(SCR_GAME);
 }
@@ -1132,11 +1240,12 @@ static void scr_about(void)
     draw_header(T(S_ABOUT), NULL);
     ui_orb(W / 2, H * 0.36f, 60, 0);
     char v[96];
-    snprintf(v, sizeof(v), "%s %s", T(S_VERSION), KANTAIX_VERSION);
-    ui_text(W / 2, H * 0.52f, "kantaiX", 54, UI_FONT_BOLD, UI_GREEN_HI, UI_ALIGN_CENTER);
+    snprintf(v, sizeof(v), "%s %s", T(S_VERSION), XBASED_VERSION);
+    ui_text(W / 2, H * 0.52f, "xbased", 54, UI_FONT_BOLD, UI_GREEN_HI, UI_ALIGN_CENTER);
     ui_text(W / 2, H * 0.62f, v, 22, UI_FONT_REGULAR, UI_WHITE, UI_ALIGN_CENTER);
-    ui_text(W / 2, H * 0.67f, T(S_BASED_ON), 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_CENTER);
-    ui_text(W / 2, H * 0.72f, "Fonts: Play (SIL OFL). Box art: libretro-thumbnails.", 18, UI_FONT_REGULAR, UI_GREY,
+    ui_text_fit(W / 2, H * 0.67f, T(S_BASED_ON), 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_CENTER, W - 80);
+    ui_text(W / 2, H * 0.715f, "github.com/crazyriddler/xbased", 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_CENTER);
+    ui_text(W / 2, H * 0.77f, "Fonts: Play (SIL OFL). Box art: libretro-thumbnails.", 18, UI_FONT_REGULAR, UI_GREY,
             UI_ALIGN_CENTER);
     if (D.in.back || D.in.ok) {
         dash_pop();
@@ -1150,42 +1259,117 @@ static void draw_ask(void)
 {
     const float W = ui_w(), H = ui_h();
     ui_rect(0, 0, W, H, (UiColor){0, 0, 0, 170});
-    const float w = 620, h = 230, x = (W - w) / 2, y = (H - h) / 2;
+    /* three answers take a wider panel (and the longer questions they come with) */
+    const float w = D.nchoices == 3 ? 900 : 620, h = 230, x = (W - w) / 2, y = (H - h) / 2;
     ui_glow(W / 2, H / 2, w * 0.8f, ui_alpha(UI_GREEN, 0.18f));
     ui_round(x, y, w, h, 18, (UiColor){0x0A, 0x1C, 0x06, 0xF4});
     ui_round_outline(x, y, w, h, 18, 2, UI_GREEN);
-    ui_text_fit(W / 2, y + 50, D.ask, 26, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_CENTER, w - 40);
-    static int yes;
-    const char *opts[2] = {T(S_YES), T(S_NO)};
-    for (int i = 0; i < 2; i++) {
-        const float bx = x + 70 + i * 260, by = y + 130, bw = 220, bh = 56;
+    ui_text_fit(W / 2, y + 50, D.ask, D.nchoices == 3 ? 24 : 26, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_CENTER, w - 40);
+    /* the selection: No for a yes/no question (the safe one), else the first */
+    static int sel = -1;
+    static const char *sel_for;
+    if (sel_for != D.ask) {
+        sel_for = D.ask;     /* a new question (one closed elsewhere left its selection) */
+        sel = -1;
+    }
+    const int n = D.nchoices ? D.nchoices : 2;
+    const char *opts[3] = {T(S_YES), T(S_NO), NULL};
+    for (int i = 0; D.nchoices && i < n; i++) {
+        opts[i] = D.choices[i];
+    }
+    if (sel < 0) {
+        sel = D.nchoices ? 0 : 1;
+    }
+    const float bw = n == 3 ? 260 : 220, gap = n == 3 ? 24 : 40, bh = 56;
+    const float x0 = x + (w - (n * bw + (n - 1) * gap)) / 2;
+    for (int i = 0; i < n; i++) {
+        const float bx = x0 + i * (bw + gap), by = y + 130;
         const bool over = D.in.mx >= bx && D.in.mx < bx + bw && D.in.my >= by && D.in.my < by + bh;
         if (over && D.in.moved) {
-            yes = i == 0;
+            sel = i;
         }
-        const bool s = (i == 0) == yes;
+        const bool s = i == sel;
         ui_round(bx, by, bw, bh, 28, s ? (UiColor){0x3C, 0x9A, 0x12, 0xFF} : (UiColor){0x14, 0x3A, 0x08, 0xFF});
         ui_round_outline(bx, by, bw, bh, 28, 2, s ? UI_GREEN_HI : UI_GREEN_DIM);
-        ui_text(bx + bw / 2, by + 12, opts[i], 28, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_CENTER);
+        ui_text_fit(bx + bw / 2, by + 14, opts[i], n == 3 ? 22 : 28, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_CENTER,
+                    bw - 16);
         if (over && D.in.click) {
-            yes = i == 0;
+            sel = i;
             D.in.ok = true;
         }
     }
-    if (D.in.left || D.in.right) {
-        yes = !yes;
+    if (D.in.left) {
+        sel = (sel + n - 1) % n;
+    } else if (D.in.right) {
+        sel = (sel + 1) % n;
     }
-    if (D.in.ok) {
-        void (*cb)(Dash *) = D.on_yes;
-        const bool y2 = yes;
+    if (D.in.ok || D.in.back) {
+        const int chosen = D.in.ok ? sel : -1;
+        void (*yes_cb)(Dash *) = D.nchoices ? NULL : D.on_yes;
+        void (*choice_cb)(Dash *, int) = D.nchoices ? D.on_choice : NULL;
         D.ask = NULL;
-        yes = 0;
-        if (y2 && cb) {
-            cb(&D);
+        D.nchoices = 0;
+        sel = -1;
+        if (yes_cb && chosen == 0) {
+            yes_cb(&D);
+        } else if (choice_cb) {
+            choice_cb(&D, chosen);
         }
-    } else if (D.in.back) {
-        D.ask = NULL;
-        yes = 0;
+    }
+}
+
+/* ------------------------------------------------------------ updates */
+
+static void update_chosen(Dash *d, int choice)
+{
+    if (choice == 0) {
+        if (upd_can_install()) {
+            upd_install_start();
+        } else {
+            SDL_OpenURL(upd_page());    /* a copy that can't replace itself: the release's page */
+        }
+    } else if (choice == 2) {
+        cfg_set_bool(&d->global, "update.check", false);
+        cfg_save(&d->global);
+        dash_toast(T(S_UPDATE_TURNED_OFF));
+    }
+}
+
+/* A newer release (update.c): asked about once, on the main screen; then
+ * its install's progress, and the new version started in this one's place. */
+static void update_poll(void)
+{
+    static bool asked, failed;
+    char msg[256];
+    switch (upd_state()) {
+    case UPD_AVAILABLE:
+        if (!asked && !D.ask && dash_top() == SCR_MAIN) {
+            asked = true;
+            snprintf(msg, sizeof(msg), T(S_UPDATE_AVAILABLE), upd_version(), XBASED_VERSION);
+            const char *choices[3] = {T(S_UPDATE_NOW), T(S_NOT_NOW), T(S_DONT_ASK)};
+            dash_choose(msg, choices, 3, update_chosen);
+        }
+        break;
+    case UPD_INSTALLING:
+        snprintf(msg, sizeof(msg), T(S_UPDATING), upd_version());
+        snprintf(D.toast, sizeof(D.toast), "%s", msg);
+        D.toast_until = ui_time() + 0.5;
+        break;
+    case UPD_INSTALLED:
+        if (upd_relaunch()) {
+            D.quit = true;
+            break;
+        }
+        /* fall through: started by hand, from the page */
+    case UPD_FAILED:
+        if (!failed) {
+            failed = true;
+            dash_toast(T(S_UPDATE_FAILED));
+            SDL_OpenURL(upd_page());
+        }
+        break;
+    default:
+        break;
     }
 }
 
@@ -1202,16 +1386,25 @@ int dash_run(SDL_Window *win, const char *exe)
 {
     memset(&D, 0, sizeof(D));
     g_win = win;
+    SDL_HideCursor();   /* it shows when the mouse moves (poll_input) */
+    g_cursor_at = 0;
     snprintf(D.exe, sizeof(D.exe), "%s", exe);
     char p[1200];
-    snprintf(p, sizeof(p), "%skantaiX.ini", cfg_data_dir());
+    snprintf(p, sizeof(p), "%sxbased.ini", cfg_data_dir());
     cfg_load(&D.global, p);
+    if (upscale_migrate(&D.global)) {
+        cfg_save(&D.global);
+    }
     if (cfg_get(&D.global, "uncap")) {
         /* the frame rate is each game's now (Mods & patches): no global one left unseen */
         cfg_unset(&D.global, "uncap");
         cfg_save(&D.global);
     }
     i18n_set(cfg_get(&D.global, "ui.lang"));
+    upd_cleanup();
+    if (cfg_bool(&D.global, "update.check", true)) {
+        upd_check_start(XBASED_VERSION);
+    }
     char fonts[1200];
     snprintf(fonts, sizeof(fonts), "%sfonts/", cfg_exe_dir());
     if (!ui_init(win, fonts)) {
@@ -1249,6 +1442,7 @@ int dash_run(SDL_Window *win, const char *exe)
         auto_poll();
         dash_take_folder();
         lib_poll();
+        update_poll();
         if (!fetched && !lib_scanning() && cfg_bool(&D.global, "covers", true) && lib_count()) {
             fetched = true;
             lib_fetch_all_covers();
@@ -1290,6 +1484,7 @@ int dash_run(SDL_Window *win, const char *exe)
         case SCR_SETTINGS: scr_settings(); break;
         case SCR_CONTROLS: scr_controls(); break;
         case SCR_REMAP: scr_remap(); break;
+        case SCR_STICKS: scr_sticks(); break;
         case SCR_MEMORY: scr_memory(); break;
         case SCR_MEMORY_TITLE: scr_memory_title(); break;
         case SCR_ONLINE: scr_online(); break;
@@ -1479,9 +1674,14 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
 {
     memset(&D, 0, sizeof(D));
     g_win = win;
+    SDL_HideCursor();   /* it shows when the mouse moves (poll_input) */
+    g_cursor_at = 0;
     char p[1200];
-    snprintf(p, sizeof(p), "%skantaiX.ini", cfg_data_dir());
+    snprintf(p, sizeof(p), "%sxbased.ini", cfg_data_dir());
     cfg_load(&D.global, p);
+    if (upscale_migrate(&D.global)) {
+        cfg_save(&D.global);
+    }
     i18n_set(cfg_get(&D.global, "ui.lang"));
     static LibGame game;
     memset(&game, 0, sizeof(game));
@@ -1490,6 +1690,7 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
     D.cur = &game;
     game_cfg_path(&game, p, sizeof(p));
     cfg_load(&D.game, p);
+    upscale_migrate(&D.game);
     D.stack[0] = SCR_INGAME;
     D.sel[SCR_INGAME] = 0;  /* on Resume each time, as a console's: no Quit by habit */
     g_auto_off = -1;
@@ -1536,6 +1737,7 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
         case SCR_GAME_SETTINGS: scr_game_settings(); break;
         case SCR_CONTROLS: scr_controls(); break;
         case SCR_REMAP: scr_remap(); break;
+        case SCR_STICKS: scr_sticks(); break;
         case SCR_SETTINGS: scr_settings(); break;
         default: dash_pop(); break;
         }

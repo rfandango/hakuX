@@ -505,6 +505,18 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
                  (d->gp.realtime ||
                   (boost && d->gp.dsp->core.cycle_count < GP_FRAME_CYCLES)));
 
+        /* 5.1: the GP's six speaker outputs (X:0x1400, 32 samples a channel,
+         * FL FR C LFE BL BR as DirectSound's mixbins), what its EP encodes
+         * for the Dolby Digital out; the VP's own mix has its own (vp.c) */
+        if (g_apu_out_channels == 6 && d->monitor.point != MCPX_APU_DEBUG_MON_VP) {
+            int off = (d->ep_frame_div % 8) * NUM_SAMPLES_PER_FRAME;
+            for (int c = 0; c < 6; c++) {
+                for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+                    uint32_t v = dsp_read_memory(d->gp.dsp, 'X', 0x1400 + c * 0x20 + i);
+                    g_apu_frame6[off + i][c] = v >> 8;
+                }
+            }
+        }
         if ((d->monitor.point == MCPX_APU_DEBUG_MON_GP) ||
             (d->monitor.point == MCPX_APU_DEBUG_MON_GP_OR_EP && !ep_enabled)) {
             int off = (d->ep_frame_div % 8) * NUM_SAMPLES_PER_FRAME;

@@ -6,7 +6,13 @@
 #define HW_XBOX_HLE_VK_VKDEV_H
 
 #include <volk.h>
+#ifdef __ANDROID__
 #include <vulkan/vulkan_android.h>
+#else
+/* the AHB import's names, never present off Android */
+#define VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME     "VK_ANDROID_external_memory_android_hardware_buffer"
+typedef void (*PFN_vkGetAndroidHardwareBufferPropertiesANDROID)(void);
+#endif
 
 /* Command buffers in flight (back.c's ring, one recording each): a slot's
  * recording starts once its previous submission has completed, so the
@@ -91,6 +97,7 @@ typedef struct HleCaps {
     bool swapchain;             /* the Android surface and VK_KHR_swapchain: the window's
                                    presenter (vk/swapchain.c) */
     float max_lod_bias;         /* maxSamplerLodBias */
+    float max_aniso;            /* maxSamplerAnisotropy (0: no anisotropic filtering) */
 } HleCaps;
 
 typedef struct HleVk {

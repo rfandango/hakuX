@@ -1,7 +1,7 @@
 /*
  * xbased on Linux: what Android's libc gives the core and glibc doesn't
  * (system properties: sys/system_properties.h), and the thread helpers the
- * Windows build's compat layer has (nc_desk_thread_name, _priority), and
+ * Windows build's compat layer has (nc_win_thread_name, _priority), and
  * what an older glibc lacks (arc4random: 2.36, strlcpy: 2.38) for the
  * release built on one.
  */
@@ -139,7 +139,7 @@ static void refresh(void)
     g_mtime = st.st_mtim;
 }
 
-void nc_desk_prop_set(const char *name, const char *value)
+void nc_win_prop_set(const char *name, const char *value)
 {
     pthread_mutex_lock(&g_mu);
     int slot = -1;
@@ -214,14 +214,14 @@ int __system_property_get(const char *name, char *value)
     return (int)strlen(value);
 }
 
-void nc_desk_thread_name(const char *name)
+void nc_win_thread_name(const char *name)
 {
     char n[16];
     snprintf(n, sizeof(n), "%s", name);
     pthread_setname_np(pthread_self(), n);
 }
 
-void nc_desk_thread_priority(int level)
+void nc_win_thread_priority(int level)
 {
     (void)level;    /* raising it needs privileges on Linux; the scheduler's default */
 }

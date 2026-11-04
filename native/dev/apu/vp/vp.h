@@ -79,6 +79,7 @@ typedef struct VoiceWorker {
     pthread_cond_t cond;
     float mixbins[NUM_MIXBINS][NUM_SAMPLES_PER_FRAME];
     float sample_buf[NUM_SAMPLES_PER_FRAME][2];
+    float sample6[NUM_SAMPLES_PER_FRAME][6];   /* 5.1 (g_apu_out_channels 6): the speakers' */
     VoiceWorkItem queue[MCPX_HW_MAX_VOICES];
     int queue_len;
 } VoiceWorker;

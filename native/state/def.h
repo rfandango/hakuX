@@ -35,10 +35,10 @@
  * sizes from the assembly instead) */
 #ifdef NC_STATE_PROBE
 #define NC_REC(T, size) const unsigned long nc_probe_size_##T = sizeof(T);
-#elif defined(__aarch64__)
-/* struct sizes were calibrated on Android arm32; skip whole-struct check on
- * aarch64 where pointer/alignment differences change them. Field-level checks
- * (NC_F/NC_SKIP) still run and catch actual field changes. */
+#elif defined(_WIN32) || defined(__aarch64__)
+/* Windows' host types (its pthread mutexes, NC_SKIP members) have other
+ * sizes, and arm64's differ from the arm32 baseline; the members are still
+ * checked below (NC_F / NC_SKIP). */
 #define NC_REC(T, size)
 #else
 #define NC_REC(T, size)                                                                            \

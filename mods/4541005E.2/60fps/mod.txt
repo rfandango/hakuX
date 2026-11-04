@@ -1,0 +1,13 @@
+name: 60 fps
+description: Lifts the frame limiter: the game runs at the display's rate (50 or 60 fps) instead of 25-30, and beyond it with the frame rate uncapped. The game steps by the time each frame took.
+author: icup321 (XboxGraphicalPatches); hakuX port
+
+# Medal of Honor: European Assault, the European release (version 2); the
+# USA patch's one record, the same code at the same address here.
+#
+# The main loop spins at 0x137E0 until the timer count at 0x38DC8C is the
+# frame's minimum past the last frame's (cmp edx, ecx; jb 0x137E0). The jb
+# goes: the frame starts at once, the present's interval (one vblank) the
+# only pacing left. Converted by tools/mods/ips2mod.py.
+[default.xbe]
+0x000137EA: 72 F4 -> 90 90

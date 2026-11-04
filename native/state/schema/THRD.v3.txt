@@ -1,0 +1,90 @@
+section THRD
+record NcWait
+  objects U32 x64 since 1
+  count U32 x1 since 1
+  wait_all BOOL x1 since 1
+  deadline_ns U64 x1 since 1
+  cs U32 x1 since 1
+  alertable BOOL x1 since 1
+record NcApc
+  kapc U32 x1 since 1
+  normal U32 x1 since 1
+  ctx U32 x1 since 1
+  a1 U32 x1 since 1
+  a2 U32 x1 since 1
+record NcApcChain
+  cur rec NcApc x1 since 1
+  has_cur BOOL x1 since 1
+  stage U8 x1 since 1
+  in_apc BOOL x1 since 1
+  esp U32 x1 since 1
+  eip U32 x1 since 1
+record NcSeh
+  unwind BOOL x1 since 1
+  base U32 x1 since 1
+  rec U32 x1 since 1
+  ctx U32 x1 since 1
+  reg U32 x1 since 1
+  nested U32 x1 since 1
+  target U32 x1 since 1
+record NcCpuState
+  rip U64 x1 since 1
+  gregs U64 x16 since 1
+  pf_raw U32 x1 since 1
+  af_raw U32 x1 since 1
+  flags U8 x48 since 1
+  xmm U64 x32 since 1
+  mm U64 x16 since 1
+  mxcsr U32 x1 since 1
+  fcw U16 x1 since 1
+  ftw U8 x1 since 1
+  es_idx U16 x1 since 1
+  cs_idx U16 x1 since 1
+  ss_idx U16 x1 since 1
+  ds_idx U16 x1 since 1
+  gs_idx U16 x1 since 1
+  fs_idx U16 x1 since 1
+  es_cached U32 x1 since 1
+  cs_cached U32 x1 since 1
+  ss_cached U32 x1 since 1
+  ds_cached U32 x1 since 1
+  gs_cached U64 x1 since 1
+  fs_cached U64 x1 since 1
+record NcThread
+  state U32 x1 since 1
+  ethread U32 x1 since 1
+  id U32 x1 since 1
+  priority I32 x1 since 1
+  stack_base U32 x1 since 1
+  stack_limit U32 x1 since 1
+  tib_base U32 x1 since 2
+  frame_top U32 x1 since 2
+  exception_list U32 x1 since 1
+  wait rec NcWait x1 since 1
+  suspend U32 x1 since 1
+  callout_ret U32 x4 since 1
+  callout_esp U32 x4 since 1
+  callout_irql U8 x4 since 1
+  ncallouts U32 x1 since 1
+  napcs U32 x1 since 1
+  apc rec NcApcChain x1 since 1
+  apc_outer rec NcApcChain x4 since 1
+  apc_nest U32 x1 since 1
+  seh rec NcSeh x8 since 1
+  nseh U32 x1 since 1
+  fresh BOOL x1 since 1
+  ready_seq U64 x1 since 1
+  run_seq U64 x1 since 1
+  slice_used_ns U64 x1 since 1
+  slice_start_ns U64 x1 since 1
+  slice_expired BOOL x1 since 1
+  boost I32 x1 since 3
+  no_boost BOOL x1 since 3
+record NcThreadRefs
+  current I32 x1 since 1
+  slice_thread I32 x1 since 1
+  dpc_thread I32 x1 since 1
+  isr_thread I32 x1 since 1
+  isr_interrupted I32 x1 since 1
+  resume_first I32 x1 since 1
+  point U8 x1 since 1

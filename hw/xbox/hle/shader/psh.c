@@ -340,7 +340,14 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "  return texture(sampler3D(uTex3D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), "
             "uvw);\n"
             "}\n"
+            /* a cube along no direction (a program that left the stage's
+             * texture coordinates unwritten, (0, 0, 0)) is opaque black:
+             * Driv3r's characters add an environment cube through stage 3
+             * with oT3 unwritten, and the face a PC GPU picks for (0, 0, 0)
+             * added a skin tone over Tanner's jeans and hair. Its alpha goes
+             * to the frame's, which a later pass reads: 0 there hid him. */
             "vec4 sampc(uint s, vec3 dir) {\n"
+            "  if (dir == vec3(0.0)) return vec4(0.0, 0.0, 0.0, 1.0);\n"
             "  uint ti = pc.tex[s] & 0xFFFFu, si = pc.tex[s] >> 16;\n"
             "  return texture(samplerCube(uTexCube[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), "
             "dir);\n"

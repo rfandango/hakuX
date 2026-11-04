@@ -7,7 +7,7 @@
  */
 #include "hw/xbox/hle/base.h"
 #include <math.h>
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
 #include <sys/system_properties.h>
 #endif
 
@@ -1638,9 +1638,27 @@ static uint32_t sampler_index(const uint32_t *tss, uint32_t lod_down)
                  f[0] + f[1] + f[2] < 1.5f ? VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK :
                                              VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
     }
+    /* anisotropic filtering: the game's own (an anisotropic min filter and
+     * its MAXANISOTROPY) or the app's forced level, the higher; on filtered
+     * mipmapped textures only (nearest ones keep their look) */
+    float aniso = 0.0f;
+    if (lin_min && mip && g_hvk.caps.aniso && g_hvk.caps.max_aniso >= 2.0f) {
+        const float own = (tss[TSS_MINFILTER] & 7) == 3 ? (float)tss[TSS_MAXANISOTROPY] : 0.0f;
+        aniso = MIN(MAX(own, (float)hle_host_anisotropy()), g_hvk.caps.max_aniso);
+    }
+    {
+        static unsigned made, with;
+        made++;
+        with += aniso >= 2.0f;
+        if (made == 4 || made == 16 || made == 64) {
+            hle_log("hakuX-hle-back", "samplers: %u of %u anisotropic (forced %dx, device max %.0f)", with, made,
+                    hle_host_anisotropy(), g_hvk.caps.max_aniso);
+        }
+    }
     VkSamplerCreateInfo sci = {
         .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
         .pNext = g_hvk.caps.cbc_any ? &cbc : NULL,
+        .anisotropyEnable = aniso >= 2.0f, .maxAnisotropy = aniso >= 2.0f ? aniso : 1.0f,
         .magFilter = lin_mag ? VK_FILTER_LINEAR : VK_FILTER_NEAREST,
         .minFilter = lin_min ? VK_FILTER_LINEAR : VK_FILTER_NEAREST,
         .mipmapMode = mip >= 2 ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST,
@@ -2926,7 +2944,7 @@ void hle_draw_psframe_poll(uint64_t swap)
     }
     probe_log(swap);
     hle_quirks_poll();
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
     static int64_t next_poll;
     if ((int64_t)swap < next_poll) {
         return;
@@ -3562,7 +3580,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
             const char *e = getenv("HAKUX_HLE_PSDBG");     /* debug: HlePshKey.debug */
             psdbg = e ? atoi(e) : 0;
         }
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
         {   /* on demand: debug.hakux.psdbg=<view> (0 = off) switches the combiner
              * debug view live; with pixhist.sh, a stage's value at a pixel. Polled
              * by program draws seen, not drawn: a view whose pipelines cannot be
