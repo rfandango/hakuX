@@ -22,6 +22,7 @@
 #define FLOATCONV_H
 
 #include <stdint.h>
+#include <math.h>
 
 static inline float int8_to_float(int8_t x)
 {
@@ -65,7 +66,10 @@ static inline uint32_t float_to_24b(float value)
     } else if (scaled_value <= (-8.0 * 0x100000)) {
         int24 = -1 - 0x7fffff;
     } else {
-        int24 = lrint(scaled_value);
+        /* MCPX rounds 24-bit mixbin writes with halves UP (towards +inf),
+         * not the host FPU's ties-to-even lrint behaviour.
+         * Source: raddad772 Xbox APU tests, xemu PR #3105 45af4ac. */
+        int24 = (int)floor(scaled_value + 0.5);
     }
     return int24 & 0xffffff;
 }

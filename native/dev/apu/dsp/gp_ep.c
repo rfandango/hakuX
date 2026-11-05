@@ -185,9 +185,9 @@ static void gp_fifo_rw(void *opaque, uint8_t *ptr, unsigned int index,
     //     base, end, cur, len);
 
     /* DSP hangs if current >= end; but forces current >= base */
-    assert(cur < end);
-    if (cur < base) {
-        cur = base;
+    if (!APU_CHECK(end > base)) return;
+    if (cur >= end || cur < base) {
+        cur = base + (cur >= base ? (cur - base) % (end - base) : 0);
     }
 
     cur = circular_scatter_gather_rw(d,
@@ -253,11 +253,10 @@ static void ep_fifo_rw(void *opaque, uint8_t *ptr, unsigned int index,
     }
 
     /* DSP hangs if current >= end; but forces current >= base */
-    if (cur >= end) {
-        cur = cur % (end - base);
-    }
-    if (cur < base) {
-        cur = base;
+    if (!APU_CHECK(end > base)) return; /* guest-controlled empty FIFO */
+    if (cur >= end || cur < base) {
+        /* Wrap relative to FIFO base, not address zero. */
+        cur = base + (cur >= base ? (cur - base) % (end - base) : 0);
     }
 
     cur = circular_scatter_gather_rw(d,
@@ -499,11 +498,18 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
         bool boost = !d->gp.realtime &&
                      apu_ld(&d->gp_boost_until_us) >
                          apu_host_us();
-        do {
-            dsp_run(d->gp.dsp, 1000);
-        } while (!d->gp.dsp->core.is_idle &&
-                 (d->gp.realtime ||
-                  (boost && d->gp.dsp->core.cycle_count < GP_FRAME_CYCLES)));
+        /* Bound execution even if a guest program never signals idle. The
+         * interpreter counts executed instructions, NOT exact hardware
+         * cycles; this is a safety ceiling, not cycle-perfect timing. */
+        const uint32_t gp_limit = (d->gp.realtime || boost)
+                                    ? GP_FRAME_CYCLES : 1000;
+        while (!d->gp.dsp->core.is_idle &&
+               d->gp.dsp->core.cycle_count < gp_limit) {
+            const uint32_t before = d->gp.dsp->core.cycle_count;
+            const uint32_t chunk = MIN(1000u, gp_limit - before);
+            dsp_run(d->gp.dsp, (int)chunk);
+            if (d->gp.dsp->core.cycle_count <= before) break;
+        }
 
         if ((d->monitor.point == MCPX_APU_DEBUG_MON_GP) ||
             (d->monitor.point == MCPX_APU_DEBUG_MON_GP_OR_EP && !ep_enabled)) {
@@ -525,9 +531,17 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
             dsp_start_frame(d->ep.dsp);
             d->ep.dsp->core.is_idle = false;
             d->ep.dsp->core.cycle_count = 0;
-            do {
-                dsp_run(d->ep.dsp, 1000);
-            } while (!d->ep.dsp->core.is_idle && d->ep.realtime);
+            /* This ceiling prevents an EP program from holding the APU lock
+             * indefinitely. It does not make the legacy interpreter real-time. */
+            const uint32_t ep_limit = d->ep.realtime
+                ? 8u * GP_FRAME_CYCLES : 1000u;
+            while (!d->ep.dsp->core.is_idle &&
+                   d->ep.dsp->core.cycle_count < ep_limit) {
+                const uint32_t before = d->ep.dsp->core.cycle_count;
+                const uint32_t chunk = MIN(1000u, ep_limit - before);
+                dsp_run(d->ep.dsp, (int)chunk);
+                if (d->ep.dsp->core.cycle_count <= before) break;
+            }
         }
     }
 }

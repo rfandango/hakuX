@@ -40,7 +40,26 @@ typedef struct MCPXAPUVoiceFilter {
     uint16_t voice;
     float resample_buf[NUM_SAMPLES_PER_FRAME * 2];
     SRC_STATE *resampler;
+    /* Transient VP oscillator/pitch and coefficient-ramp state. These are
+     * reset on VOICE_ON, not written to savestates; guest registers remain
+     * authoritative. Source: original Xbox measurements, xemu PR #3105
+     * commits e38ad53, e1a8fad and 957c5ee. */
+    uint16_t lfo_phase[2];
+    uint16_t lfo_wait[2];
+    bool lfo_armed;
+    double previous_pitch;
+    bool previous_pitch_valid;
+    float previous_dls2_f[2];
+    float previous_paraeq_f[2];
+    bool previous_dls2_valid;
+    bool previous_paraeq_valid;
+    /* Per-voice route gains in MCPX 1/16384 units. Host-side transient
+     * state only: reset on VOICE_ON or reset; newly started voices fade in.
+     * Source: xemu PR #3105 commit 8156cca. */
+    uint16_t previous_mix_gain[8];
     sv_filter svf[2];
+    sv_filter paraeq[2];      /* separate SVF integrators for EQ modes */
+    double i3dl2_state[2];     /* independent direct/room LPF histories */
     HrtfFilter hrtf;
     /* The voice table for voice_resample_callback (libsamplerate's callback
      * signature cannot be extended). Set by voice_resample before

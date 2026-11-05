@@ -53,4 +53,43 @@ static inline void mix_one_bin(float *dst, const float *src, float g) {
 #endif
 }
 
+/* The MCPX interpolates each route's quantised gain across 32 samples.
+ * Sample 0 uses the previous gain and sample 31 is 31/32 toward the
+ * current target. NEON remains in use for both the constant and ramped
+ * paths, preserving hakuX's per-bin worker optimisations.
+ * Source: raddad772 Xbox tests, xemu PR #3105 commit 8156cca. */
+static inline unsigned mcpx_gain_at(unsigned previous, unsigned target,
+                                    unsigned sample)
+{
+    return (previous * (NUM_SAMPLES_PER_FRAME - sample) +
+            target * sample) / NUM_SAMPLES_PER_FRAME;
+}
+static inline void mix_one_bin_ramped(float *dst, const float *src,
+                                      unsigned previous, unsigned target,
+                                      float headroom)
+{
+    if (previous == target) {
+        mix_one_bin(dst, src, (float)target / (16384.0f * headroom));
+        return;
+    }
+#if defined(__aarch64__)
+    for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i += 4) {
+        float gains[4];
+        for (int j = 0; j < 4; j++) {
+            gains[j] = (float)mcpx_gain_at(previous, target, i+j) /
+                       (16384.0f * headroom);
+        }
+        float32x4_t d = vld1q_f32(dst+i);
+        float32x4_t x = vld1q_f32(src+i);
+        d = vfmaq_f32(d, x, vld1q_f32(gains));
+        vst1q_f32(dst+i, d);
+    }
+#else
+    for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+        dst[i] += src[i] * (float)mcpx_gain_at(previous, target, i) /
+                  (16384.0f * headroom);
+    }
+#endif
+}
+
 #endif /* HW_XBOX_MCPX_APU_VP_MIX_INLINE_H */

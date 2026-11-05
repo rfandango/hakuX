@@ -1,265 +1,147 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-
+#include <stdint.h>
+#include <pthread.h>
 #if defined(__aarch64__)
 #include <arm_neon.h>
 #endif
-
 #include "resample.h"
 
-/*
- * Linear-interpolation resampler stub used in place of libsamplerate.
- *
- * Per-refill malloc/memcpy/free was the bulk of the cost in profiling
- * (PGR2 race, 2026-06-01 ~3.4% host CPU). Replace with a fixed inline
- * buffer + memmove-compact on refill. The lerp inner loop gets a NEON
- * 2-channel specialization; ch=2 is the only used case (vp.c:1255
- * hardcodes channels=2). Scalar fallback preserved for other channel
- * counts and non-AArch64 builds.
- *
- * Buffer sizing: the only producer is voice_resample_callback which
- * returns at most NUM_SAMPLES_PER_FRAME=32 frames per call. Worst-case
- * residue carried across a refill is < 1 frame (we compact whole
- * frames), so 2 * 32 = 64 frames is a safe upper bound. We use 128 to
- * give comfortable headroom and absorb any future bumps.
+/* hakuX MCPX 8-tap, 16.16 cursor resampler. Preserve the callback's 32-frame
+ * refill (including CBO/SSL/notifications and silent-voice decode skip), and
+ * the existing per-voice SRC_STATE allocation/reset API. The kernel weights
+ * are quantised to 1/65536; measured by raddad772 against retail Xbox APU.
+ * Sub-1/256 fractional interpolation is an approximation also used in the
+ * reference xemu PR #3105, commit 38e5733.
  */
-#define STUB_MAX_CHANNELS 2
-#define STUB_BUFFER_FRAMES 128
-
+#define MCPX_REFILL 32
+static float lagrange[257][8];
+static pthread_once_t lagrange_once=PTHREAD_ONCE_INIT;
+static void init_lagrange(void) {
+    for(int r=0;r<=256;r++) {
+        for(int k=-3;k<=4;k++) {
+            double w=1.0;
+            for(int j=-3;j<=4;j++) if(j!=k)
+                w*=((r/256.0)-j)/(k-j);
+            lagrange[r][k+3]=(float)(round(w*65536.0)/65536.0);
+        }
+    }
+}
 struct SRC_STATE {
     src_callback_t cb;
     void *cb_data;
     int channels;
-
-    /* Inline buffer. Layout: interleaved frames, frame i at
-     * input_buf[i * channels + c]. After every refill, the live region
-     * starts at index 0 and runs for input_len frames. */
-    float input_buf[STUB_BUFFER_FRAMES * STUB_MAX_CHANNELS];
-    int input_len;     /* frames currently live in input_buf */
-    float input_pos;   /* fractional read cursor in frames; >=0, < input_len */
+    float input[MCPX_REFILL*2];
+    int input_len, input_idx;
+    float taps[8][2];
+    uint32_t pos;
 };
-
-SRC_STATE *src_callback_new(src_callback_t cb, int converter_type, int channels,
-                            int *error, void *cb_data)
-{
-    (void)converter_type;
-    if (error) {
-        *error = 0;
-    }
-    if (channels < 1 || channels > STUB_MAX_CHANNELS) {
-        if (error) {
-            *error = -1;
-        }
+SRC_STATE *src_callback_new(src_callback_t cb,int type,int channels,
+                            int *error,void *userdata) {
+    (void)type;
+    if(error) *error=0;
+    if(!cb || channels<1 || channels>2) {
+        if(error) *error=-1;
         return NULL;
     }
-    SRC_STATE *state = (SRC_STATE *)calloc(1, sizeof(*state));
-    if (!state) {
-        if (error) {
-            *error = -1;
-        }
-        return NULL;
-    }
-    state->cb = cb;
-    state->cb_data = cb_data;
-    state->channels = channels;
-    state->input_len = 0;
-    state->input_pos = 0.0f;
-    return state;
+    SRC_STATE *s=calloc(1,sizeof(*s));
+    if(!s) { if(error) *error=-1; return NULL; }
+    s->cb=cb; s->cb_data=userdata; s->channels=channels;
+    s->pos=5u<<16; /* first output aligns at input sample 0 */
+    pthread_once(&lagrange_once,init_lagrange);
+    return s;
 }
-
-/*
- * Compact already-consumed frames out of the buffer and pull new data
- * from the callback.
- *
- * Returns 1 if the buffer now has at least 2 frames (the minimum
- * needed to produce a single interpolated output), 0 otherwise.
- */
-static int src_refill_input(SRC_STATE *state)
-{
-    int ch = state->channels;
-
-    /* Number of whole frames already consumed. The fractional part of
-     * input_pos stays with us; we will rebase it onto frame 0. */
-    int consumed = (int)state->input_pos;
-    if (consumed < 0) {
-        consumed = 0;
-    }
-    if (consumed > state->input_len) {
-        consumed = state->input_len;
-    }
-
-    int residue = state->input_len - consumed;
-    if (residue < 0) {
-        residue = 0;
-    }
-
-    /* Compact residue to slot 0. memmove because the regions may
-     * overlap when consumed < residue. */
-    if (residue > 0 && consumed > 0) {
-        memmove(state->input_buf,
-                state->input_buf + consumed * ch,
-                sizeof(float) * residue * ch);
-    }
-    state->input_len = residue;
-    state->input_pos -= (float)consumed;
-    if (state->input_pos < 0.0f) {
-        state->input_pos = 0.0f;
-    }
-
-    /* Pull new data. Caller (voice_resample_callback) returns at most
-     * NUM_SAMPLES_PER_FRAME=32 frames; the buffer always has room. */
-    float *new_data = NULL;
-    long got = state->cb(state->cb_data, &new_data);
-    if (got <= 0 || new_data == NULL) {
-        /* End-of-stream: no new data. Caller can still drain whatever
-         * residue we have (>=2 frames required for one lerp output). */
-        return residue >= 2;
-    }
-
-    int max_new = STUB_BUFFER_FRAMES - residue;
-    if (got > max_new) {
-        /* Defensive clamp; the callsite never produces this in
-         * practice, but we must not overrun the inline buffer. */
-        got = max_new;
-    }
-
-    if (got > 0) {
-        memcpy(state->input_buf + residue * ch,
-               new_data,
-               sizeof(float) * (size_t)got * (size_t)ch);
-        state->input_len = residue + (int)got;
-    }
-
-    return state->input_len >= 2;
-}
-
-long src_callback_read(SRC_STATE *state, double ratio, long frames, float *data)
-{
-    if (!state || !state->cb || !data || frames <= 0) {
-        return 0;
-    }
-
-    if (ratio <= 0.0) {
-        ratio = 1.0;
-    }
-
-    int ch = state->channels;
-    float step = (float)(1.0 / ratio);
-    long out_frames = 0;
-
-#if defined(__aarch64__)
-    if (ch == 2) {
-        /* Fast path: 2-channel NEON lerp. One float32x2_t FMA per
-         * output frame. Bit-identical to the scalar form
-         *   out[c] = s0[c] + frac * (s1[c] - s0[c])
-         * because vfma_n_f32(a, b, n) computes a + b*n with a single
-         * rounding (same as the scalar expression after CSE on this
-         * target's IEEE-754 FMA-or-not behavior — both forms compile
-         * to the same FMLA on AArch64 with -ffp-contract=fast, which
-         * is the project default; otherwise both produce the same
-         * unfused mul+add). */
-        float pos = state->input_pos;
-        while (out_frames < frames) {
-            int need = (int)pos + 1;
-            if (need >= state->input_len) {
-                /* Flush pos back to state before refill so refill's
-                 * consumed-frame math sees the latest cursor. */
-                state->input_pos = pos;
-                if (!src_refill_input(state)) {
-                    break;
-                }
-                pos = state->input_pos;
-                if (state->input_len < 2) {
-                    break;
-                }
-                continue;
-            }
-
-            int idx0 = (int)pos;
-            int idx1 = idx0 + 1;
-            if (idx1 >= state->input_len) {
-                /* Need refill — same path as above. */
-                state->input_pos = pos;
-                if (!src_refill_input(state)) {
-                    break;
-                }
-                pos = state->input_pos;
-                if (state->input_len < 2) {
-                    break;
-                }
-                continue;
-            }
-
-            float frac = pos - (float)idx0;
-            const float *base = state->input_buf;
-            float32x2_t s0 = vld1_f32(base + idx0 * 2);
-            float32x2_t s1 = vld1_f32(base + idx1 * 2);
-            float32x2_t d  = vsub_f32(s1, s0);
-            float32x2_t r  = vfma_n_f32(s0, d, frac);
-            vst1_f32(data + out_frames * 2, r);
-
-            out_frames++;
-            pos += step;
-        }
-        state->input_pos = pos;
-        return out_frames;
-    }
-#endif
-
-    /* Scalar fallback: any channel count, non-AArch64. */
-    while (out_frames < frames) {
-        int need = (int)state->input_pos + 1;
-        if (need >= state->input_len) {
-            if (!src_refill_input(state)) {
-                break;
-            }
-            if (state->input_len < 2) {
-                break;
-            }
-            continue;
-        }
-
-        int idx0 = (int)state->input_pos;
-        int idx1 = idx0 + 1;
-        if (idx1 >= state->input_len) {
-            if (!src_refill_input(state)) {
-                break;
-            }
-            if (state->input_len < 2) {
-                break;
-            }
-            continue;
-        }
-
-        float frac = state->input_pos - (float)idx0;
-        const float *s0 = state->input_buf + idx0 * ch;
-        const float *s1 = state->input_buf + idx1 * ch;
-
-        for (int c = 0; c < ch; c++) {
-            data[out_frames * ch + c] = s0[c] + frac * (s1[c] - s0[c]);
-        }
-
-        out_frames++;
-        state->input_pos += step;
-    }
-
-    return out_frames;
-}
-
-int src_reset(SRC_STATE *state)
-{
-    if (state) {
-        state->input_len = 0;
-        state->input_pos = 0.0f;
-    }
+int src_reset(SRC_STATE *s) {
+    if(!s) return 0;
+    s->input_len=s->input_idx=0;
+    memset(s->taps,0,sizeof(s->taps));
+    s->pos=5u<<16;
     return 0;
 }
-
-const char *src_strerror(int error)
-{
+const char *src_strerror(int error) {
     (void)error;
-    return "libsamplerate stub";
+    return "hakuX MCPX Lagrange resampler";
+}
+static void read_tap(SRC_STATE *s) {
+    if(s->input_idx>=s->input_len) {
+        float *data=NULL;
+        long n=s->cb(s->cb_data,&data);
+        if(n>0 && data) {
+            if(n>MCPX_REFILL) n=MCPX_REFILL;
+            memcpy(s->input,data,(size_t)n*(size_t)s->channels*sizeof(float));
+            s->input_len=(int)n;
+        } else {
+            s->input_len=0;
+        }
+        s->input_idx=0;
+    }
+    memmove(s->taps[0],s->taps[1],7*sizeof(s->taps[0]));
+    for(int ch=0;ch<s->channels;ch++)
+        s->taps[7][ch]=(s->input_idx<s->input_len) ?
+              s->input[s->input_idx*s->channels+ch] : 0.0f;
+    if(s->channels==1) s->taps[7][1]=s->taps[7][0];
+    if(s->input_idx<s->input_len) s->input_idx++;
+}
+long src_callback_read_steps(SRC_STATE *s,const uint32_t *steps,
+                             long frames,float *out) {
+    if(!s || !steps || !out || frames<=0) return 0;
+    for(long n=0;n<frames;n++) {
+        while(s->pos>=65536u) {
+            read_tap(s);
+            s->pos-=65536u;
+        }
+        unsigned idx=s->pos>>8;
+        float a=(s->pos&255u)*(1.0f/256.0f);
+        float w[8];
+        for(int k=0;k<8;k++)
+            w[k]=lagrange[idx][k]+(lagrange[idx+1][k]-lagrange[idx][k])*a;
+#if defined(__aarch64__)
+        if(s->channels==2) {
+            float32x2_t acc=vdup_n_f32(0.0f);
+            if(s->pos==0) {
+                acc=vld1_f32(s->taps[3]);
+            } else {
+                for(int k=0;k<8;k++)
+                    acc=vfma_n_f32(acc,vld1_f32(s->taps[k]),w[k]);
+            }
+            vst1_f32(out+2*n,acc);
+        } else
+#endif
+        {
+            for(int ch=0;ch<s->channels;ch++) {
+                float acc=(s->pos==0) ? s->taps[3][ch] : 0.0f;
+                if(s->pos) for(int k=0;k<8;k++) acc+=w[k]*s->taps[k][ch];
+                out[n*s->channels+ch]=acc;
+            }
+        }
+        /* Avoid arithmetic overflow in the 16.16 accumulator at extreme
+         * guest pitch settings; a 64-bit intermediate preserves the full step. */
+        uint64_t next=(uint64_t)s->pos+steps[n];
+        if(next>UINT32_MAX) {
+            /* Extremely large pitch: keep the fractional portion, letting
+             * the following samples consume as many input frames as needed. */
+            uint64_t whole=next>>16;
+            while(whole--) read_tap(s);
+            s->pos=(uint32_t)(next&0xFFFFu);
+        } else s->pos=(uint32_t)next;
+    }
+    return frames;
+}
+long src_callback_read(SRC_STATE *s,double ratio,long frames,float *data) {
+    if(!s || !data || frames<=0) return 0;
+    if(!(ratio>0.0)) ratio=1.0;
+    double x=65536.0/ratio;
+    uint32_t step=(uint32_t)fmin(4294967295.0,fmax(1.0,x));
+    uint32_t local[32];
+    for(int i=0;i<32;i++) local[i]=step;
+    long done=0;
+    while(done<frames) {
+        int n=(int)((frames-done)<32 ? frames-done : 32);
+        src_callback_read_steps(s,local,n,data+done*s->channels);
+        done+=n;
+    }
+    return done;
 }
 
 void src_float_to_short_array(const float *in, short *out, int len)
