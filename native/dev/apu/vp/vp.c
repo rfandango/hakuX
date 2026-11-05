@@ -147,31 +147,75 @@ static void set_notify_status(MCPXAPUState *d, uint32_t v, int notifier,
 static void voice_reset_filters(MCPXAPUState *d, uint16_t v)
 {
     assert(v < MCPX_HW_MAX_VOICES);
+    memset(d->vp.filters[v].previous_mix_gain, 0,
+           sizeof(d->vp.filters[v].previous_mix_gain));
     memset(&d->vp.filters[v].svf, 0, sizeof(d->vp.filters[v].svf));
-    if (d->vp.filters[v].resampler) {
-        src_reset(d->vp.filters[v].resampler);
+    memset(&d->vp.filters[v].paraeq, 0, sizeof(d->vp.filters[v].paraeq));
+    memset(&d->vp.filters[v].i3dl2_state, 0,
+           sizeof(d->vp.filters[v].i3dl2_state));
+    MCPXAPUVoiceFilter *f = &d->vp.filters[v];
+    f->lfo_phase[0] = f->lfo_phase[1] = 0;
+    f->lfo_wait[0] = f->lfo_wait[1] = 0;
+    f->lfo_armed = false;
+    f->previous_pitch_valid = false;
+    f->previous_dls2_valid = false;
+    f->previous_paraeq_valid = false;
+    if (f->resampler) {
+        src_reset(f->resampler);
     }
 }
 
-static float clampf(float v, float min, float max)
+/* Retail MCPX frequency control uses units of 1/4096 octave but
+ * quantises the exponent to 1/1024 octave, then to 16-bit /65536.
+ * The top is FFFFh, not unity (1.0f).
+ * Source: raddad772, xemu PR #3105 b323e32.
+ */
+static float mcpx_filter_frequency(double fc)
 {
-    if (v < min) {
-        return min;
-    } else if (v > max) {
-        return max;
-    } else {
-        return v;
-    }
+    /* 1/1024-octave LOG coefficient uses FLOOR, not nearest octave step.
+     * A negative test value 0xD97E must produce exactly 0x3043.
+     * Earlier hakuX stage3 erroneously rounded the log step here.
+     * Source: raddad772 retail MCPX tests, xemu PR #3105 b323e32. */
+    int k=(int)floor(fc/4.0);
+    int octave=(int)floor(k/1024.0);
+    double c=ldexp(exp2((k-octave*1024)/1024.0)*65536.0,octave);
+    return (float)(fmin(fmax(floor(c+0.5),0.0),65535.0)/65536.0);
 }
 
-/* attenuate()'s values for the 4096 volumes, computed once (the same
- * expression: a voice asks for 16 a frame) */
+/* MCPX volume curve in units of 1/16384: the console linearly
+ * interpolates between integer-dB anchors (4 * round(4095 * 10^(-dB/20))),
+ * truncating the result. After 48 dB (0xC00) it linearly fades from
+ * 64/16384 to zero at 63 dB (0xFC0), rather than following an exponential.
+ * Attenuation zero is exactly unity. Cache all 4096 values for the hot path.
+ * Source: raddad772's retail Xbox tests, xemu-project/xemu#3105 fb7e45a.
+ * https://github.com/xemu-project/xemu/pull/3105
+ */
 static float g_attenuation[0x1000];
 
 static void attenuation_init(void)
 {
-    for (int vol = 0; vol < 0x1000; vol++) {
-        g_attenuation[vol] = (vol == 0xFFF) ? 0.0 : powf(10.0f, vol/(64.0 * -20.0f));
+    unsigned anchors[49];
+    anchors[0] = 16384; /* exact unity for 0 dB */
+    for (int db = 1; db <= 48; db++) {
+        anchors[db] = 4u * (unsigned)lroundf(4095.0f *
+                                              powf(10.0f, -db / 20.0f));
+    }
+
+    for (unsigned vol = 0; vol < 0x1000; vol++) {
+        unsigned gain;
+        if (vol == 0) {
+            gain = 16384;
+        } else if (vol < 48u * 64u) {
+            unsigned db = vol >> 6;
+            unsigned frac = vol & 63u;
+            gain = (anchors[db] * (64u - frac) +
+                    anchors[db + 1] * frac) / 64u;
+        } else if (vol < 63u * 64u) {
+            gain = (64u * (63u * 64u - vol)) / (15u * 64u);
+        } else {
+            gain = 0;
+        }
+        g_attenuation[vol] = (float)gain / 16384.0f;
     }
 }
 
@@ -518,11 +562,29 @@ static bool is_voice_locked(MCPXAPUState *d, uint16_t v)
     return (apu_ld(&d->vp.voice_locked[v / 64]) & mask) != 0;
 }
 
+/* Decode MCPX HRIR coefficients as 8-bit sign-magnitude minifloats:
+ * S EEE MMMM; e=0: m/2048, e>0: (16+m)*2^(e-1)/2048.
+ * Retail Xbox tests found 0x40 = 1/16 (rather than 1/2 from int8/128).
+ * Source: raddad772, xemu-project/xemu#3105, commit ccc18b4:
+ * https://github.com/xemu-project/xemu/pull/3105
+ * The companion hrtf.h fix preserves this magnitude without normalization.
+ */
+static float hrtf_coeff_to_float(uint8_t encoded)
+{
+    unsigned exponent = (encoded >> 4) & 7u;
+    unsigned mantissa = encoded & 15u;
+    unsigned magnitude = exponent ? ((16u + mantissa) << (exponent - 1))
+                                  : mantissa;
+    float coefficient = (float)magnitude / 2048.0f;
+    return (encoded & 0x80u) ? -coefficient : coefficient;
+}
+
 static void set_hrir_coeff_tar(MCPXAPUState *d, int channel, int coeff_idx,
                                int8_t value)
 {
     int entry = d->vp.hrtf.current_entry;
-    d->vp.hrtf.entries[entry].hrir[channel][coeff_idx] = int8_to_float(value);
+    d->vp.hrtf.entries[entry].hrir[channel][coeff_idx] =
+        hrtf_coeff_to_float((uint8_t)value);
 }
 
 static void fe_method(MCPXAPUState *d, uint32_t method, uint32_t argument)
@@ -600,7 +662,8 @@ static void fe_method(MCPXAPUState *d, uint32_t method, uint32_t argument)
                                NV_PAVS_VOICE_CFG_ENV0_EA_DELAYTIME);
             voice_set_mask(d, selected_handle, NV_PAVS_VOICE_CUR_ECNT,
                            NV_PAVS_VOICE_CUR_ECNT_EACOUNT, delay_time * 16);
-        } else if (ea_start == NV_PAVS_VOICE_PAR_STATE_EFCUR_ATTACK) {
+        } else if (ea_start == NV_PAVS_VOICE_PAR_STATE_EFCUR_ATTACK ||
+                   ea_start == NV_PAVS_VOICE_PAR_STATE_EFCUR_DECAY) {
             voice_set_mask(d, selected_handle, NV_PAVS_VOICE_CUR_ECNT,
                            NV_PAVS_VOICE_CUR_ECNT_EACOUNT, 0);
         } else if (ea_start == NV_PAVS_VOICE_PAR_STATE_EFCUR_HOLD) {
@@ -621,7 +684,8 @@ static void fe_method(MCPXAPUState *d, uint32_t method, uint32_t argument)
                                NV_PAVS_VOICE_CFG_ENV0_EA_DELAYTIME);
             voice_set_mask(d, selected_handle, NV_PAVS_VOICE_CUR_ECNT,
                            NV_PAVS_VOICE_CUR_ECNT_EFCOUNT, delay_time * 16);
-        } else if (ef_start == NV_PAVS_VOICE_PAR_STATE_EFCUR_ATTACK) {
+        } else if (ef_start == NV_PAVS_VOICE_PAR_STATE_EFCUR_ATTACK ||
+                   ef_start == NV_PAVS_VOICE_PAR_STATE_EFCUR_DECAY) {
             voice_set_mask(d, selected_handle, NV_PAVS_VOICE_CUR_ECNT,
                            NV_PAVS_VOICE_CUR_ECNT_EFCOUNT, 0);
         } else if (ef_start == NV_PAVS_VOICE_PAR_STATE_EFCUR_HOLD) {
@@ -634,6 +698,20 @@ static void fe_method(MCPXAPUState *d, uint32_t method, uint32_t argument)
         // FIXME: Will count be overwritten in other cases too?
 
         voice_reset_filters(d, selected_handle);
+        /* Reset stale HRTF delay/history on a new voice. Its first frame
+         * must start at the programmed entry, not ramp from zero.
+         * Source: raddad772 Xbox tests, xemu PR #3105 21db778. */
+        hrtf_filter_init(&d->vp.filters[selected_handle].hrtf);
+        if (selected_handle < MCPX_HW_MAX_3D_VOICES) {
+            uint16_t target = voice_get_mask(d, selected_handle,
+                          NV_PAVS_VOICE_CFG_HRTF_TARGET,
+                          NV_PAVS_VOICE_CFG_HRTF_TARGET_HANDLE);
+            if (target != HRTF_NULL_HANDLE && target < HRTF_ENTRY_COUNT) {
+                hrtf_filter_set_target_params(&d->vp.filters[selected_handle].hrtf,
+                                               d->vp.hrtf.entries[target].hrir,
+                                               d->vp.hrtf.entries[target].itd);
+            }
+        }
         voice_set_mask(d, selected_handle, NV_PAVS_VOICE_PAR_STATE,
                        NV_PAVS_VOICE_PAR_STATE_ACTIVE_VOICE, 1);
         break;
@@ -740,9 +818,17 @@ static void fe_method(MCPXAPUState *d, uint32_t method, uint32_t argument)
         voice_set_mask(d, d->regs[NV_PAPU_FECV], NV_PAVS_VOICE_TAR_VOLC,
                        0xFFFFFFFF, argument);
         break;
+    case NV1BA0_PIO_SET_VOICE_LFO_DELAY:
+        voice_set_mask(d, d->regs[NV_PAPU_FECV], NV_PAVS_VOICE_PAR_LFO_DELAY,
+                       0xFFFFFFFFu, argument);
+        break;
     case NV1BA0_PIO_SET_VOICE_LFO_ENV:
         voice_set_mask(d, d->regs[NV_PAPU_FECV], NV_PAVS_VOICE_TAR_LFO_ENV,
                        0xFFFFFFFF, argument);
+        break;
+    case NV1BA0_PIO_SET_VOICE_LFO_MOD:
+        voice_set_mask(d, d->regs[NV_PAPU_FECV], NV_PAVS_VOICE_TAR_LFO_MOD,
+                       0xFFFFFFFFu, argument);
         break;
     case NV1BA0_PIO_SET_VOICE_TAR_FCA:
         voice_set_mask(d, d->regs[NV_PAPU_FECV], NV_PAVS_VOICE_TAR_FCA,
@@ -839,18 +925,15 @@ static void fe_method(MCPXAPUState *d, uint32_t method, uint32_t argument)
             argument & NV1BA0_PIO_SET_CURRENT_OUTBUF_SGE_HANDLE;
         break;
     case NV1BA0_PIO_SET_CURRENT_OUTBUF_SGE_OFFSET: {
-        // FIXME: Is there an upper limit for the SGE table size?
-        // FIXME: NV_PAPU_VPSGEADDR is probably bad, as inbuf SGE use the same
-        // handle range (or that is also wrong)
-        // NV_PAPU_EPFADDR   EP outbufs
-        // NV_PAPU_GPFADDR   GP outbufs
-        // But how does it know which outbuf is being written?!
-        uint64_t sge_address =
-            d->regs[NV_PAPU_VPSGEADDR] + d->vp.outbuf_sge_handle * 8;
-        apu_ram_st32(sge_address,
-                    argument &
-                        NV1BA0_PIO_SET_CURRENT_OUTBUF_SGE_OFFSET_PARAMETER);
-        DPRINTF("Wrote outbuf SGE[0x%X] = 0x%08X\n", d->vp.outbuf_sge_handle,
+        /* Output-buffer SGEs are distinct from the voice INPUT page table.
+         * Output DMA is not emulated yet, so do not store these pages until
+         * that path has its own backing state. Writing them to VPSGEADDR
+         * overwrote valid voice sample pages, resulting in silent voices.
+         * Source: raddad772 retail MCPX tests, xemu PR #3105 abc1d80:
+         * https://github.com/xemu-project/xemu/pull/3105
+         */
+        DPRINTF("Ignored unemulated outbuf SGE[%u] = 0x%08X\n",
+                d->vp.outbuf_sge_handle,
                 argument & NV1BA0_PIO_SET_CURRENT_OUTBUF_SGE_OFFSET_PARAMETER);
         break;
     }
@@ -1009,7 +1092,9 @@ void mcpx_apu_vp_write(void *opaque, uint32_t addr, uint64_t val, unsigned int s
     case NV1BA0_PIO_SET_VOICE_TAR_VOLA:
     case NV1BA0_PIO_SET_VOICE_TAR_VOLB:
     case NV1BA0_PIO_SET_VOICE_TAR_VOLC:
+    case NV1BA0_PIO_SET_VOICE_LFO_DELAY:
     case NV1BA0_PIO_SET_VOICE_LFO_ENV:
+    case NV1BA0_PIO_SET_VOICE_LFO_MOD:
     case NV1BA0_PIO_SET_VOICE_TAR_FCA:
     case NV1BA0_PIO_SET_VOICE_TAR_FCB:
     case NV1BA0_PIO_SET_VOICE_TAR_PITCH:
@@ -1109,163 +1194,144 @@ static uint64_t get_data_ptr(MCPXAPUState *d, uint64_t sge_base,
     return prd_address + addr % APU_PAGE_SIZE;
 }
 
-static float voice_step_envelope(MCPXAPUState *d, uint8_t *c, uint16_t v,
-                           uint32_t reg_0,
-                           uint32_t reg_a, uint32_t rr_reg, uint32_t rr_mask,
-                           uint32_t lvl_reg, uint32_t lvl_mask,
-                           uint32_t count_mask, uint32_t cur_mask)
+/* Each envelope advances BEFORE the next 32 samples play. The guest level
+ * byte is deliberately kept at its release-start value during release,
+ * because the hardware derives the release curve from that snapshot.
+ * Hardware measurements: raddad772, xemu PR #3105 commit 3a94344. */
+static float envelope_store_level(MCPXAPUState *d, uint8_t *c, uint16_t v,
+                                  uint32_t level_reg, uint32_t level_mask,
+                                  double level2048)
 {
-    uint8_t cur = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_PAR_STATE, cur_mask);
+    if (level2048 < 0.0) level2048 = 0.0;
+    if (level2048 > 2048.0) level2048 = 2048.0;
+    unsigned guest_byte = (unsigned)level2048 / 8u;
+    if (guest_byte > 255u) guest_byte = 255u;
+    voice_set_mask_nolock(d, c, v, level_reg, level_mask, guest_byte);
+    return (float)(level2048 / 2048.0);
+}
+
+static float voice_step_envelope(MCPXAPUState *d, uint8_t *c, uint16_t v,
+                                uint32_t reg_0, uint32_t reg_a,
+                                uint32_t rr_reg, uint32_t rr_mask,
+                                uint32_t lvl_reg, uint32_t lvl_mask,
+                                uint32_t count_mask, uint32_t cur_mask)
+{
+    uint32_t cur = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_PAR_STATE, cur_mask);
+    uint32_t count = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask);
+    uint32_t attack = voice_get_mask_nolock(d, c, v, reg_0,
+                                 NV_PAVS_VOICE_CFG_ENV0_EA_ATTACKRATE);
+    uint32_t hold = voice_get_mask_nolock(d, c, v, reg_a,
+                                 NV_PAVS_VOICE_CFG_ENVA_EA_HOLDTIME);
+    uint32_t decay = voice_get_mask_nolock(d, c, v, reg_a,
+                                 NV_PAVS_VOICE_CFG_ENVA_EA_DECAYRATE);
+    uint32_t sustain_byte = voice_get_mask_nolock(d, c, v, reg_a,
+                                 NV_PAVS_VOICE_CFG_ENVA_EA_SUSTAINLEVEL);
+    uint32_t release = voice_get_mask_nolock(d, c, v, rr_reg, rr_mask);
+    const bool amplitude = (count_mask == NV_PAVS_VOICE_CUR_ECNT_EACOUNT);
+    const double sustain = floor(sustain_byte * (2048.0 / 255.0));
     switch (cur) {
     case NV_PAVS_VOICE_PAR_STATE_EFCUR_OFF:
-        voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, 0);
-        voice_set_mask_nolock(d, c, v, lvl_reg, lvl_mask, 0xFF);
-        return 1.0f;
-    case NV_PAVS_VOICE_PAR_STATE_EFCUR_DELAY: {
-        uint16_t count =
-            voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask);
-        voice_set_mask_nolock(d, c, v, lvl_reg, lvl_mask, 0x00); // FIXME: Confirm this?
-
-        if (count == 0) {
-            cur++;
-            voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_PAR_STATE, cur_mask, cur);
-            count = 0;
+        voice_set_mask_nolock(d,c,v,NV_PAVS_VOICE_CUR_ECNT,count_mask,0);
+        return envelope_store_level(d,c,v,lvl_reg,lvl_mask, amplitude ? 2048 : 0);
+    case NV_PAVS_VOICE_PAR_STATE_EFCUR_DELAY:
+        if (!count) {
+            voice_set_mask_nolock(d,c,v,NV_PAVS_VOICE_PAR_STATE,cur_mask,cur+1);
         } else {
             count--;
         }
-        voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, count);
-        return 0.0f;
-    }
+        voice_set_mask_nolock(d,c,v,NV_PAVS_VOICE_CUR_ECNT,count_mask,count);
+        return envelope_store_level(d,c,v,lvl_reg,lvl_mask,0);
     case NV_PAVS_VOICE_PAR_STATE_EFCUR_ATTACK: {
-        uint16_t count =
-            voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask);
-        uint16_t attack_rate =
-            voice_get_mask_nolock(d, c, v, reg_0, NV_PAVS_VOICE_CFG_ENV0_EA_ATTACKRATE);
-
-        float value;
-        if (attack_rate == 0) {
-            // FIXME: [division by zero]
-            //       Got crackling sound in hardware for amplitude env.
-            value = 255.0f;
-        } else {
-            if (count <= (attack_rate * 16)) {
-                value = (count * 0xFF) / (attack_rate * 16);
-            } else {
-                // FIXME: Overflow in hardware
-                //       The actual value seems to overflow, but not sure how
-                value = 255.0f;
-            }
+        if (count < 0xFFFFu) count++;
+        double level = attack ? fmin(2048.0, floor(2048.0*count/(attack*16.0)))
+                              : 2048.0;
+        if (!attack || count >= attack*16u) {
+            voice_set_mask_nolock(d,c,v,NV_PAVS_VOICE_PAR_STATE,cur_mask,cur+1);
+            count = hold*16u;
         }
-        voice_set_mask_nolock(d, c, v, lvl_reg, lvl_mask, value);
-        // FIXME: Comparison could also be the other way around?! Test please.
-        if (count == (attack_rate * 16)) {
-            cur++;
-            voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_PAR_STATE, cur_mask, cur);
-            uint16_t hold_time =
-                voice_get_mask_nolock(d, c, v, reg_a, NV_PAVS_VOICE_CFG_ENVA_EA_HOLDTIME);
-            count = hold_time * 16; // FIXME: Skip next phase if count is 0?
-                                    // [other instances too]
-        } else {
-            count++;
-        }
-        voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, count);
-        return value / 255.0f;
+        voice_set_mask_nolock(d,c,v,NV_PAVS_VOICE_CUR_ECNT,count_mask,count);
+        return envelope_store_level(d,c,v,lvl_reg,lvl_mask,level);
     }
-    case NV_PAVS_VOICE_PAR_STATE_EFCUR_HOLD: {
-        uint16_t count =
-            voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask);
-        voice_set_mask_nolock(d, c, v, lvl_reg, lvl_mask, 0xFF);
-
-        if (count == 0) {
-            cur++;
-            voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_PAR_STATE, cur_mask, cur);
-            uint16_t decay_rate = voice_get_mask_nolock(
-                d, c, v, reg_a, NV_PAVS_VOICE_CFG_ENVA_EA_DECAYRATE);
-            count = decay_rate * 16;
-        } else {
-            count--;
-        }
-        voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, count);
-        return 1.0f;
-    }
+    case NV_PAVS_VOICE_PAR_STATE_EFCUR_HOLD:
+        if (!count) voice_set_mask_nolock(d,c,v,NV_PAVS_VOICE_PAR_STATE,cur_mask,cur+1);
+        else count--;
+        voice_set_mask_nolock(d,c,v,NV_PAVS_VOICE_CUR_ECNT,count_mask,count);
+        return envelope_store_level(d,c,v,lvl_reg,lvl_mask,2048);
     case NV_PAVS_VOICE_PAR_STATE_EFCUR_DECAY: {
-        uint16_t count =
-            voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask);
-        uint16_t decay_rate =
-            voice_get_mask_nolock(d, c, v, reg_a, NV_PAVS_VOICE_CFG_ENVA_EA_DECAYRATE);
-        uint8_t sustain_level =
-            voice_get_mask_nolock(d, c, v, reg_a, NV_PAVS_VOICE_CFG_ENVA_EA_SUSTAINLEVEL);
-
-        // FIXME: Decay should return a value no less than sustain
-        float value;
-        if (decay_rate == 0) {
-            value = 0.0f;
-        } else {
-            // FIXME: This formula and threshold is not accurate, but I can't
-            // get it any better for now
-            value = 255.0f * powf(0.99988799f, (decay_rate * 16 - count) *
-                                                   4096 / decay_rate);
+        double level = 2048.0;
+        if (decay) {
+            if (count < 0xFFFFu) count++;
+            level = floor(2048.0 * exp(-(double)count/(2.0*decay)));
         }
-        if (value <= (sustain_level + 0.2f) || (value > 255.0f)) {
-            // FIXME: Should we still update lvl?
-            cur++;
-            voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_PAR_STATE, cur_mask, cur);
-        } else {
-            count--;
-            voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, count);
-            voice_set_mask_nolock(d, c, v, lvl_reg, lvl_mask, value);
-        }
-        return value / 255.0f;
-    }
-    case NV_PAVS_VOICE_PAR_STATE_EFCUR_SUSTAIN: {
-        uint8_t sustain_level =
-            voice_get_mask_nolock(d, c, v, reg_a, NV_PAVS_VOICE_CFG_ENVA_EA_SUSTAINLEVEL);
-        voice_set_mask_nolock(
-            d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask,
-            0x00); // FIXME: is this only set to 0 once or forced to zero?
-        voice_set_mask_nolock(d, c, v, lvl_reg, lvl_mask, sustain_level);
-        return sustain_level / 255.0f;
-    }
-    case NV_PAVS_VOICE_PAR_STATE_EFCUR_RELEASE: {
-        uint16_t count =
-            voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask);
-        uint16_t release_rate = voice_get_mask_nolock(d, c, v, rr_reg, rr_mask);
-
-        if (release_rate == 0) {
+        if (!decay || level <= sustain) {
+            level = decay ? sustain : 2048.0;
+            voice_set_mask_nolock(d,c,v,NV_PAVS_VOICE_PAR_STATE,cur_mask,cur+1);
             count = 0;
         }
-
-        float value = 0;
-        if (count == 0) {
-            voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_PAR_STATE, cur_mask, ++cur);
-        } else {
-            // FIXME: Appears to be an exponential but unsure about actual
-            // curve; performing standard decay of current level to T60 over the
-            // release interval which seems about right.
-            // FIXME: Based on sustain level or just decay of current level?
-            // FIXME: Update level? A very similar, alternative decay function
-            // (probably what the hw actually does): y(t)=2^(-10t), which would
-            // permit simpler attenuation more efficiently and update level on
-            // each round.
-            float pos = clampf(1 - count / (release_rate * 16.0), 0, 1);
-            uint8_t lvl = voice_get_mask_nolock(d, c, v, lvl_reg, lvl_mask);
-            value = powf(M_E, -6.91*pos)*lvl;
-            count--; // FIXME: Should release count ascend or descend?
-            voice_set_mask_nolock(d, c, v, NV_PAVS_VOICE_CUR_ECNT, count_mask, count);
+        voice_set_mask_nolock(d,c,v,NV_PAVS_VOICE_CUR_ECNT,count_mask,count);
+        return envelope_store_level(d,c,v,lvl_reg,lvl_mask,level);
+    }
+    case NV_PAVS_VOICE_PAR_STATE_EFCUR_SUSTAIN:
+        voice_set_mask_nolock(d,c,v,NV_PAVS_VOICE_CUR_ECNT,count_mask,0);
+        voice_set_mask_nolock(d,c,v,lvl_reg,lvl_mask,sustain_byte);
+        return (float)(sustain/2048.0);
+    case NV_PAVS_VOICE_PAR_STATE_EFCUR_RELEASE: {
+        /* A release starts at count = R*16, after VOICE_RELEASE. */
+        uint32_t t = release*16u > count ? release*16u - count : 0u;
+        if (!release || t >= release*15u) {
+            voice_set_mask_nolock(d,c,v,NV_PAVS_VOICE_PAR_STATE,cur_mask,cur+1);
+            voice_set_mask_nolock(d,c,v,NV_PAVS_VOICE_CUR_ECNT,count_mask,0);
+            return 0.0f;
         }
-
-        return value / 255.0f;
+        voice_set_mask_nolock(d,c,v,NV_PAVS_VOICE_CUR_ECNT,count_mask,
+                              count ? count-1u : 0u);
+        double start = voice_get_mask_nolock(d,c,v,lvl_reg,lvl_mask)*8.0;
+        double fall = floor(start*exp(-(double)t/(2.0*release)));
+        double tail = floor(start*2.0*(release*15u-t)/(2048.0*release)+0.5);
+        return (float)((t < release*11u ? fmax(fall,tail) : tail)/2048.0);
     }
     case NV_PAVS_VOICE_PAR_STATE_EFCUR_FORCE_RELEASE:
-        if (count_mask == NV_PAVS_VOICE_CUR_ECNT_EACOUNT) {
-            voice_off_nolock(d, c, v);
-        }
+        if (amplitude) voice_off_nolock(d,c,v);
         return 0.0f;
     default:
-        fprintf(stderr, "Unknown envelope state 0x%x\n", cur);
-        assert(false);
+        /* Unknown guest state: avoid crashing a shipping hakuX build. */
         return 0.0f;
     }
+}
+
+/* Two independent 16-bit LFO phase accumulators, triangular rising-first.
+ * Delays are in 32-sample frames; signed depths in register 0x70.
+ * Source: raddad772, xemu PR #3105 commit e1a8fad. */
+static void voice_step_lfos(MCPXAPUState *d, uint8_t *c, uint16_t v,
+                            float *att, float *pitch, float *cutoff)
+{
+    MCPXAPUVoiceFilter *f=&d->vp.filters[v];
+    if (!f->lfo_armed) {
+        uint32_t misc=voice_get_mask_nolock(d,c,v,NV_PAVS_VOICE_CFG_MISC,0xFFFFFFFFu);
+        f->lfo_wait[0] = (misc & NV_PAVS_VOICE_CFG_MISC_LFOA_DELAY_ENABLE) ?
+            voice_get_mask_nolock(d,c,v,NV_PAVS_VOICE_PAR_LFO_DELAY,
+                                   NV_PAVS_VOICE_PAR_LFO_DELAY_LFOA) : 0;
+        f->lfo_wait[1] = (misc & NV_PAVS_VOICE_CFG_MISC_LFOF_DELAY_ENABLE) ?
+            voice_get_mask_nolock(d,c,v,NV_PAVS_VOICE_PAR_LFO_DELAY,
+                                   NV_PAVS_VOICE_PAR_LFO_DELAY_LFOF) : 0;
+        f->lfo_armed=true;
+    }
+    uint32_t delta_masks[2]={NV_PAVS_VOICE_TAR_LFO_ENV_LFOA_DELTA,
+                              NV_PAVS_VOICE_TAR_LFO_ENV_LFOF_DELTA};
+    float values[2]={0,0};
+    for(int k=0;k<2;k++) {
+        if (f->lfo_wait[k]) { f->lfo_wait[k]--; continue; }
+        f->lfo_phase[k]=(uint16_t)(f->lfo_phase[k]+voice_get_mask_nolock(
+                                     d,c,v,NV_PAVS_VOICE_TAR_LFO_ENV,delta_masks[k]));
+        int p=f->lfo_phase[k];
+        values[k]=(p<0x4000 ? p : p<0xC000 ? 0x8000-p : p-0x10000)/16384.0f;
+    }
+    uint32_t mod=voice_get_mask_nolock(d,c,v,NV_PAVS_VOICE_TAR_LFO_MOD,0xFFFFFFFFu);
+    int8_t a_amp=(int8_t)(mod&0xFFu), a_pitch=(int8_t)((mod>>8)&0xFFu);
+    int8_t a_fc=(int8_t)((mod>>16)&0xFFu), f_pitch=(int8_t)((mod>>24)&0xFFu);
+    *att=a_amp*8.0f*values[0];
+    *pitch=(a_pitch*values[0]+f_pitch*values[1])*32.0f;
+    *cutoff=a_fc*256.0f*values[0];
 }
 
 static int voice_get_samples(MCPXAPUState *d, uint8_t *c, uint32_t v,
@@ -1621,49 +1687,32 @@ static long voice_resample_callback(void *cb_data, float **data)
     return sample_count;
 }
 
+/* Keep hakuX's synchronous 32-sample refill callback. That preserves its
+ * guest CBO/SSL/notifier progression and mute-skip plumbing; only sample
+ * interpolation/cursor arithmetic changes to the MCPX's 8-point Lagrange.
+ * The actual interpolation lives in resample.c, including NEON support.
+ * Source: raddad772, xemu PR #3105 commits 38e5733 and e38ad53. */
 static int voice_resample(MCPXAPUState *d, uint8_t *c, uint16_t v,
-                          float samples[][2],
-                          int requested_num, float rate)
+                          float samples[][2], int requested_num,
+                          const uint32_t *steps)
 {
-    assert(v < MCPX_HW_MAX_VOICES);
-    MCPXAPUVoiceFilter *filter = &d->vp.filters[v];
-
-    if (filter->resampler == NULL) {
-        filter->voice = v;
-        int err;
-
-        /* Note: Using a sinc based resampler for quality. Unsure about
-         * hardware's actual interpolation method; it could just be linear, in
-         * which case using this resampler is overkill, but quality is good
-         * so use it for now.
-         */
-        // FIXME: Don't do 2ch resampling if this is a mono voice
-        filter->resampler = src_callback_new(&voice_resample_callback,
-                                           SRC_SINC_FASTEST, 2, &err, filter);
-        if (filter->resampler == NULL) {
-            fprintf(stderr, "src error: %s\n", src_strerror(err));
-            assert(0);
+    MCPXAPUVoiceFilter *filter=&d->vp.filters[v];
+    if (!filter->resampler) {
+        filter->voice=v;
+        int err=0;
+        filter->resampler=src_callback_new(&voice_resample_callback,
+                                           SRC_SINC_FASTEST,2,&err,filter);
+        if (!filter->resampler) {
+            nc_log("hakuX-apu", "MCPX resampler allocation failed: %s",
+                   src_strerror(err));
+            return -1;
         }
     }
-
-    /* The voice table through to the libsamplerate callback (whose
-     * signature we cannot extend), for the synchronous duration of
-     * src_callback_read. */
-    filter->cb_voice_cache = c;
-    int count = src_callback_read(filter->resampler, rate, requested_num,
-                                  (float *)samples);
-    filter->cb_voice_cache = NULL;
-    if (count == -1) {
-        DPRINTF("resample error\n");
-    }
-    if (count != requested_num) {
-        DPRINTF("resample returned fewer than expected: %d\n", count);
-
-        if (count == 0)
-            return -1;
-    }
-
-    return count;
+    filter->cb_voice_cache=c;
+    long got=src_callback_read_steps(filter->resampler,steps,requested_num,
+                                     (float *)samples);
+    filter->cb_voice_cache=NULL;
+    return got>0 ? (int)got : -1;
 }
 
 static int peek_ahead_multipass_bin(MCPXAPUState *d, uint8_t *c,
@@ -1711,9 +1760,28 @@ static void get_multipass_samples(MCPXAPUState *d, uint8_t *c,
     int mp_bin = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CFG_FMT,
                                 NV_PAVS_VOICE_CFG_FMT_MULTIPASS_BIN);
 
+    /* On MCPX hardware, a multipass voice reads its source bin multiplied
+     * by 2^headroom (CFG_FMT bits 15:13), undoing the attenuation applied
+     * when the source voices were mixed into that bin. DirectSound commonly
+     * sets both fields to 7; without this the second pass is 42 dB too low.
+     * Use the raw mask here to avoid depending on a register-name alias.
+     * Source: raddad772, xemu-project/xemu#3105, commit 12e9219.
+     */
+    unsigned headroom = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CFG_FMT,
+                                               0x0000E000u);
+    float scale = (float)(1u << headroom);
     for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
-        samples[i][0] = mixbins[mp_bin][i];
-        samples[i][1] = mixbins[mp_bin][i];
+        /* The multipass input is first converted to a saturated 24-bit
+         * sample, halves UP, and only then raised by 2^headroom. Otherwise
+         * a bin value outside [-1,1] or halfway between PCM24 values feeds
+         * different data into its second pass. Source: #3105 12e9219,
+         * 45af4ac. */
+        double pcm=floor((double)mixbins[mp_bin][i]*8388608.0+0.5);
+        if (pcm < -8388608.0) pcm=-8388608.0;
+        if (pcm > 8388607.0) pcm=8388607.0;
+        float value=(float)(pcm/8388608.0)*scale;
+        samples[i][0] = value;
+        samples[i][1] = value;
     }
 
     // DirectSound sets clear mix to true
@@ -1732,7 +1800,12 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
     assert(v < MCPX_HW_MAX_VOICES);
     bool stereo = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CFG_FMT,
                                  NV_PAVS_VOICE_CFG_FMT_STEREO);
-    unsigned int channels = stereo ? 2 : 1;
+    const bool is_3d = v < MCPX_HW_MAX_3D_VOICES;
+    /* The sample decoder still consumes the encoded stereo data, but the
+     * 3D voice processor filters/mixes channel 0 alone even when STEREO=1.
+     * Source: retail Xbox measurement, xemu-project/xemu#3105 5cebb72.
+     */
+    unsigned int channels = (stereo && !is_3d) ? 2 : 1;
     bool paused = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_PAR_STATE,
                                  NV_PAVS_VOICE_PAR_STATE_PAUSED);
 
@@ -1751,7 +1824,23 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
                                NV_PAVS_VOICE_TAR_PITCH_LINK_PITCH);
     int8_t ps = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CFG_ENV0,
                                NV_PAVS_VOICE_CFG_ENV0_EF_PITCHSCALE);
-    float rate = 1.0 / powf(2.0f, (p + ps * 32 * ef_value) / 4096.0f);
+    /* The guest specifies pitch logarithmically. Ramp its logarithm over
+     * the 32 samples (not the resampling ratio itself). A direct -1000h
+     * step over one frame should advance ~23 inputs, not 16 or 24.
+     * Source: xemu PR #3105 e38ad53. */
+    float lfo_att=0, lfo_pitch=0, lfo_fc=0;
+    voice_step_lfos(d,c,v,&lfo_att,&lfo_pitch,&lfo_fc);
+    double pitch = p + ps * 32.0 * ef_value + lfo_pitch;
+    MCPXAPUVoiceFilter *vf=&d->vp.filters[v];
+    double pitch_from = vf->previous_pitch_valid ? vf->previous_pitch : pitch;
+    uint32_t pitch_steps[NUM_SAMPLES_PER_FRAME];
+    for (int i=0;i<NUM_SAMPLES_PER_FRAME;i++) {
+        double sample_pitch = pitch_from+(pitch-pitch_from)*((double)i/32.0);
+        double step=exp2(sample_pitch/4096.0)*65536.0;
+        pitch_steps[i]=(uint32_t)fmax(1.0,fmin(step,4294967295.0));
+    }
+    vf->previous_pitch=pitch;
+    vf->previous_pitch_valid=true;
 
     float ea_value = voice_step_envelope(
         d, c, v, NV_PAVS_VOICE_CFG_ENV0, NV_PAVS_VOICE_CFG_ENVA,
@@ -1769,6 +1858,14 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
      * bit-exactly (the loop trip count and num_samples_requested are value-
      * independent of the decoded samples; we only null the sample VALUES). */
     bool skip_muted = voice_all_vols_maxed(d, c, v);
+    if (skip_muted) {
+        for (int b = 0; b < 8; b++) {
+            if (d->vp.filters[v].previous_mix_gain[b] != 0) {
+                skip_muted = false; /* fade out, do not abruptly cut */
+                break;
+            }
+        }
+    }
 #endif
 
     float samples[NUM_SAMPLES_PER_FRAME][2] = { 0 };
@@ -1796,7 +1893,8 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
             }
             int count =
                 voice_resample(d, c, v, &samples[sample_count],
-                               NUM_SAMPLES_PER_FRAME - sample_count, rate);
+                               NUM_SAMPLES_PER_FRAME - sample_count,
+                               &pitch_steps[sample_count]);
             if (count < 0) {
                 break;
             }
@@ -1825,7 +1923,7 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
      * (void)multipass; (void)rate; (void)mixbins; */
     (void)samples;
     (void)multipass;
-    (void)rate;
+    (void)pitch_steps;
     (void)mixbins;
     return;
 #endif
@@ -1941,6 +2039,9 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
      * muted-frame input -- exactly the decode we skipped.) */
     if (d->vp.filters[v].muted_prev) {
         memset(&d->vp.filters[v].svf, 0, sizeof(d->vp.filters[v].svf));
+        memset(&d->vp.filters[v].paraeq, 0, sizeof(d->vp.filters[v].paraeq));
+        memset(&d->vp.filters[v].i3dl2_state, 0,
+               sizeof(d->vp.filters[v].i3dl2_state));
         for (int ch = 0; ch < 2; ch++) {
             memset(d->vp.filters[v].hrtf.ch[ch].buf, 0,
                    sizeof(d->vp.filters[v].hrtf.ch[ch].buf));
@@ -1951,51 +2052,132 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
 
     int fmode = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CFG_MISC,
                                NV_PAVS_VOICE_CFG_MISC_FMODE);
-
-    // FIXME: Move to function
-    bool lpf = false;
-    if (v < MCPX_HW_MAX_3D_VOICES) {
-        /* 1:DLS2+I3DL2 2:ParaEQ+I3DL2 3:I3DL2 */
-        lpf = (fmode == 1);
-    } else {
-        /* 0:Bypass 1:DLS2 2:ParaEQ 3(Mono):DLS2+ParaEQ 3(Stereo):Bypass */
-        lpf = stereo ? (fmode == 1) : (fmode & 1);
+    uint16_t hrtf_handle = HRTF_NULL_HANDLE;
+    if (is_3d) {
+        hrtf_handle = voice_get_mask_nolock(d, c, v,
+                     NV_PAVS_VOICE_CFG_HRTF_TARGET,
+                     NV_PAVS_VOICE_CFG_HRTF_TARGET_HANDLE);
     }
-    if (lpf) {
-        for (int ch = 0; ch < 2; ch++) {
-            // FIXME: Cutoff modulation via NV_PAVS_VOICE_CFG_ENV1_EF_FCSCALE
-            int16_t fc = voice_get_mask_nolock(
-                d, c, v, NV_PAVS_VOICE_TAR_FCA + (ch % channels) * 4,
-                NV_PAVS_VOICE_TAR_FCA_FC0);
-            float fc_f = clampf(pow(2, fc / 4096.0), 0.003906f, 1.0f);
-            uint16_t q = voice_get_mask_nolock(
-                d, c, v, NV_PAVS_VOICE_TAR_FCA + (ch % channels) * 4,
-                NV_PAVS_VOICE_TAR_FCA_FC1);
-            float q_f = clampf(q / (1.0 * 0x8000), 0.079407f, 1.0f);
-            sv_filter *filter = &d->vp.filters[v].svf[ch];
-            setup_svf(filter, fc_f, q_f, F_LP);
-            for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
-                samples[i][ch] = run_svf(filter, samples[i][ch]);
-                samples[i][ch] = fminf(fmaxf(samples[i][ch], -1.0f), 1.0f);
+    const bool has_hrtf = is_3d && hrtf_handle != HRTF_NULL_HANDLE &&
+                          hrtf_handle < HRTF_ENTRY_COUNT;
+
+    /* Filter modes, measured on retail Xbox (raddad772 #3105 commits
+     * fbe7463 ParaEQ, b4a9b50 I3DL2, 2e31ff4 null HRTF, b323e32 SVF).
+     * 3D HRTF: 1 DLS2+I3DL2, 2 ParaEQ+I3DL2, 3 I3DL2.
+     * 2D mono (including 3D without HRTF): 1 DLS2, 2 ParaEQ,
+     *     3 DLS2 then ParaEQ. 2D stereo: modes 1/2, mode 3 bypass.
+     */
+    const bool spatial_filter = is_3d && has_hrtf;
+    const bool dls2 = spatial_filter ? (fmode == 1) :
+                      (fmode == 1 || (channels == 1 && fmode == 3));
+    const bool peq = spatial_filter ? (fmode == 2) :
+                     (fmode == 2 || (channels == 1 && fmode == 3));
+    const bool i3dl2 = spatial_filter && fmode != 0;
+    /* F envelope shifts DLS2/ParaEQ frequency in units of 256 per scale
+     * byte, and the A LFO adds its cutoff modulation. Coefficients ramp
+     * linearly through the output frame, without resetting filter history.
+     * Source: xemu PR #3105 957c5ee (retail Xbox measurement). */
+    int8_t fc_scale=(int8_t)voice_get_mask_nolock(d,c,v,NV_PAVS_VOICE_CFG_ENV1,
+                                  NV_PAVS_VOICE_CFG_ENV1_EF_FCSCALE);
+    double fc_bend=fc_scale*256.0*ef_value+lfo_fc;
+    if (dls2 || peq) {
+        uint32_t misc = voice_get_mask_nolock(d, c, v,
+                            NV_PAVS_VOICE_CFG_MISC, 0xFFFFFFFFu);
+        unsigned qbits = (misc >> 18) & 7u;
+        for (unsigned ch = 0; ch < channels; ch++) {
+            if (dls2) {
+                /* DLS2 always reads FCA except for stereo channel 1. */
+                uint32_t reg = (ch == 1) ? NV_PAVS_VOICE_TAR_FCB :
+                                          NV_PAVS_VOICE_TAR_FCA;
+                uint32_t word = voice_get_mask_nolock(d, c, v, reg, 0xFFFFFFFFu);
+                float f = mcpx_filter_frequency((int16_t)(word & 0xFFFFu)+fc_bend);
+                float f0 = vf->previous_dls2_valid ? vf->previous_dls2_f[ch] : f;
+                vf->previous_dls2_f[ch]=f;
+                float q = (float)(word >> 16) / 32768.0f;
+                sv_filter *filter = &vf->svf[ch];
+                setup_svf(filter, f, q, F_LP);
+                for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+                    filter->f = f0 + (f-f0)*(i/32.0f);
+                    samples[i][ch] = run_svf(filter, samples[i][ch]);
+                }
+            }
+            if (peq) {
+                /* On 3D use FCA; on 2D mono FCB; on stereo FCA/FCB. */
+                uint32_t reg = spatial_filter ? NV_PAVS_VOICE_TAR_FCA :
+                               (channels == 1 || ch == 1) ?
+                               NV_PAVS_VOICE_TAR_FCB : NV_PAVS_VOICE_TAR_FCA;
+                uint32_t word = voice_get_mask_nolock(d, c, v, reg, 0xFFFFFFFFu);
+                float f = mcpx_filter_frequency((int16_t)(word & 0xFFFFu)+fc_bend);
+                float f0 = vf->previous_paraeq_valid ? vf->previous_paraeq_f[ch] : f;
+                vf->previous_paraeq_f[ch]=f;
+                float q = 1.0f / (float)(1u << qbits);
+                float gain = (float)(int16_t)(word >> 16) / 8192.0f;
+                sv_filter *filter = &vf->paraeq[ch];
+                setup_svf(filter, f, q, F_BP);
+                for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+                    filter->f = f0 + (f-f0)*(i/32.0f);
+                    samples[i][ch] = run_para_eq(filter, samples[i][ch], gain);
+                }
             }
         }
     }
+    vf->previous_dls2_valid=dls2;
+    vf->previous_paraeq_valid=peq;
 
-    if (v < MCPX_HW_MAX_3D_VOICES && g_apu_config.hrtf) {
-        uint16_t hrtf_handle =
-            voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CFG_HRTF_TARGET,
-                           NV_PAVS_VOICE_CFG_HRTF_TARGET_HANDLE);
-        if (hrtf_handle != HRTF_NULL_HANDLE) {
-            hrtf_filter_process(&d->vp.filters[v].hrtf, samples, samples);
+    /* I3DL2 has two independent one-pole low-pass histories. The direct
+     * output feeds HRTF routes 0..3 and dry routes 4,6; room routes 5,7
+     * use the other history. FCB low16 and high16 hold their coefficients.
+     * Source: retail Xbox tests, xemu PR #3105 b4a9b50.
+     */
+    float room_samples[NUM_SAMPLES_PER_FRAME];
+    if (i3dl2) {
+        uint32_t fcb = voice_get_mask_nolock(d, c, v,
+                                              NV_PAVS_VOICE_TAR_FCB, 0xFFFFFFFFu);
+        float a_direct = (float)(fcb & 0xFFFFu) / 65536.0f;
+        float a_room = (float)(fcb >> 16) / 65536.0f;
+        double *hist = d->vp.filters[v].i3dl2_state;
+        for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+            float x = samples[i][0];
+            hist[0] = mcpx_round_filter((1.0 - a_direct) * x +
+                                                a_direct * hist[0]);
+            hist[1] = mcpx_round_filter((1.0 - a_room) * x +
+                                                a_room * hist[1]);
+            samples[i][0] = hist[0];
+            room_samples[i] = hist[1];
         }
     }
 
-    // FIXME: ParaEQ
+    /* Keep the dry 3D voice separate from HRTF output: routes 0/1 receive
+     * left HRTF, routes 2/3 right HRTF, routes 4..7 the UNFILTERED voice.
+     * With no HRTF entry the hardware emits silence on routes 0..3; when the
+     * user explicitly disables HRTF keep a dry fallback for compatibility.
+     * The HRTF's two input channels must both use mono channel 0, including
+     * for voices whose encoded input happens to be stereo.
+     * Source: raddad772 retail measurements, xemu-project/xemu#3105
+     * commits 478546e (routing) and 5cebb72 (3D mono).
+     */
+    const bool use_hrtf = has_hrtf && g_apu_config.hrtf;
+    float hrtf_samples[NUM_SAMPLES_PER_FRAME][2] = { 0 };
+    if (use_hrtf) {
+        /* The MCPX samples the selected HRIR entry every voice frame;
+         * games may rewrite taps without changing the handle. Refreshing
+         * the target here preserves the one-frame interpolation in hrtf.h.
+         * Source: xemu PR #3105, commit 21db778. */
+        hrtf_filter_set_target_params(&vf->hrtf,
+                         d->vp.hrtf.entries[hrtf_handle].hrir,
+                         d->vp.hrtf.entries[hrtf_handle].itd);
+        float hrtf_input[NUM_SAMPLES_PER_FRAME][2];
+        for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+            hrtf_input[i][0] = samples[i][0];
+            hrtf_input[i][1] = samples[i][0];
+        }
+        hrtf_filter_process(&d->vp.filters[v].hrtf, hrtf_input, hrtf_samples);
+    }
 
-    /* Deinterleave samples[32][2] into per-channel contiguous buffers once
-     * (amortized across 8 subsequent mix_one_bin calls). mix_one_bin
-     * (NEON-accelerated on aarch64) reads contiguous float[32]. */
+    /* Deinterleave for the existing NEON mix routine without losing the dry
+     * input. Prepare HRTF ear channels only when HRTF is actually active. */
     float channel_buf[2][NUM_SAMPLES_PER_FRAME];
+    float hrtf_channel_buf[2][NUM_SAMPLES_PER_FRAME];
     for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
         channel_buf[0][i] = samples[i][0];
     }
@@ -2004,25 +2186,69 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
             channel_buf[1][i] = samples[i][1];
         }
     }
+    if (use_hrtf) {
+        for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
+            hrtf_channel_buf[0][i] = hrtf_samples[i][0];
+            hrtf_channel_buf[1][i] = hrtf_samples[i][1];
+        }
+    }
 
     /* The VP's own mix (the default, no DSP): the frame's mixbins are
      * cleared unread at its end, but for the multipass bin the next voices
      * of a group read (scheduled together, voice_work_schedule) */
+    /* Route target gains: attenuation is quantised to units of 1/16384;
+     * envelope level is in 2048ths, then the product rounds DOWN.
+     * Source: raddad772's real Xbox tests, xemu PR #3105 8156cca.
+     * These are calculated for all eight routes even if a NULL HRTF entry
+     * suppresses an ear send, so its previous gain still advances. */
+    unsigned target_gain[8];
+    /* Both factors are nonnegative. Truncation gives the hardware's
+     * round-down without extra libm calls in this hot 8-route loop. The
+     * attenuation table stores exact multiples of 1/16384. */
+    unsigned envelope = (unsigned)(ea_value * 2048.0f);
+    if (envelope > 2048u) envelope = 2048u;
+    for (int b = 0; b < 8; b++) {
+        /* Fully muted routes stay silent even under a negative amplitude
+         * LFO. Its depth is measured in 1/8 dB steps. */
+        int att=(int)vol[b]+(int)floorf(lfo_att);
+        if (att<0) att=0;
+        if (att>4095) att=4095;
+        unsigned attenuation=(vol[b]==0xFFF) ? 0u :
+                              (unsigned)(attenuate((uint16_t)att)*16384.0f);
+        target_gain[b]=(attenuation*envelope)/2048u;
+    }
     const bool mon_vp = d->monitor.point == MCPX_APU_DEBUG_MON_VP;
     for (int b = 0; b < 8; b++) {
         if (mon_vp && bin[b] != MULTIPASS_BIN) {
             continue;
         }
-        float g = ea_value;
-        float hr;
-        if ((v < MCPX_HW_MAX_3D_VOICES) && (b < 4)) {
-            // FIXME: Not sure if submix/voice headroom factor in for HRTF
-            hr = 1 << d->vp.hrtf_headroom;
+        const float *source;
+        if (is_3d) {
+            if (b < 4) {
+                if (use_hrtf) {
+                    source = hrtf_channel_buf[b < 2 ? 0 : 1];
+                } else if (!g_apu_config.hrtf) {
+                    source = channel_buf[0]; /* deliberate HRTF-off fallback */
+                } else {
+                    continue; /* hardware: NULL HRTF entry has no ear sends */
+                }
+            } else {
+                /* Dry means without HRTF convolution, but I3DL2 routes
+                 * 5 and 7 use the independent room low-pass filter. */
+                source = (i3dl2 && (b == 5 || b == 7)) ?
+                         room_samples : channel_buf[0];
+            }
         } else {
-            hr = 1 << d->vp.submix_headroom[bin[b]];
+            source = channel_buf[b % channels];
         }
-        g *= attenuate(vol[b]) / hr;
-        mix_one_bin(mixbins[bin[b]], channel_buf[b % channels], g);
+        /* HRTF submixes use the DESTINATION bin's headroom, not the
+         * SET_HRTF_HEADROOM register (no observable hardware effect).
+         * Source: xemu-project/xemu#3105, commit 42f675d.
+         */
+        float hr = (float)(1u << d->vp.submix_headroom[bin[b]]);
+        mix_one_bin_ramped(mixbins[bin[b]], source,
+                           d->vp.filters[v].previous_mix_gain[b],
+                           target_gain[b], hr);
     }
 
     if (d->monitor.point == MCPX_APU_DEBUG_MON_VP) {
@@ -2057,9 +2283,15 @@ static void voice_process(MCPXAPUState *d, uint8_t *c,
         }
         g *= ea_value;
         for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
-            sample_buf[i][0] += g*samples[i][0];
-            sample_buf[i][1] += g*samples[i][1];
+            /* The monitor is a debug-only mix. Keep its previous audible
+             * HRTF behaviour now that routing no longer filters in place. */
+            sample_buf[i][0] += g * (use_hrtf ? hrtf_samples[i][0] : samples[i][0]);
+            sample_buf[i][1] += g * (use_hrtf ? hrtf_samples[i][1] :
+                                    (is_3d ? samples[i][0] : samples[i][1]));
         }
+    }
+    for (int b = 0; b < 8; b++) {
+        d->vp.filters[v].previous_mix_gain[b] = (uint16_t)target_gain[b];
     }
 }
 
@@ -2077,9 +2309,9 @@ static void get_voice_bin_src_dst(MCPXAPUState *d, uint8_t *c, int v,
                                     NV_PAVS_VOICE_CFG_FMT_MULTIPASS_BIN);
         bool clear_mix = voice_get_mask_nolock(d, c, v, NV_PAVS_VOICE_CFG_FMT,
                                         NV_PAVS_VOICE_CFG_FMT_CLEAR_MIX);
-        src_v |= (1 << mp_bin);
+        src_v |= (1u << mp_bin);
         if (clear_mix) {
-            clr_v |= (1 << mp_bin);
+            clr_v |= (1u << mp_bin);
         }
     }
 
@@ -2109,7 +2341,7 @@ static void get_voice_bin_src_dst(MCPXAPUState *d, uint8_t *c, int v,
                             NV_PAVS_VOICE_CFG_FMT_V7BIN);
 
     for (int i = 0; i < 8; i++) {
-        dst_v |= 1 << bin[i];
+        dst_v |= 1u << bin[i];
     }
 
     if (src) {
@@ -2320,16 +2552,45 @@ static void voice_work_schedule(MCPXAPUState *d, uint8_t *c)
     bool group = false;
     uint32_t dirty = 0;
 
+    /* The parallel scheduler assumes the DirectSound convention: bin 31 is
+     * the only multipass source, consumed/cleared by the MP voice, with all
+     * contributing source voices consecutive. Retail MCPX permits other
+     * bins and layouts. Detect those first and preserve list order on one
+     * worker, avoiding both the old asserts and cross-worker dependencies.
+     * The normal fast scheduling path is unchanged for conventional layouts.
+     * Source: raddad772, xemu PR #3105 1296ec2.
+     */
+    bool unusual_multipass = false;
+    uint32_t check_dirty = 0;
+    for (int i = 0; i < vwd->queue_len; i++) {
+        uint32_t src, dst, clr;
+        get_voice_bin_src_dst(d, c, vwd->queue[i].voice, &src, &dst, &clr);
+        if ((src && (src != MULTIPASS_BIN_MASK ||
+                     clr != MULTIPASS_BIN_MASK)) ||
+            (!src && !(dst & MULTIPASS_BIN_MASK) &&
+             (check_dirty & MULTIPASS_BIN_MASK))) {
+            unusual_multipass = true;
+            break;
+        }
+        check_dirty = (check_dirty & ~clr) | dst;
+    }
+    if (unusual_multipass) {
+        VoiceWorker *worker = &vwd->workers[0];
+        for (int i = 0; i < vwd->queue_len; i++) {
+            worker->queue[worker->queue_len++] = vwd->queue[i];
+        }
+        if (vwd->queue_len) {
+            vwd->workers_pending |= 1ull;
+        }
+        return;
+    }
+
     for (int i = 0; i < vwd->queue_len; i++) {
         uint32_t src, dst, clr;
         get_voice_bin_src_dst(d, c, vwd->queue[i].voice, &src, &dst, &clr);
 
-        // TODO: To simplify submix scheduling, we make a few assumptions based
-        // on Xbox software observations. However, the configurability of
-        // multipass sources suggests the hardware may not be so strict. We'll
-        // defer making this more robust for now.
-        //
-        // We currently assume that:
+        // Checked above: the normal parallel path uses DirectSound's layout.
+        // The uncommon layouts were sent to the ordered worker-0 fallback:
         //
         // - MP bin is constant
         assert(!src || (src == MULTIPASS_BIN_MASK));
@@ -2640,6 +2901,19 @@ void mcpx_apu_vp_reset(MCPXAPUState *d)
     g_idle_last = 0xFFFF;
     for (int v = 0; v < ARRAY_SIZE(d->vp.filters); v++) {
         hrtf_filter_init(&d->vp.filters[v].hrtf);
+        memset(d->vp.filters[v].previous_mix_gain, 0,
+               sizeof(d->vp.filters[v].previous_mix_gain));
+        memset(&d->vp.filters[v].svf, 0, sizeof(d->vp.filters[v].svf));
+        memset(&d->vp.filters[v].paraeq, 0, sizeof(d->vp.filters[v].paraeq));
+        memset(&d->vp.filters[v].i3dl2_state, 0,
+               sizeof(d->vp.filters[v].i3dl2_state));
+        d->vp.filters[v].lfo_armed=false;
+        memset(d->vp.filters[v].lfo_phase,0,sizeof(d->vp.filters[v].lfo_phase));
+        memset(d->vp.filters[v].lfo_wait,0,sizeof(d->vp.filters[v].lfo_wait));
+        d->vp.filters[v].previous_pitch_valid=false;
+        d->vp.filters[v].previous_dls2_valid=false;
+        d->vp.filters[v].previous_paraeq_valid=false;
+        if (d->vp.filters[v].resampler) src_reset(d->vp.filters[v].resampler);
     }
     refresh_table(&d->vp.voice_cache, 0, 0);
     refresh_table(&d->vp.ssl_cache, 0, 0);

@@ -176,7 +176,12 @@
 #define NV1BA0_PIO_SET_VOICE_TAR_VOLA                    0x00000360
 #define NV1BA0_PIO_SET_VOICE_TAR_VOLB                    0x00000364
 #define NV1BA0_PIO_SET_VOICE_TAR_VOLC                    0x00000368
+/* Xbox FE method = voice-record offset + 0x300. The 0x350/0x370
+ * methods were silently ignored in older xemu/hakuX. Hardware verified:
+ * raddad772, https://github.com/xemu-project/xemu/pull/3105 (e1a8fad). */
+#define NV1BA0_PIO_SET_VOICE_LFO_DELAY                   0x00000350
 #define NV1BA0_PIO_SET_VOICE_LFO_ENV                     0x0000036C
+#define NV1BA0_PIO_SET_VOICE_LFO_MOD                     0x00000370
 #define NV1BA0_PIO_SET_VOICE_TAR_FCA                     0x00000374
 #define NV1BA0_PIO_SET_VOICE_TAR_FCB                     0x00000378
 #define NV1BA0_PIO_SET_VOICE_TAR_PITCH                   0x0000037C
@@ -261,6 +266,8 @@
 #define NV_PAVS_VOICE_CFG_ENVF                           0x00000014
 #define NV_PAVS_VOICE_CFG_MISC                           0x00000018
 #   define NV_PAVS_VOICE_CFG_MISC_EF_RELEASERATE            (0xFFF << 0)
+#   define NV_PAVS_VOICE_CFG_MISC_LFOA_DELAY_ENABLE         (1u << 14)
+#   define NV_PAVS_VOICE_CFG_MISC_LFOF_DELAY_ENABLE         (1u << 15)
 #   define NV_PAVS_VOICE_CFG_MISC_FMODE                     (3 << 16)
 #define NV_PAVS_VOICE_CFG_HRTF_TARGET                    0x0000001C
 #   define NV_PAVS_VOICE_CFG_HRTF_TARGET_HANDLE             0x0000FFFF
@@ -308,8 +315,18 @@
 #   define NV_PAVS_VOICE_TAR_VOLC_VOLUME4                   0x0000FFF0
 #   define NV_PAVS_VOICE_TAR_VOLC_VOLUME7_B11_8             0x000F0000
 #   define NV_PAVS_VOICE_TAR_VOLC_VOLUME5                   0xFFF00000
+#define NV_PAVS_VOICE_PAR_LFO_DELAY                      0x00000050
+#   define NV_PAVS_VOICE_PAR_LFO_DELAY_LFOA                 0x00007FFFu
+#   define NV_PAVS_VOICE_PAR_LFO_DELAY_LFOF                 0x7FFF0000u
 #define NV_PAVS_VOICE_TAR_LFO_ENV                        0x0000006C
 #   define NV_PAVS_VOICE_TAR_LFO_ENV_EA_RELEASERATE         (0xFFF << 0)
+#   define NV_PAVS_VOICE_TAR_LFO_ENV_LFOA_DELTA             (0x3FFu << 12)
+#   define NV_PAVS_VOICE_TAR_LFO_ENV_LFOF_DELTA             (0x3FFu << 22)
+#define NV_PAVS_VOICE_TAR_LFO_MOD                        0x00000070
+#   define NV_PAVS_VOICE_TAR_LFO_MOD_LFOA_AMPLITUDE         0x000000FFu
+#   define NV_PAVS_VOICE_TAR_LFO_MOD_LFOA_PITCH             0x0000FF00u
+#   define NV_PAVS_VOICE_TAR_LFO_MOD_LFOA_CUTOFF            0x00FF0000u
+#   define NV_PAVS_VOICE_TAR_LFO_MOD_LFOF_PITCH             0xFF000000u
 #define NV_PAVS_VOICE_TAR_FCA                            0x00000074
 #   define NV_PAVS_VOICE_TAR_FCA_FC0                        0x0000FFFF
 #   define NV_PAVS_VOICE_TAR_FCA_FC1                        0xFFFF0000
@@ -356,7 +373,8 @@ enum MCPX_HW_NOTIFIER {
 #define HRTF_ENTRY_COUNT 128
 
 #define MULTIPASS_BIN      31
-#define MULTIPASS_BIN_MASK (1 << MULTIPASS_BIN)
+/* Bin 31 must be shifted in an unsigned word (signed 1<<31 is undefined). */
+#define MULTIPASS_BIN_MASK (1u << MULTIPASS_BIN)
 
 // clang-format on
 

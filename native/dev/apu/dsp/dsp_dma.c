@@ -105,7 +105,21 @@ static void dsp_dma_run(DSPDMAState *s)
         return;
     }
 
+    /* Synchronous descriptor processing must not hang on a cyclic chain.
+     * This is a defensive bound, not accurate asynchronous DMA emulation. */
+    unsigned nodes_visited = 0;
     while (!(s->next_block & NODE_POINTER_EOL)) {
+        if (++nodes_visited > 4096) {
+            /* A cycle or overlong chain cannot be completed synchronously.
+             * Stop the DMA engine instead of leaving RUNNING set forever.
+             * Do not raise EOL: no actual end-of-list was encountered.
+             * Error interrupt semantics are not modelled by this backend. */
+            (void)APU_CHECK(!"DSP DMA exceeded 4096 descriptors");
+            s->error = true;
+            s->control &= ~DMA_CONTROL_RUNNING;
+            s->control |= DMA_CONTROL_STOPPED;
+            break;
+        }
         uint32_t addr = s->next_block & NODE_POINTER_VAL;
         uint32_t block_addr = 0;
         int block_space = DSP_SPACE_X;
@@ -336,6 +350,8 @@ void dsp_dma_write(DSPDMAState *s, DSPDMARegister reg, uint32_t v)
     case DMA_CONTROL:
         switch(v & DMA_CONTROL_ACTION) {
         case DMA_CONTROL_ACTION_START:
+            /* A new transfer may recover after a descriptor-chain fault. */
+            s->error = false;
             s->control |= DMA_CONTROL_RUNNING;
             s->control &= ~DMA_CONTROL_STOPPED;
             break;
