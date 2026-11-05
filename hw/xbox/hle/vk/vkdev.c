@@ -305,7 +305,13 @@ int hle_vk_init(void)
     const uint32_t api = force11 ? VK_API_VERSION_1_1 : v->props.apiVersion;
     const bool v13 = api >= VK_API_VERSION_1_3, v12 = api >= VK_API_VERSION_1_2;
     bool e_tl = v12 || has_ext(ext, ne, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
-    bool e_di = v12 || has_ext(ext, ne, VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
+    /* malisx2 on a Mali-G52 or G76 (v7) offers the part of descriptor indexing
+     * it has as its own VK_MALISX2_descriptor_indexing (the EXT's structs, flags
+     * and SPIR-V capabilities, within the limits it reports), not the EXT,
+     * whose required limits its 16-bit descriptor tables cannot meet */
+    bool e_di_malisx2 = !v12 && !has_ext(ext, ne, VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) &&
+                        has_ext(ext, ne, "VK_MALISX2_descriptor_indexing");
+    bool e_di = v12 || has_ext(ext, ne, VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) || e_di_malisx2;
     bool e_bda = v12 || has_ext(ext, ne, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
     bool e_hqr = v12 || has_ext(ext, ne, VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME);
     bool e_s2 = has_ext(ext, ne, VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
@@ -647,7 +653,9 @@ int hle_vk_init(void)
     if (!v13) {
         if (!v12) {                     /* core in 1.2 */
             exts[nx++] = VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME;
-            if (c->bindless) exts[nx++] = VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME;
+            if (c->bindless)
+                exts[nx++] = e_di_malisx2 ? "VK_MALISX2_descriptor_indexing"
+                                          : VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME;
             if (c->bda) exts[nx++] = VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME;
             if (c->host_query_reset) exts[nx++] = VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME;
         }
