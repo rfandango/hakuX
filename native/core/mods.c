@@ -170,7 +170,7 @@ static bool is_update(const char *xbe)
 /* The update's file for the disc's title, on the host; false when no update is installed. */
 static bool update_host(NcDisc *disc, const char *xbe, char *out, size_t n)
 {
-    HleXbeInfo x;
+    static HleXbeInfo x;    /* ~33 KB: off the stack */
     char path[512];
     if (!xbe_info(disc, "default.xbe", &x)) {
         return false;
@@ -223,7 +223,7 @@ static void patch_update(NcDisc *disc, const char *xbe, const char *mod, uint32_
                          unsigned nold, const uint8_t *neu, unsigned nnew, bool on)
 {
     char host[320];
-    HleXbeInfo x;
+    static HleXbeInfo x;    /* ~33 KB: off the stack */
     uint32_t off;
     uint8_t cur[256];
     if (!update_host(disc, xbe, host, sizeof(host))) {
@@ -273,7 +273,7 @@ static void patch(NcDisc *disc, const char *xbe, const char *mod, const char *li
             p++;
         }
     }
-    HleXbeInfo x;
+    static HleXbeInfo x;    /* ~33 KB: off the stack */
     uint32_t off;
     if (*colon != ':' || !nnew || (nold && nold != nnew) || (*p && *p != '#')) {
         nc_log("hakuX-native-mods", "%s: [%s] \"%s\": not a patch", mod, xbe, line);
