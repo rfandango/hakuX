@@ -25,7 +25,10 @@ extern "C" {
 
 #define NC_KERNEL_VA     0x80010000u
 #define NC_KERNEL_PA     0x00010000u
-#define NC_KERNEL_SIZE   0x00040000u
+/* The HLE layout ends at offset 0x13000 (checked in kernel.c). Keep the
+ * reservation small: unused low physical pages are needed by titles that
+ * request constrained allocations after laying out their fixed heaps. */
+#define NC_KERNEL_SIZE   0x00020000u
 #define NC_KCALL_VECTOR  0x3Fu
 /* In the KPCR's page, past its fields (guest code reads it at fs:): 1 while
  * DPCs are queued (timer.c), for the guest-code KfLowerIrql (kernel.c). */
