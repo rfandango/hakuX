@@ -39,6 +39,7 @@ static const NcKExport *k_by_ordinal[NC_KORDINAL_MAX];
 #define K_IDT      0x11000u /* 256 gates of 8 bytes */
 #define K_FAST     0x12000u /* exports run as guest code (install_fast_paths) */
 #define K_FAST_END 0x13000u
+_Static_assert(K_FAST_END <= NC_KERNEL_SIZE, "kernel code fits in reserved physical RAM");
 
 /* Kernel pool: starts with one 64 KiB chunk of physical RAM, reached through
  * the contiguous window, and grows a chunk at a time as needed (pool.c), as
