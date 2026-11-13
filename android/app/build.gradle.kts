@@ -113,9 +113,9 @@ android {
 
 // The repository's mods/ folder (mods and cheats per game: mods/README.md),
 // packed as the APK's assets/mods for the library's Mods & cheats; its
-// README stays out.
+// README and CREDITS stay out.
 val syncModAssets = tasks.register<Sync>("syncModAssets") {
-  from(rootProject.file("../mods")) { exclude("README.md") }
+  from(rootProject.file("../mods")) { exclude("README.md", "CREDITS.md") }
   into(layout.buildDirectory.dir("generated/modAssets/mods"))
 }
 tasks.named("preBuild") { dependsOn(syncModAssets) }

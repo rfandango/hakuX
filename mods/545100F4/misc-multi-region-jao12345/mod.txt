@@ -1,0 +1,13 @@
+name: {Misc} (Multi Region) [Jao12345]
+description: 60 FPS. One PAL version doesn't work.
+author: Jao12345, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Nickelodeon - Tak - The Great Juju Challenge {Misc} (Multi Region) [Jao12345].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jao12345.
+# Region in the file: NTSC, JAPAN & PAL; XBE CRC32 {39F4617E}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 60 FPS
+search 2A000000 C705A89F 4A000200 0080E812 B90A0085 C0 -> 2A000000 C705A89F 4A000100 0080E812 B90A0085 C0

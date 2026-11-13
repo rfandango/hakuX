@@ -1,0 +1,13 @@
+name: {Misc} (All Regions) [Jao12345]
+description: 60 FPS
+author: Jao12345, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Mafia {Misc} (All Regions) [Jao12345].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jao12345.
+# Region in the file: All Regions.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 60 FPS
+search 3D008B7C 24102BC6 3BC77317 8BF72BF0 56E869C4 FD -> 3D008B7C 24102BC6 3BC7EB17 8BF72BF0 56E869C4 FD

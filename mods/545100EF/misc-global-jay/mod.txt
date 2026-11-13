@@ -1,0 +1,13 @@
+name: {Misc} (GLOBAL) [Jay]
+description: Increases FOV a little bit. That's it.
+author: Jay, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Juiced {Misc} (GLOBAL) [Jay].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jay.
+# Region in the file: NTSC, JAPAN, PAL; XBE CRC32 {64CAA3B4}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Increase FOV 1.333 -> 1.5
+offset 0x312214: 0000C0

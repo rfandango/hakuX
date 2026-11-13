@@ -1,0 +1,23 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+description: Widescreen
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Shenmue II {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC; XBE CRC32 {8C2133CC}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+offset 0x13543: 80A047
+# Render Fix
+offset 0x46DD60: 55555555 555575
+# Render Fix
+offset 0x12C2E6: 80A84700 DB442410 DC0D90A8 4700DC0D 88A84700 DEC1E807 0A19008B 5424245F 5E89025B C390E86D B4FAFF59 D996AC00 0000E9D3 5CEEFF
+# Render Fix
+offset 0x11FBE: D80D307C 4600D996 A8000000 D80DC88F 4D00D91C 24E8A477 1600D1E0 668986A6 0000000F BFC0992B C2D1F850 E91DA311 0090
+# Cutscenes Letterbox Fix
+offset 0x75BFF: 0000
+# Cutscenes Letterbox Fix
+offset 0x75C21: 0000

@@ -1,0 +1,17 @@
+name: {480i Fix} (NTSC) [Zorlon]
+description: 480i Fix
+author: Zorlon, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Operation WinBack 2 - Project Poseidon {480i Fix} (NTSC) [Zorlon].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Zorlon.
+# Region in the file: NTSC; XBE CRC32 {10C442F1}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Allowed Media & Region Flags
+search 00000000 00000000 00000202 00000100 00000300 00000000 00 -> 00000000 00000000 0000FF01 00C00700 00000300 00000000 00
+# 480i Fix
+search 4F77FF43 08004F4B 57004900 4E004200 41004300 4B003200 00000000 00000000 000000 -> 4F77FF43 08004F4B 57006900 6E006200 61006300 6B002000 32000000 00000000 000000
+# 480i Fix
+search 8B8424D4 0000008B 50088B48 28528B50 2C518B48 04528B10 51528BF3 -> 8B8424D4 0000008B 50089090 528B502C 6A008B48 04528B10 51528BF3

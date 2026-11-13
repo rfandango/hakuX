@@ -1,0 +1,31 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+description: Widescreen
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Metal Gear Solid 2 - Substance {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC; XBE CRC32 {2555EC4D}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+offset 0x4D2EA9: 40
+# Widescreen
+offset 0x4D2F46: 40
+# Widescreen
+offset 0x4D2EF3: 40
+# Widescreen
+offset 0x4D2E53: 40
+# Post FX Fix
+offset 0x3BB310: D905E0E1 69009090 9090908B 8E640100 00D80D3C 345C008B BC99C000 00008B96 68010000 8B9C9AC0 000000D9 5C2458D9 0547A020 00
+# Post FX Fix
+offset 0x3D1E68: C6960C
+# Post FX Fix
+offset 0x3D1D8B: D905FBB3 0B
+# Post FX Fix
+offset 0x3F01DC: C6960C
+# Post FX Fix
+offset 0x3F015B: D9053BB7 58
+# Cutscenes Letterbox Fix
+offset 0x1A41DC: 2A

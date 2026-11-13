@@ -1,0 +1,21 @@
+name: {Misc} (NTSC+JPN) [Jay]
+description: 480i Fix.<br>If using Cerbios 3.1.0, this has already been fixed and a patch isn't needed.<br>I suspect only 1 of the 3 options needs enabling to fix progressive mode issues.
+author: Jay, via Jay's Magic Patches
+region: NTSC, NTSC-J
+
+# Converted from "Kung Fu Chaos {Misc} (NTSC+JPN) [Jay].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jay.
+# Region in the file: NTSC, JAPAN; XBE CRC32 {41983FD4}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 480i (Interlaced) -> 480p (Progressive)
+offset 0x19E2A0: 00
+# Option 1 - Change interlaced Hz to 60
+offset 0x1F042E: 3C
+# Option 2 - Skip Interlacing logic
+offset 0x1F0418: 9090
+# Option 3 - Force standard 60Hz logic
+offset 0x1F0446: 3C
+# Widescreen (Esppiral)
+search 00ABAAAA 3FC7 -> 00398EE3 3FC7

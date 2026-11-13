@@ -1,0 +1,13 @@
+name: {Misc} (All Regions) [Jao12345]
+description: 60 FPS
+author: Jao12345, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Need For Speed - Most Wanted - Black Edition {Misc} (All Regions) [Jao12345].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jao12345.
+# Region in the file: All Regions; XBE CRC32 {8949CF89}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 60 FPS
+search 25FFFFFF 7F0502 -> 25FFFFFF 7F0501

@@ -1,0 +1,21 @@
+name: {Misc} (Global) [Zorlon]
+description: HDD FATX Fix.<br><br>1. Apply this JMP patch to default.xbe, overwrite the original file.<br>2. Download the 5 files: https://jayxbox.com/All-Patches/titles/TOCA%20Race%20Driver%203%20(DTM%20Race%20Driver%203)%20(Pro%20Race%20Driver%203)%20(V8%20Supercars%20Australia%203)/TOCA3_HDDFIX.zip <br>3. Place the 5 files into the game's main dir<br>4. Delete the original 5 files that were already there (their names are too long for the FATX filesystem and won't transfer over).
+author: Zorlon, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "TOCA Race Driver 3 {Misc} (Global) [Zorlon].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Zorlon.
+# Region in the file: Global; XBE CRC32 {0045879E}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# HDD Fix
+search 13E8599F 000085C0 7508C744 24200000 48008D44 241CC744 2430C0C9 -> 13E8599F 000085C0 75089090 90909090 90908D44 241CC744 2430C0C9
+# HDD Fix
+search 5657C645 0000C744 24201400 0000EB03 8D49000F BE -> 5657C645 0000C744 24200500 0000EB03 8D49000F BE
+# HDD Fix
+search 8038008B F8E8A9E9 03008BF0 56E800F0 03005068 0C803800 A3DCB249 -> 8038008B F8E8A9E9 0300B87C D0070090 90905068 0C803800 A3DCB249
+# HDD Fix
+search C4183BF0 0F8472FC FFFFC705 EC6A3A00 00000000 E963FCFF FF5F5E5D B802 -> C4183BF0 0F8472FC FFFF9090 90909090 90909090 E963FCFF FF5F5E5D B802
+# HDD Fix
+search C9C20800 558BEC83 EC24568D 450850FF 3530C734 0083CEFF FF7508FF 15F4C634 0085 -> C9C20800 558BEC83 EC24BE56 3412008B C65EC9C2 04009090 FF7508FF 15F4C634 0085

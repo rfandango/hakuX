@@ -1,0 +1,23 @@
+name: {Misc} (NTSC) [Zorlon]
+description: FATX HDD Fix
+author: Zorlon, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Xbox Music Mixer {Misc} (NTSC) [Zorlon].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Zorlon.
+# Region in the file: NTSC; XBE CRC32 {7B10EF6B}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Allowed Media & Region Flags
+# (not imported: media and region flags of a real console) offset 0x220: FF010040
+# FATX HDD Fix
+offset 0xAB6BD: 33C0B006 A35C0037 00909090
+# FATX HDD Fix
+offset 0xAC4E3: 90909090 90
+# FATX HDD Fix
+offset 0xC04BC: EB
+# FATX HDD Fix
+offset 0x114F83: 90909090 90
+# FATX HDD Fix
+offset 0x28EC77: 90909090

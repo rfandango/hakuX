@@ -1,0 +1,15 @@
+name: {Misc} (NTSC-JPN) [theboy181]
+description: 60 FPS
+author: theboy181, via Jay's Magic Patches
+region: NTSC, NTSC-J
+
+# Converted from "Prince of Persia - The Sands of Time {Misc} (NTSC-JPN) [theboy181].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by theboy181.
+# Region in the file: NTSC, JAPAN; XBE CRC32 {C39268AA}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 60 FPS
+search 7E10F3AB B8010000 00BF0200 0000C746 18060000 00 -> 7E10F3AB B8010000 00BF0100 0000C746 18060000 00
+# 60 FPS
+search C5AC2700 85C0F30F 10057093 4200761D 3BC77614 83F8 -> C5AC2700 85C0F30F 1005289C 4200761D 3BC77614 83F8

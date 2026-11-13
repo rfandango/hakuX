@@ -1,0 +1,13 @@
+name: {Misc} (NTSC-JPN) [Jao12345]
+description: 60 FPS. This patch is to be applied to "bo3gm.xbe", not "default.xbe".
+author: Jao12345, via Jay's Magic Patches
+region: NTSC, NTSC-J
+
+# Converted from "Project - Snowblind {Misc} (NTSC-JPN) [Jao12345].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jao12345.
+# Region in the file: NTSC, JAPAN; XBE CRC32 {363DE9EC}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# [Apply to "bo3gm.xbe"]60 FPS
+search 00007506 893DA4A8 66008B54 24306878 A866008D 4C2434B8 -> 00007506 893DA4A8 660066BA 01006878 A866008D 4C2434B8

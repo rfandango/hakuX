@@ -1,0 +1,33 @@
+name: {720p} (GLOBAL) [Silverrock]
+description: 720p. 128MB only.<br>Visual bugs present.<br>Patch "hl2_xbox.xbe" not "default.xbe".
+author: Silverrock, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Half-Life 2 {720p} (GLOBAL) [Silverrock].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Silverrock.
+# Region in the file: NTSC, JAPAN, PAL; XBE CRC32 {5DC8E588}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# hl2_xbox.xbe - Header Edit - Limit RAM 64MB (OFF)
+offset 0x124: 01
+# hl2_xbox.xbe - VideoModeTable
+offset 0x609AE0: 0005D002 0F0D0F04 00016102 0005D002 0F0D0F14 00014003 8002F000 0F0D0F04 00014103 0005F000 0F0D0F14 04024800 0005D002 020A0B88 04024900 0005D002 020A0B88 04024800 D002D002 020A0B88 04024900 D002D002 020A0B88 04024802 0005D002 020A0B88 04024902 0005D002 020A0B88 04024300 0005D002 020A0B88 04026000 0005D002 0D010108 04026100 0005D002
+# hl2_xbox.xbe - 640x480 -> 1280x720 [Integers]
+offset 0xA4914: D0020000 8D7E1468 0005
+# hl2_xbox.xbe - 640x480 -> 1280x720 [Integers]
+offset 0xDFA9A: 00000000 680000
+# hl2_xbox.xbe - 640x480 -> 1280x720 [Integers]
+offset 0x3FFA2E: 00050000 C7460CD0 02
+# hl2_xbox.xbe - 640x480 -> 1280x720 [Integers]
+offset 0x3FFCB0: 00050000 C74018D0 02
+# hl2_xbox.xbe - 640x480 -> 1280x720 [Integers]
+offset 0x444ACA: 00050000 C701D002
+# hl2_xbox.xbe - 640x480 -> 1280x720 [Integers]
+offset 0x4ABA40: 0005
+# hl2_xbox.xbe - 640x480 -> 1280x720 [Integers]
+offset 0x4B0B22: D0020000 2BC1992B C251FF75 FCD1F850 B80005
+# hl2_xbox.xbe - 640x480 -> 1280x720 [Integers]
+offset 0x585850: 00050000 C3B8D002
+# hl2_xbox.xbe - ???
+offset 0x58C6D1: 00CA9A3B

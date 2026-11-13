@@ -1,0 +1,21 @@
+name: {Widescreen} (GLOBAL) [Combo]
+description: Patch made by both Esppiral and ICUP321
+author: Esppiral/ICUP321, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Crash Tag Team Racing {Widescreen} (GLOBAL) [Combo].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral/ICUP321.
+# Region in the file: GLOBAL.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 1.0f -> 0.75f
+search D2C1E006 03C7C700 0000803F 89500489 50088950 0C -> D2C1E006 03C7C700 0000403F 89500489 50088950 0C
+# 1.0f -> 0.75f
+search 500C8950 10C74014 0000803F 89501889 501C8950 20 -> 500C8950 10C74014 0000403F 89501889 501C8950 20
+# 1.0f -> 0.75f
+search 50208950 24C74028 0000803F 89502C89 50308950 34 -> 50208950 24C74028 0000403F 89502C89 50308950 34
+# 1.0f -> 0.75f
+search 50348950 38C7403C 0000803F 8B0156FF 90B00100 00 -> 50348950 38C7403C 0000403F 8B0156FF 90B00100 00
+# Aspect Ratio
+search 0000D84C 2410C744 24540000 803FC744 24580000 0000C7 -> 0000D84C 2410C744 2454ABAA AA3FC744 24580000 0000C7

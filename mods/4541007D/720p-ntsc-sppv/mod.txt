@@ -1,0 +1,43 @@
+name: {720p} (NTSC) [SPPV]
+description: 720p.
+author: SPPV, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "The Godfather {720p} (NTSC) [SPPV].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by SPPV.
+# Region in the file: NTSC; XBE CRC32 {EB5B10F0}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Allowed Media & Region Flags
+# (not imported: media and region flags of a real console) offset 0x220: FF010040
+# 720p
+offset 0x557914: 803F
+# 720p
+offset 0x563E00: 803F
+# 720p
+offset 0x380A4: 40
+# 720p
+offset 0x544EE: 40
+# 720p
+offset 0x5464F: 40
+# 720p
+offset 0x57921: 40
+# 720p
+offset 0x58F3E: 40
+# 720p
+offset 0x5A318: 40
+# 720p
+offset 0x5B21C: 40
+# 720p
+offset 0x2B2834: 40
+# 720p
+offset 0x2B286F: 40
+# 720p
+offset 0x4A0581: 508B4730 508B472C 518B4F04 906A0090
+# 720p
+offset 0x4BA1B3: 40
+# 720p
+offset 0x51A9D0: 398EE3
+# 720p
+offset 0x51F5AC: 803F

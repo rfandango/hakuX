@@ -1,0 +1,21 @@
+name: {128mb D3D} (US_CANADA) [iroiry]
+description: 128mb D3D allocation patch. Credit to Andy Anderson for these values. These follow a known working pattern of data values! Not guaranteed to work, give it a try!
+author: iroiry, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Hoops 2K7 {128mb D3D} (US_CANADA) [iroiry].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by iroiry.
+# Region in the file: US/CANADA.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Remove Ram Limit Flag @ 0x124
+search 05000080 3247FDA8 CC974300 A0860100 -> 01000080 3247FDA8 CC974300 A0860100
+# General Memory Cap Increase-> 128mb 1 @ 0x000098A6 (Header)
+search FC81CE00 00000C8B CEC1E918 8BC6C1E8 -> F881CE00 00000C8B CEC1E918 8BC6C1E8
+# General Memory Cap Increase-> 128mb 2 @ 0x000098AC (Header)
+search 0C8BCEC1 E9188BC6 C1E81C83 E10F83E0 -> 088BCEC1 E9188BC6 C1E81C83 E10F83E0
+# General Memory Cap Increase-> 128mb 3 @ 0x000098FA (Header)
+search 40742A8B 4D088BF1 57C1E902 33C08BFA -> 80742A8B 4D088BF1 57C1E902 33C08BFA
+# 64mb D3D Data Value Change 1 @ 0x004F9425 (XPP)
+search 00B0FF03 00D70267 0031FFF2 FFD802B3 -> 00B0FF07 00D70267 0031FFF2 FFD802B3

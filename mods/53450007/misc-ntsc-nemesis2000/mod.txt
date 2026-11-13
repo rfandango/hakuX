@@ -1,0 +1,21 @@
+name: {Misc} (NTSC) [Nemesis2000]
+description: Cutscene Letterbox Fix
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Panzer Dragoon ORTA {Misc} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC; XBE CRC32 {105EF843}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Cutscenes letterbox fix
+search 00000084 42C78188 00000000 0094428B -> 00000000 3FC78188 00000000 00003F8B
+# Cutscenes letterbox fix
+search 000000A0 42C78188 00000000 00C8428B -> 00000000 3FC78188 00000000 00003F8B
+# Cutscenes letterbox fix
+search 306F1900 0000F042 0000A042 0000C842 -> 306F1900 0000F042 0000003F 0000003F
+# Cutscenes letterbox fix
+search A042C741 640000C8 42EB0BB8 00008442 -> 003FC741 64000000 3FEB0BB8 0000003F
+# Cutscenes letterbox fix
+search 0000C842 C786CC00 00000000 A042C786 -> 0000003F C786CC00 00000000 003FC786

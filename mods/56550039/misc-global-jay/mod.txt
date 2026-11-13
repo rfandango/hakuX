@@ -1,0 +1,17 @@
+name: {MISC} (GLOBAL) [Jay]
+description: Various edits
+author: Jay, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "The Incredible Hulk - Ultimate Destruction {MISC} (GLOBAL) [Jay].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jay.
+# Region in the file: USA/Canada & Japan & Everywhere Else.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Allowed Media & Region Flags
+# (not imported: media and region flags of a real console) offset 0x220: FF010040
+# FATX Fix 1
+search 5EC9C204 00558BEC 83EC34FF 7508 -> 5EC9C204 00558BEC 83EC34EB 4341
+# FATX Fix 2
+search 7D1B50E8 30060000 E8D50500 0083F802 75076A03 E8F10500 0033C0EB 33 -> 7C46EB19 8B450850 8B000C20 3D643A5C 0075AF58 56B80008 0000EB33 90

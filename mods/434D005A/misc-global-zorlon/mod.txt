@@ -1,0 +1,13 @@
+name: {Misc} (Global) [Zorlon]
+description: Thumbnail Fix.<br>This patch is not to be applied to anything.<br>Download the necessary files from the link: https://www.jayxbox.com/All-Patches/titles/Operation%20Flashpoint%20-%20Elite/OFP.zip
+author: Zorlon, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Operation Flashpoint - Elite {Misc} (Global) [Zorlon].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Zorlon.
+# Region in the file: Global.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# https://www.jayxbox.com/All-Patches/titles/Operation%20Flashpoint%20-%20Elite/OFP.zip
+search DEADBEEF -> DEADBEEF

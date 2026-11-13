@@ -1,0 +1,14 @@
+name: {Widescreen} (PAL) [Esppiral]
+author: Esppiral, via Jay's Magic Patches
+region: PAL
+
+# Converted from "Starsky & Hutch {Widescreen} (PAL) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: PAL.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen A
+search AA42E925 020000C7 46709A99 99BFC746 74000080 3FC74678 -> C842E925 020000C7 46709A99 99BFC746 74000080 3FC74678
+# Widescreen B
+search D9055C0A 4100D8C9 DCC0D95C 240C -> D905CCC1 3C00D8C9 DCC0D95C 240C

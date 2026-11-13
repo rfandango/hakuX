@@ -1,0 +1,19 @@
+name: {Widescreen} (NTSC+JPN) [Esppiral]
+description: Widescreen
+author: Esppiral, via Jay's Magic Patches
+region: NTSC, NTSC-J
+
+# Converted from "Galleon {Widescreen} (NTSC+JPN) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: NTSC+JPN.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen 9a653 - 9a672
+offset 0x9A654: 60E503
+# Widescreen 9a826 - 9a855
+offset 0x9A82A: 88
+# Widescreen 9a658 - 9a6a7
+offset 0x9A65A: C86512
+# Widescreen 9a7f0 - 9a81f
+offset 0x9A7F4: CC7F20

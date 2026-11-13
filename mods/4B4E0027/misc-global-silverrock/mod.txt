@@ -1,0 +1,211 @@
+name: {Misc} (GLOBAL) [Silverrock]
+description: Select only one group that you wish to patch.
+author: Silverrock, via Jay's Magic Patches
+region: NTSC, NTSC-J
+
+# Converted from "World Soccer Winning Eleven 8 - International {Misc} (GLOBAL) [Silverrock].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Silverrock.
+# Region in the file: NTSC&JPN; XBE CRC32 {08D819E8}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Limit RAM 64MB (OFF)
+offset 0x124: 01
+# [-]1. 768x672 render, 720p canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x4: 568B7424 08803DE5 00010000 741981FE 88000000 73118B44 240C3B04 B5E03D33 0075045E C20800E9 F52F3100 8B442408 803DE500 01000074 5683F810 721883F8 1277138B 54240C83 FA017620 C744240C 01000000 EB1683F8 1575118B 54240C83 FA017608 C744240C 01000000 83F80D72 1E83F815 77198B4C 2404C1E1 0501C18B 54240C3B 148DE03B 33007503 C20C0083 F80CE9CC 39310080 3DE50001 00007419 A1784033 008B4C24 048B5424 083B9488 880F0000 7503C208 0083EC08 5355E96E 5C3100C6 05E50001 0000538B 1D784033 00E92DA2 3100C605 E5000100 015F5E5B C300
+# [-]1. 768x672 render, 720p canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x58243: 19
+# [-]1. 768x672 render, 720p canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x582BF: 19
+# [-]1. 768x672 render, 720p canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x582F2: 19
+# [-]1. 768x672 render, 720p canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x58357: 19
+# [-]1. 768x672 render, 720p canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x58591: 0005
+# [-]1. 768x672 render, 720p canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x58596: D002
+# [-]1. 768x672 render, 720p canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x682D0: 30
+# [-]1. 768x672 render, 720p canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x6833E: 00
+# [-]1. 768x672 render, 720p canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x313060: E9DFCFCE FF
+# [-]1. 768x672 render, 720p canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x313AA0: E9CBC5CE FF9090
+# [-]1. 768x672 render, 720p canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x315D70: E966A3CE FF
+# [-]1. 768x672 render, 720p canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x31A340: E9C25DCE FF9090
+# [-]1. 768x672 render, 720p canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x31A3EB: 01
+# [-]1. 768x672 render, 720p canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x31A3FE: E9175DCE FF
+# [-]1. 768x672 render, 720p canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x32219A: 01
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x4: 568B7424 08803DE5 00010000 741981FE 88000000 73118B44 240C3B04 B5E03D33 0075045E C20800E9 F52F3100 8B442408 803DE500 01000074 5683F810 721883F8 1277138B 54240C83 FA017620 C744240C 01000000 EB1683F8 1575118B 54240C83 FA017608 C744240C 01000000 83F80D72 1E83F815 77198B4C 2404C1E1 0501C18B 54240C3B 148DE03B 33007503 C20C0083 F80CE9CC 39310080 3DE50001 00007419 A1784033 008B4C24 048B5424 083B9488 880F0000 7503C208 0083EC08 5355E96E 5C3100C6 05E50001 0000538B 1D784033 00E92DA2 3100C605 E5000100 015F5E5B C300
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x2865: E8762302 00E87123 0200C3
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x28A0: C1FFFFFF
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x53F9C: D002
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x53FA2: 05
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x58243: 19
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x582BF: 19
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x582F2: 19
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x58357: 19
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x58591: 0005
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x58596: D002
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x5A33B: 10
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x5A33D: E08561
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x5A403: 10
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x5A405: 6C9D61
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x67A81: B9000200 0090BAC0 01000090
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x682D0: 30
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x6833B: 02
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x6833E: 00
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x2D08D8: 10
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x2D08DA: E08561
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x2D08FD: 10
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x2D08FF: 6C9D61
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x313060: E9DFCFCE FF
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x313AA0: E9CBC5CE FF9090
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x315D70: E966A3CE FF
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x31A340: E9C25DCE FF9090
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x31A3EB: 01
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x31A3FE: E9175DCE FF
+# [-]2. 720p render, 720p canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x32219A: 01
+# [-]3. 480p render/canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x4: 568B7424 08803DE5 00010000 741981FE 88000000 73118B44 240C3B04 B5E03D33 0075045E C20800E9 F52F3100 8B442408 803DE500 01000074 5683F810 721883F8 1277138B 54240C83 FA017620 C744240C 01000000 EB1683F8 1575118B 54240C83 FA017608 C744240C 01000000 83F80D72 1E83F815 77198B4C 2404C1E1 0501C18B 54240C3B 148DE03B 33007503 C20C0083 F80CE9CC 39310080 3DE50001 00007419 A1784033 008B4C24 048B5424 083B9488 880F0000 7503C208 0083EC08 5355E96E 5C3100C6 05E50001 0000538B 1D784033 00E92DA2 3100C605 E5000100 015F5E5B C300
+# [-]3. 480p render/canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x2865: E8762302 00E87123 0200C3
+# [-]3. 480p render/canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x28A0: C1FFFFFF
+# [-]3. 480p render/canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x53F9C: E0
+# [-]3. 480p render/canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x53FA1: D0
+# [-]3. 480p render/canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x58243: 0F
+# [-]3. 480p render/canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x582BF: 0F
+# [-]3. 480p render/canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x582F2: 0F
+# [-]3. 480p render/canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x58357: 0F
+# [-]3. 480p render/canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x58591: D0
+# [-]3. 480p render/canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x682D0: 30
+# [-]3. 480p render/canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x6833B: 02
+# [-]3. 480p render/canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x6833E: 00
+# [-]3. 480p render/canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x313060: E9DFCFCE FF
+# [-]3. 480p render/canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x313AA0: E9CBC5CE FF9090
+# [-]3. 480p render/canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x315D70: E966A3CE FF
+# [-]3. 480p render/canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x31A340: E9C25DCE FF9090
+# [-]3. 480p render/canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x31A3EB: 01
+# [-]3. 480p render/canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x31A3FE: E9175DCE FF
+# [-]3. 480p render/canvas, 30FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x32219A: 01
+# [-]4. 480p render/canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x4: 568B7424 08803DE5 00010000 741981FE 88000000 73118B44 240C3B04 B5E03D33 0075045E C20800E9 F52F3100 8B442408 803DE500 01000074 5683F810 721883F8 1277138B 54240C83 FA017620 C744240C 01000000 EB1683F8 1575118B 54240C83 FA017608 C744240C 01000000 83F80D72 1E83F815 77198B4C 2404C1E1 0501C18B 54240C3B 148DE03B 33007503 C20C0083 F80CE9CC 39310080 3DE50001 00007419 A1784033 008B4C24 048B5424 083B9488 880F0000 7503C208 0083EC08 5355E96E 5C3100C6 05E50001 0000538B 1D784033 00E92DA2 3100C605 E5000100 015F5E5B C300
+# [-]4. 480p render/canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x53F9C: E0
+# [-]4. 480p render/canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x53FA1: D0
+# [-]4. 480p render/canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x58243: 0F
+# [-]4. 480p render/canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x582BF: 0F
+# [-]4. 480p render/canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x582F2: 0F
+# [-]4. 480p render/canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x58357: 0F
+# [-]4. 480p render/canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x58591: D0
+# [-]4. 480p render/canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x682D0: 30
+# [-]4. 480p render/canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x6833E: 00
+# [-]4. 480p render/canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x313060: E9DFCFCE FF
+# [-]4. 480p render/canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x313AA0: E9CBC5CE FF9090
+# [-]4. 480p render/canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x315D70: E966A3CE FF
+# [-]4. 480p render/canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x31A340: E9C25DCE FF9090
+# [-]4. 480p render/canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x31A3EB: 01
+# [-]4. 480p render/canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x31A3FE: E9175DCE FF
+# [-]4. 480p render/canvas, 60FPS VSync, performance optimizations, triple buffer.
+# [off by default in the source] offset 0x32219A: 01
+# [-]5. 480p render/canvas, VSync OFF, unlockedFPS, performance optimizations, double buffer.
+# [off by default in the source] offset 0x4: 568B7424 08803DE5 00010000 741981FE 88000000 73118B44 240C3B04 B5E03D33 0075045E C20800E9 F52F3100 8B442408 803DE500 01000074 5683F810 721883F8 1277138B 54240C83 FA017620 C744240C 01000000 EB1683F8 1575118B 54240C83 FA017608 C744240C 01000000 83F80D72 1E83F815 77198B4C 2404C1E1 0501C18B 54240C3B 148DE03B 33007503 C20C0083 F80CE9CC 39310080 3DE50001 00007419 A1784033 008B4C24 048B5424 083B9488 880F0000 7503C208 0083EC08 5355E96E 5C3100C6 05E50001 0000538B 1D784033 00E92DA2 3100C605 E5000100 015F5E5B C300
+# [-]5. 480p render/canvas, VSync OFF, unlockedFPS, performance optimizations, double buffer.
+# [off by default in the source] offset 0x53F9C: E0
+# [-]5. 480p render/canvas, VSync OFF, unlockedFPS, performance optimizations, double buffer.
+# [off by default in the source] offset 0x53FA1: D0
+# [-]5. 480p render/canvas, VSync OFF, unlockedFPS, performance optimizations, double buffer.
+# [off by default in the source] offset 0x58243: 0F
+# [-]5. 480p render/canvas, VSync OFF, unlockedFPS, performance optimizations, double buffer.
+# [off by default in the source] offset 0x582BF: 0F
+# [-]5. 480p render/canvas, VSync OFF, unlockedFPS, performance optimizations, double buffer.
+# [off by default in the source] offset 0x582F2: 0F
+# [-]5. 480p render/canvas, VSync OFF, unlockedFPS, performance optimizations, double buffer.
+# [off by default in the source] offset 0x58357: 0F
+# [-]5. 480p render/canvas, VSync OFF, unlockedFPS, performance optimizations, double buffer.
+# [off by default in the source] offset 0x58591: D0
+# [-]5. 480p render/canvas, VSync OFF, unlockedFPS, performance optimizations, double buffer.
+# [off by default in the source] offset 0x682D0: 30
+# [-]5. 480p render/canvas, VSync OFF, unlockedFPS, performance optimizations, double buffer.
+# [off by default in the source] offset 0x313060: E9DFCFCE FF
+# [-]5. 480p render/canvas, VSync OFF, unlockedFPS, performance optimizations, double buffer.
+# [off by default in the source] offset 0x313AA0: E9CBC5CE FF9090
+# [-]5. 480p render/canvas, VSync OFF, unlockedFPS, performance optimizations, double buffer.
+# [off by default in the source] offset 0x315D70: E966A3CE FF
+# [-]5. 480p render/canvas, VSync OFF, unlockedFPS, performance optimizations, double buffer.
+# [off by default in the source] offset 0x31A340: E9C25DCE FF9090
+# [-]5. 480p render/canvas, VSync OFF, unlockedFPS, performance optimizations, double buffer.
+# [off by default in the source] offset 0x31A3EB: 01
+# [-]5. 480p render/canvas, VSync OFF, unlockedFPS, performance optimizations, double buffer.
+# [off by default in the source] offset 0x31A3FE: E9175DCE FF
+# [-]5. 480p render/canvas, VSync OFF, unlockedFPS, performance optimizations, double buffer.
+# [off by default in the source] offset 0x32219A: 01

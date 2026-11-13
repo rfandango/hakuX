@@ -1,0 +1,14 @@
+name: {Widescreen} (PAL) [icup321]
+author: icup321, via Jay's Magic Patches
+region: PAL
+
+# Converted from "Dark Summit {Widescreen} (PAL) [icup321].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by icup321.
+# Region in the file: PAL.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 16:9
+search 03000000 33ED8944 2410908A 841FC003 000084C0 0F8453 -> 03000000 33ED8944 24100000 801FC003 000084C0 0F8453
+# 16:9
+search B99C965C B1555F00 C0D179B0 5F0A4061 7FB5BC49 00B21E -> B99C965C B1555F00 C0D1ABAA AA0A4061 7FB5BC49 00B21E

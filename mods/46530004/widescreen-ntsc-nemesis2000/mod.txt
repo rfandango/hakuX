@@ -1,0 +1,17 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+description: Widescreen
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Otogi 2 - Immortal Warriors {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC; XBE CRC32 {C522C7FE}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Aspect Ratio
+search 298AA23F -> 30B8DB3F
+# Render Fix
+search 68000040 3F52B874 FA9D00E8 BF580000 -> 68000010 3F52B874 FA9D00E8 BF580000
+# Cutscenes Letterbox Fix
+search 3E000000 C744241C A2010000 894C2420 C7442424 E0010000 -> 00000000 C744241C E0010000 894C2420 C7442424 E0010000

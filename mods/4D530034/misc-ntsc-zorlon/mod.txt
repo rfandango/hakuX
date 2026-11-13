@@ -1,0 +1,15 @@
+name: {Misc} (NTSC) [Zorlon]
+description: HDD Fix
+author: Zorlon, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Inside Pitch 2003 {Misc} (NTSC) [Zorlon].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Zorlon.
+# Region in the file: NTSC; XBE CRC32 {A6CB654E}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# HDD Fix
+search 00000000 00000000 00000200 00000100 00000400 00 -> 00000000 00000000 0000FF00 00000100 00000400 00
+# HDD Fix
+search 1BFCEC01 00000000 00000300 00007BF3 5F27025E BC -> 1BFCEC01 00000000 00000200 00007BF3 5F27025E BC

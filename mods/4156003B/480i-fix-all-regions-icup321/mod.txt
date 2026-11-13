@@ -1,0 +1,13 @@
+name: {480i Fix} (All Regions) [SPPV]
+description: 480i Fix
+author: icup321, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "DreamWorks - Madagascar {480i Fix} (All Regions) [SPPV].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by icup321.
+# Region in the file: All Regions.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 480i (Interlaced) -> 480p (Progressive)
+search 0052E802 A2FFFF8B 4F088B57 28508B47 30508B47 2C518B4F 04528B17 5051528B CEE8400D -> 0052E802 A2FFFF8B 4F08508B 4730508B 472C518B 4F04906A 00908B17 5051528B CEE8400D

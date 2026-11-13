@@ -1,0 +1,15 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+description: Cutscene and Widescreen fix
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Def Jam - Fight for NY {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search 74714874 31480F85 -> 74694874 31480F85
+# Cutscene Fix
+search 410C8B54 24088902 8B44240C 8B542410 C700398E E33FD941 20D80D30 6D28008B 442414D9 052C6D28 00D8C9D8 4118D91A D94120D8 E1D918DD D8C21400 8B510C8B 44240889 108B5424 0CC702AB AAAA3F -> 510C8B44 24088910 8B54240C C702398E E33F8B41 188B5424 1089028B 41208B4C 24148901 C2140090 90909090 90909090 90909090 8B542408 D9410CD8 0DC0791B 00D91A90 908B5424 0CC70239 8EE33F

@@ -1,0 +1,15 @@
+name: {Widescreen} (All Regions) [Sifaw99]
+description: Widescreen
+author: Sifaw99, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Hitman - Contracts {Widescreen} (All Regions) [Sifaw99].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Sifaw99.
+# Region in the file: All Regions.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search C7853C13 00003001 0000 -> C7853C13 00001001 0000
+# Widescreen
+search C7853C13 00002001 0000 -> C7853C13 00004001 0000

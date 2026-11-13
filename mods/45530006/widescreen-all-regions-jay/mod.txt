@@ -1,0 +1,19 @@
+name: {Widescreen} (All Regions) [Jay]
+description: Nemesis made the original patch. I added a missed value and rearranged this patch to work for all regions of the game. The HUD elements are stretched horizontally, maybe that fixes it. ~Jay
+author: Jay, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Blood Omen 2 - The Legacy of Kain Series {Widescreen} (All Regions) [Jay].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jay.
+# Region in the file: All Regions.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Aspect Ratio 1.333 -> 1.777
+search 804068AB AAAA3F -> 80406839 8EE33F
+# Aspect Ratio 1.333 -> 1.777
+search 804068AB AAAA3F -> 80406839 8EE33F
+# Aspect Ratio 1.333 -> 1.777 | FMV/Menu Fix
+search 000060C3 ABAAAA3F -> 000060C3 398EE33F
+# Aspect Ratio 1.333 -> 1.777 | Missed value, possibly fixes HUD stretching? Test.
+search 5268ABAA AA3F -> 5268398E E33F

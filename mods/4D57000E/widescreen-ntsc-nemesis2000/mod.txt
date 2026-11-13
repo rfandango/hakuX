@@ -1,0 +1,17 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+description: Widescreen
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Gauntlet - Dark Legacy {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC; XBE CRC32 {07DE6BAA}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+offset 0x9A0C8: EC56
+# Widescreen
+offset 0x84AE7: 0D941F01 00D84424 18D94424 00D84964 D8D1DFE0 F6C44175 0DDDD8B8 02000000 DDD883C4 10C3D9C9 D9E0D9C9 DED9DFE0 F6C4057A 09B80100 000083C4 10C3D944 2408D849 68D84424 18D94424 04D8496C D8D1DFE0 F6C44175 0DDDD8B8 03000000 DDD883C4 10C3D9C9 D9E0D9C9 DED9DFE0 F6C4057A 09B80400 000083C4 10C333C0 83C410C3
+# Widescreen
+offset 0x109BE0: 08

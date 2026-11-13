@@ -1,0 +1,14 @@
+name: {Widescreen} (PAL) [Esppiral]
+author: Esppiral, via Jay's Magic Patches
+region: PAL
+
+# Converted from "Battlestar Galactica {Widescreen} (PAL) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: PAL?.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen A
+search 3333733F CDCCCC3E 57434C31 4C413031 -> 2222A23F CDCCCC3E 57434C31 4C413031
+# Widescreen B
+search F30F100D 3CE01400 F30F1154 244CF30F -> F30F100D 74931500 F30F1154 244CF30F

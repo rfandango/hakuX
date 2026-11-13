@@ -1,0 +1,17 @@
+name: {Misc} (PAL) [Zorlon]
+description: HDD Fix
+author: Zorlon, via Jay's Magic Patches
+region: PAL
+
+# Converted from "The Sims - Bustin' Out {Misc} (PAL) [Zorlon].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Zorlon.
+# Region in the file: PAL; XBE CRC32 {C213A321}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Allowed Media & Region Flags
+# (not imported: media and region flags of a real console) offset 0x220: FF000000 07000080
+# HDD Fix
+offset 0x35C: 02
+# HDD Fix
+offset 0xF1B07: EB

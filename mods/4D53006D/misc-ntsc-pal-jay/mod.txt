@@ -1,0 +1,13 @@
+name: {Misc} (NTSC+PAL) [Jay]
+description: <br>A collection of character texture mods.<br>This patch is not to be applied to anything.<br>Download pack here: https://www.jayxbox.com/All-Patches/titles/Jade%20Empire/jayxbox.com_jade_empire_xbox_texture_mods.zip
+author: Jay, via Jay's Magic Patches
+region: NTSC, PAL
+
+# Converted from "Jade Empire {Misc} (NTSC+PAL) [Jay].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jay.
+# Region in the file: NTSC+PAL.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Download pack here: https://www.jayxbox.com/All-Patches/titles/Jade%20Empire/jayxbox.com_jade_empire_xbox_texture_mods.zip
+search DEADBEEF -> DEADBEEF

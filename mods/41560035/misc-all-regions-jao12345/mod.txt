@@ -1,0 +1,17 @@
+name: {Misc} (All Regions) [Jao12345]
+description: 60 FPS
+author: Jao12345, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Ultimate Spider-Man {Misc} (All Regions) [Jao12345].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jao12345.
+# Region in the file: All Regions; XBE CRC32 {F0BE90BC}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 60 FPS
+search 0AD7A33C 6F12033A 8988083D 8C008C3A 00000C42 0000 -> 0AD7A33C 6F12033A 8988883C 8C008C3A 00000C42 0000
+# 60 FPS
+search 47008032 47000100 00000200 00009017 16009091 25 -> 47008032 47000100 00000100 00009017 16009091 25
+# 60 FPS
+search ABAA2A3E 00004842 8988083D 00002041 CDCCCC3D 3D0A -> ABAA2A3E 00004842 8988883C 00002041 CDCCCC3D 3D0A

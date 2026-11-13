@@ -1,0 +1,37 @@
+name: {720p} (NTSC+JPN) [Author Unknown]
+description: 720p
+author: Unknown author, via Jay's Magic Patches
+region: NTSC, NTSC-J
+
+# Converted from "Galleon {720p} (NTSC+JPN) [Author Unknown].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Unknown author.
+# Region in the file: NTSC+JPN; XBE CRC32 {CE70D63C}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Limit RAM 64MB (OFF)
+offset 0x124: 01
+# Header Edit - Allowed Media & Region Flags
+# (not imported: media and region flags of a real console) offset 0x220: FF010040 07
+# Video Mode Table
+offset 0x1D5B34: 0005D002 020A0B88 04014900 0005D002
+# 640x480 -> 1280x720
+offset 0x59093: D0020000 B80005
+# 640x480 -> 1280x720
+offset 0x60E02: 00050000 C74024D0 02
+# 640x480 -> 1280x720
+offset 0x7271E: D0020000 B80005
+# 640x480 -> 1280x720
+offset 0x161890: D0020000 B80005
+# 640x480 -> 1280x720
+offset 0x19BD12: 000566C7 401ED002
+# 640x480 -> 1280x720
+offset 0x1A4B9E: D0020000 BF0005
+# 640x480 -> 1280x720
+offset 0x1A89F4: 00050000 C74658D0 02
+# 640x480 -> 1280x720
+offset 0x1ABD9B: D0020000 680005
+# 640x480 -> 1280x720
+offset 0x1ABDE3: D0020000 680005
+# 640x480 -> 1280x720
+offset 0x1D5B04: 0005D002 010606C0 05016000 0005D002

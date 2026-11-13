@@ -1,0 +1,17 @@
+name: {480i Fix} (NTSC) [Zorlon]
+description: 480i Fix
+author: Zorlon, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "I-Ninja {480i Fix} (NTSC) [Zorlon].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Zorlon.
+# Region in the file: NTSC; XBE CRC32 {DA260AF1}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Allowed Media & Region Flags
+search 00000000 00000000 00000200 00000100 00000300 000000 -> 00000000 00000000 0000FFFF FF000100 00000300 000000
+# 480i Fix
+search 0BBCEC01 00000000 00000300 00004E3D 44726BEB 53 -> 0BBCEC01 00000000 00000200 00004E3D 44726BEB 53
+# 480i Fix
+search 0F95C15F 4983E110 81C92001 0000894A 288B4E08 49 -> 0F95C15F 4983E110 81C90001 0000894A 288B4E08 49

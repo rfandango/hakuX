@@ -1,0 +1,15 @@
+name: Halo 2 - DLC {Misc} (Global) [Jao12345]
+description: 60 FPS. This patch is only for the NTSC 1.5 DLC.
+author: Jao12345, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Halo 2 - DLC {Misc} (Global) [Jao12345].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jao12345.
+# Region in the file: Global.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 60 FPS
+search 7410663D 02007F04 66B80200 66A38A2C 4F0066A3 88 -> 7410663D 02007F04 66B80100 66A38A2C 4F0066A3 88
+# 60 FPS
+search FFFFFFFF 00000000 00003E40 0000003F 3333333F 22 -> FFFFFFFF 00000000 00004E40 0000003F 3333333F 22

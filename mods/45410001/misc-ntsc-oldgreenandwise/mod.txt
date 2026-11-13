@@ -1,0 +1,39 @@
+name: {Misc} (NTSC) [OldGreenAndWise]
+description: Fix Menus in widescreen mode.
+author: OldGreenAndWise, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Madden NFL 2002 {Misc} (NTSC) [OldGreenAndWise].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by OldGreenAndWise.
+# Region in the file: NTSC; XBE CRC32 {32643768}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Main menus being set to widescreen
+offset 0xB33A7: 398EE3
+# Main menus being set to widescreen
+offset 0xCCEF5: 398EE3
+# Main menus being set to widescreen
+offset 0x14909B: 398EE3
+# Main menus being set to widescreen
+offset 0x1490E3: 398EE3
+# Main menus being set to widescreen
+offset 0x149399: 398EE3
+# Main menus being set to widescreen
+offset 0x149639: 398EE3
+# Main menus being set to widescreen
+offset 0x14CBF6: 398EE3
+# Main menus being set to widescreen
+offset 0x14CCCD: 398EE3
+# Main menus being set to widescreen
+offset 0x16D777: 398EE3
+# Main menus being set to widescreen
+offset 0x16DDCA: 398EE3
+# Main menus being set to widescreen
+offset 0x16F537: 398EE3
+# Main menus being set to widescreen
+offset 0x17093A: 398EE3
+# Main menus being set to widescreen
+offset 0x170C8F: 398EE3
+# Main menus being set to widescreen
+offset 0x19D9EE: 398EE3

@@ -1,0 +1,16 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Forgotten Realms - Demon Stone {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC; XBE CRC32 {1547308D}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search 68ABAAAA 3F -> 867477E3 3F
+# Widescreen
+search 0FBF9184 060000 -> BA550300 009090
+# Cutscene Letterbox Fix
+search A198E31B 0083F803 -> A1A41001 0083F803

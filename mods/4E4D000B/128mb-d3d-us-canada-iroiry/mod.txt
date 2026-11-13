@@ -1,0 +1,21 @@
+name: {128mb D3D} (US_CANADA) [iroiry]
+description: 128mb D3D allocation patch. Credit to Andy Anderson for these values. These follow a known working pattern of data values! Not guaranteed to work, give it a try!
+author: iroiry, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "kill.switch {128mb D3D} (US_CANADA) [iroiry].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by iroiry.
+# Region in the file: US/CANADA.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# General Memory Cap Increase-> 128mb 1 @ 0x000C835B (Header)
+search FC81CE00 00000C8B CEC1E918 8BC6C1E8 -> F881CE00 00000C8B CEC1E918 8BC6C1E8
+# General Memory Cap Increase-> 128mb 2 @ 0x000C8361 (Header)
+search 0C8BCEC1 E9188BC6 C1E81C83 E10F83E0 -> 088BCEC1 E9188BC6 C1E81C83 E10F83E0
+# General Memory Cap Increase-> 128mb 3 @ 0x000C83AF (Header)
+search 40742A8B 4D088BF1 57C1E902 33C08BFA -> 80742A8B 4D088BF1 57C1E902 33C08BFA
+# 64mb D3D Data Value Change 1 @ 0x00222C6B (.rdata)
+search 00B0FF03 0090FD03 0070F403 00D0F503 -> 00B0FF07 0090FD03 0070F403 00D0F503
+# 64mb D3D Data Value Change 2 @ 0x00222F9B (.rdata)
+search 00B0FF03 0040FF03 0070F403 00D0F503 -> 00B0FF07 0040FF03 0070F403 00D0F503

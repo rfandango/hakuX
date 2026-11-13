@@ -64,10 +64,11 @@ private object Routes {
   const val GAME = "game?key={key}&title={title}"
 
   fun game(key: String, title: String) = "game?key=${Uri.encode(key)}&title=${Uri.encode(title)}"
-  /** One disc's mods and cheats: its game key and title. */
-  const val MODS = "mods?key={key}&title={title}"
+  /** One disc's mods and cheats: its game key, title and regions (XboxDisc.regions). */
+  const val MODS = "mods?key={key}&title={title}&regions={regions}"
 
-  fun mods(key: String, title: String) = "mods?key=${Uri.encode(key)}&title=${Uri.encode(title)}"
+  fun mods(key: String, title: String, regions: Int) =
+    "mods?key=${Uri.encode(key)}&title=${Uri.encode(title)}&regions=$regions"
 }
 
 /**
@@ -150,7 +151,7 @@ fun HakuXApp(
         },
         onMods = { game, disc ->
           val key = GameOverrides.gameKey(disc.titleId, disc.version, game.relativePath)
-          nav.navigate(Routes.mods(key, game.title))
+          nav.navigate(Routes.mods(key, game.title, disc.regions))
         },
       )
     }
@@ -159,11 +160,13 @@ fun HakuXApp(
       arguments = listOf(
         navArgument("key") { type = NavType.StringType; defaultValue = "" },
         navArgument("title") { type = NavType.StringType; defaultValue = "" },
+        navArgument("regions") { type = NavType.IntType; defaultValue = 0 },
       ),
     ) { entry ->
       ModsScreen(
         gameKey = entry.arguments?.getString("key").orEmpty(),
         title = entry.arguments?.getString("title").orEmpty(),
+        regions = entry.arguments?.getInt("regions") ?: 0,
         onBack = { nav.popBackStack() },
       )
     }

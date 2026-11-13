@@ -1,0 +1,15 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+description: Widescreen.
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Breakdown {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen A
+search D918D9EE D95804D9 EED95808 D9EED958 0CD9EED9 5810D875 10D95814 D9EED958 18D9EED9 581C -> D80D182E 210090D9 18B90000 00008948 04894808 89480C89 4810D875 10D95814 89481889 481C
+# Widescreen B
+search 2000D905 3CE02000 D8C9E885 B01800D8 -> 2000D905 80AB0800 D8C9E885 B01800D8

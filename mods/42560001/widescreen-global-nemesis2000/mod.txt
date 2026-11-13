@@ -1,0 +1,19 @@
+name: {Widescreen} (Global) [Nemesis2000]
+description: Apply to the file "TRON20KA.xbe", not "default.xbe"
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "TRON 2.0 - Killer App {Widescreen} (Global) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC; XBE CRC32 {BEED1DCA}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Apply to the file "TRON20KA.xbe", not "default.xbe"
+search D95E0CD9 450CDD1C 24E82272 3E00D95D 08D9450C DD1C24E8 CC6E3E00 D875080F 57C059F3 0F1106F3 0F114604 F30F1005 48C16500 59F30F11 4608 -> D83518C3 6500D95E 0CD9450C DD1C24E8 1C723E00 D95D08D9 450CDD1C 24E8C66E 3E00D875 080F57C0 59F30F11 06F30F11 460459C7 46080000 803F
+# Apply to the file "TRON20KA.xbe", not "default.xbe"
+search D918D9EE D95804D9 EED95808 D9EED958 0CD9EED9 5810D958 14D9EED9 5818D9EE D9581C -> D80D18C3 6500D918 B9000000 00894804 89480889 480C8948 10D95814 89481889 481C90
+# Apply to the file "TRON20KA.xbe", not "default.xbe"
+search 7447B9A4 417A00E8 1628FEFF D955F8D9 -> EB47B9A4 417A00E8 1628FEFF D955F8D9
+# Apply to the file "TRON20KA.xbe", not "default.xbe"
+search 7620F30F 100548C1 65000F2F 45FC7212 -> EB20F30F 100548C1 65000F2F 45FC7212

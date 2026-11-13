@@ -1,0 +1,19 @@
+name: {720p} (NTSC) [Esppiral]
+description: 720p requires 128MB for gameplay. Option for 1080i runs very poorly.
+author: Esppiral, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Panzer Dragoon ORTA {720p} (NTSC) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: NTSC; XBE CRC32 {105EF843}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Allowed Media & Region Flags
+# (not imported: media and region flags of a real console) offset 0x21C: FF010040 07
+# 640x480 -> 1280x720 [Floats] (Disable this if using 1080i option)
+offset 0x332E36: A0440000 34440000 A0440000 3444
+# 640x480 -> 1280x720 [Integers]
+offset 0x34A791: 050000D0 02000000 050000D0 02
+# 1080i [OPTIONAL] - 640x480 -> 1920x1080 [Floats] (Disable 720p if using 1080i option) [-]
+# [off by default in the source] offset 0x332E36: F0440000 87440000 F0440000 8744

@@ -1,0 +1,13 @@
+name: {Widescreen} (NTSC) [OldGreenAndWise]
+description: Menu select icon visible on left side, usually hidden by 4:3 ratio.
+author: OldGreenAndWise, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Disney-Pixar Finding Nemo {Widescreen} (NTSC) [OldGreenAndWise].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by OldGreenAndWise.
+# Region in the file: NTSC; XBE CRC32 {80D5BAB8}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 16:9
+offset 0x6C548: B8000010 3F894644 B8000080 3F89465C 89465889 465483C4 08C74648 CDCCCC3D C7465000 000000C7 464C0000 7A448BC6 5EC3

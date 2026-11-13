@@ -1,0 +1,20 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Project Gotham Racing {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen A
+search DC3D2805 1400D95C 2408D80D E47F2B00 -> DC3D5431 0A00D95C 2408D80D E47F2B00
+# Widescreen B
+search FFD9C083 C00449D8 48FCD958 3C75F2DD D8C39090 90909090 90909090 90909090 -> FFD9C083 C00449D8 48FCD958 3C75F2DD D8C39090 90000000 000000E8 3F909090
+# Letterbox Fix A
+search 680000C8 42536AFF E8C47307 00680000 803F5368 0000C842 68000020 446AFFE8 -> 68000000 00536AFF E8C47307 00680000 803F5368 00000000 68000020 446AFFE8
+# Letterbox Fix B
+search 680000BE 43536AFF E87F7307 00680000 803F5368 0000BE43 68000020 446AFFE8 -> 680000F0 43536AFF E87F7307 00680000 803F5368 0000F043 68000020 446AFFE8
+# Letterbox Fix C
+search C7442418 0000C842 C744241C 0000BE43 -> C7442418 00000000 C744241C 0000F043

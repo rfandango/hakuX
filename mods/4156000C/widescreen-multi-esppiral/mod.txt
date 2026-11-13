@@ -1,0 +1,17 @@
+name: {Widescreen} (Multi) [Esppiral]
+description: Widescreen, for all but NTSC.
+author: Esppiral, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "DOUBLE-S.T.E.A.L (Wreckless - The Yakuza Missions) {Widescreen} (Multi) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: Multi; XBE CRC32 {9A9292BD}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen A
+search C7000000 403FC390 -> C7000000 103FC390
+# Widescreen B
+search 35FA8E3F C10F733F -> F1A2BE3F C10F733F
+# No blur (Optional)
+search 8B868802 00003BC3 DCC0D954 2438D9C1 -> 90909090 90903BC3 DCC0D954 2438D9C1

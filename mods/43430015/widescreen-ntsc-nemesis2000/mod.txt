@@ -1,0 +1,27 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+description: Widescreen
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Beat Down - Fists of Vengeance {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 16:9 A
+search 68713DAA 3F680000 1C42E8DA 7AFCFF83 -> 68398EE3 3F680000 1C42E8DA 7AFCFF83
+# 16:9 B
+search 68713DAA 3F680000 1C42E826 85F6FF83 -> 68398EE3 3F680000 1C42E826 85F6FF83
+# 16:9 C
+search 68713DAA 3F680000 2042E8E7 D3E5FF83 -> 68398EE3 3F680000 2042E8E7 D3E5FF83
+# 16:9 D
+search 68ABAAAA 3F518D7D 10E85DC6 E5FF8B53 -> 68398EE3 3F518D7D 10E85DC6 E5FF8B53
+# 16:9 E
+search 68713DAA 3FF30F2A C2F30F59 05BC5A3B -> 68398EE3 3FF30F2A C2F30F59 05BC5A3B
+# 16:9 F
+search 68713DAA 3F51F30F 110424E8 0D9DE2FF -> 68398EE3 3F51F30F 110424E8 0D9DE2FF
+# Cutscenes Letterbox Fix
+search 68000020 44E8A4EE FBFF68E8 324200E8 -> 68000000 00E8A4EE FBFF68E8 324200E8
+# Cutscenes Letterbox Fix
+search 68000020 44E835EE FBFF6860 D35A00E8 -> 68000000 00E835EE FBFF6860 D35A00E8

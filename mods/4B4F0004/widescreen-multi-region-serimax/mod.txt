@@ -1,0 +1,17 @@
+name: {Widescreen} (Multi-Region) [SeriMax]
+description: Widescreen
+author: SeriMax, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Dynasty Warriors 4 {Widescreen} (Multi-Region) [SeriMax].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by SeriMax.
+# Region in the file: Multi-Region.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# WIDESCREEN
+search C845EFEE EE3E8988 083BCDCC CC -> 0546EFEE EE3E8988 083BCDCC CC
+# NAME AND HEALTH BARS ALIGMENT
+search AA3F0000 B9430000 963C6D11 C938FF12 4939CCCC -> DE3F0000 B9430000 963C6D11 C938FF12 4939CCCC
+# ZOOM
+search 36428080 803BCDCC CC -> 69428080 803BCDCC CC

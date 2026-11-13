@@ -1,0 +1,13 @@
+name: {Widescreen} (NTSC) [Esppiral]
+description: Widescreen
+author: Esppiral, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Knockout Kings 2002 {Widescreen} (NTSC) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: NTSC; XBE CRC32 {5E4C93FC}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search D905802F 3300C390 90909090 90909090 83EC508B 4424548B 4C24588B 54245C89 4424008B 44246056 57C74424 18000020 44C74424 1C000000 00C74424 24000080 -> D905F001 0F00C390 90909090 90909090 83EC508B 4424548B 4C24588B 54245C89 4424008B 44246056 57C74424 18000020 44C74424 1C000000 00C74424 24000080

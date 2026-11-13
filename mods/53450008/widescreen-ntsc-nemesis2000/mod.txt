@@ -1,0 +1,22 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "The House of the Dead III {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen A
+search 68ABAAAA 3F -> 68398EE3 3F
+# Widescreen B
+search 68ABAAAA 3F -> 68398EE3 3F
+# Crosshair Alignment A
+search 8B41FC50 B9B8CA2F 00E84E47 0A00C390 90909090 90909090 90909090 83EC1856 -> 8B41FC50 B9B8CA2F 00E84E47 0A00C390 BCBBBB3F 90909090 90909090 83EC1856
+# Crosshair Alignment B
+search 78141700 D95E048B 5708D942 588B4E04 -> 34100100 D95E048B 5708D942 588B4E04
+# Bullet Position Fix A
+search 686F1283 3C686F12 833CE838 5C060068 -> 68610B36 3C686F12 833CE838 5C060068
+# Bullet Position Fix B
+search C744240C 3108ACBD -> C744240C E0B9F7BD

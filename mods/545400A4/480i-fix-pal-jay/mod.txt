@@ -1,0 +1,19 @@
+name: {480i Fix} (PAL) [Jay]
+description: <br>480p Forced.<br>Only apply to your XBE revision.<br>If you apply all 4 patch options to your XBE that's on you.<br><br>Check versions here: https://www.jayxbox.com/Misc/XBE-Analyzer.php
+author: Jay, via Jay's Magic Patches
+region: PAL
+
+# Converted from "Grand Theft Auto - San Andreas {480i Fix} (PAL) [Jay].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jay.
+# Region in the file: PAL.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 480i Fix - [PAL 00000001 - 545400A4] https://www.jayxbox.com/Misc/XBE-Analyzer.php
+offset 0x263B08: 40
+# 480i Fix - [PAL 00000001 - 54540095] https://www.jayxbox.com/Misc/XBE-Analyzer.php
+offset 0x26308B: 40
+# 480i Fix - [PAL 00000001 - 545400A5] https://www.jayxbox.com/Misc/XBE-Analyzer.php
+offset 0x26327E: 40
+# 480i Fix - [PAL 00000003 - 54540086] https://www.jayxbox.com/Misc/XBE-Analyzer.php
+offset 0x263912: 40

@@ -1,0 +1,12 @@
+name: {Widescreen} (Global) [Esppiral]
+author: Esppiral, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Spider-Man 2 {Widescreen} (Global) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: Global.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search ABAAAA3F 398EE33F 00000000 00000000 00000000 00000080 00000080 00 -> 398EE33F 398EE33F 00000000 00000000 00000000 00000080 00000080 00

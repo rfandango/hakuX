@@ -1,0 +1,13 @@
+name: {Widescreen} (JPN) [Esppiral]
+description: Widescreen
+author: Esppiral, via Jay's Magic Patches
+region: NTSC-J
+
+# Converted from "Tenerezza {Widescreen} (JPN) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: JPN; XBE CRC32 {0A51EED6}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search ABAAAA3F 68C04E2D 00E85E79 030083C4 1468 -> 398EE33F 68C04E2D 00E85E79 030083C4 1468

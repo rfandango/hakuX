@@ -1,0 +1,18 @@
+name: {Widescreen} (NTSC+PAL) [Nemesis2000]
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC, PAL
+
+# Converted from "Midtown Madness 3 {Widescreen} (NTSC+PAL) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC+PAL.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen A
+search CCCCCCCC CCCCCCCC 8B442404 85C0689C -> 35FA0E3C CCCCCCCC 8B442404 85C0689C
+# Widescreen B
+search D80D9C5F 3800D80D 88503800 D9F2DDD8 -> D80D88E2 0800D9F2 DDD8D80D 205F3800
+# Widescreen C
+search D905205F 3800 -> D90568A7 3600
+# Widescreen D
+search D905205F 3800 -> D90568A7 3600

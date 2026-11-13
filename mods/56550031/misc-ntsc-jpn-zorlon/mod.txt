@@ -1,0 +1,17 @@
+name: {Misc} (NTSC+JPN) [Zorlon]
+description: HDD Fix & Censorship Removal - Apply to default.xbe<br>Censorship mod is separate.<br>Download mod here and merge with game folder: https://jayxbox.com/All-Patches/titles/Leisure%20Suit%20Larry%20-%20Magna%20Cum%20Laude/Leisure_Suit_Larry_Uncensored.zip
+author: Zorlon, via Jay's Magic Patches
+region: NTSC, NTSC-J
+
+# Converted from "Leisure Suit Larry - Magna Cum Laude {Misc} (NTSC+JPN) [Zorlon].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Zorlon.
+# Region in the file: NTSC, JAPAN; XBE CRC32 {B950F81D}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# [-]Download Censor Mod: https://jayxbox.com/All-Patches/titles/Leisure%20Suit%20Larry%20-%20Magna%20Cum%20Laude/Leisure_Suit_Larry_Uncensored.zip
+# [off by default in the source] search DEADBEEF -> DEADBEEF
+# Header Edit - Allowed Media & Region Flags
+# (not imported: media and region flags of a real console) offset 0x220: FF0100C0
+# HDD Fix
+offset 0x168376: EB

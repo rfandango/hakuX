@@ -1,0 +1,19 @@
+name: {Misc} (GLOBAL) [Zorlon]
+description: HDD Fix
+author: Zorlon, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Greg Hastings' Tournament Paintball {Misc} (GLOBAL) [Zorlon].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Zorlon.
+# Region in the file: NTSC, JAPAN, PAL; XBE CRC32 {88E1C1F0}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Limit RAM 64MB (OFF)
+offset 0x124: 01
+# Header Edit - Allowed Media & Region Flags
+# (not imported: media and region flags of a real console) offset 0x220: FF
+# HDD Fix
+offset 0xDA909: EB4341
+# HDD Fix
+offset 0xDA94A: 7C46EB19 8B450850 8B000C20 3D643A5C 0075AF58 56B80008 0000EB33 90

@@ -1,0 +1,31 @@
+name: {Widescreen} (NTSC) [Part 2 of 2] [Nemesis2000]
+description: There are two patches for this game. They are applied to either the file "inis.viv" or "default.xbe"
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Need for Speed - Hot Pursuit 2 {Widescreen} (NTSC) [Part 2 of 2] [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# inis.viv (Replace 2 times)
+search 464F563D 3737 -> 464F563D 3933
+search 464F563D 3737 -> 464F563D 3933
+# inis.viv (Replace 3 times)
+search 464F563D 39302E30 30 -> 464F563D 3130362E 30
+search 464F563D 39302E30 30 -> 464F563D 3130362E 30
+search 464F563D 39302E30 30 -> 464F563D 3130362E 30
+# inis.viv (Replace 3 times)
+search 464F5620 3D203535 2E3030 -> 464F5620 3D203639 2E3533
+search 464F5620 3D203535 2E3030 -> 464F5620 3D203639 2E3533
+search 464F5620 3D203535 2E3030 -> 464F5620 3D203639 2E3533
+# inis.viv (Replace 4 times)
+search 464F563D 37312E35 30 -> 464F563D 38372E31 33
+search 464F563D 37312E35 30 -> 464F563D 38372E31 33
+search 464F563D 37312E35 30 -> 464F563D 38372E31 33
+search 464F563D 37312E35 30 -> 464F563D 38372E31 33
+# inis.viv
+search 4A756D70 464F5633 3D34302E 3030 -> 4A756D70 464F5633 3D35312E 3737
+# inis.viv
+search 4D617472 6978464F 563D3730 2E3030 -> 4D617472 6978464F 563D3836 2E3037

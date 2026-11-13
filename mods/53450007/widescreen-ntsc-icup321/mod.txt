@@ -1,0 +1,13 @@
+name: {Widescreen} (NTSC) [icup321]
+description: Apply to "PD1.xbe", not "default.xbe"
+author: icup321, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Panzer Dragoon Orta {Widescreen} (NTSC) [icup321].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by icup321.
+# Region in the file: NTSC; XBE CRC32 {6878C276}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# PD1.xbe - Widescreen
+search 00000000 00000000 00000001 00000000 00000000 0000 -> 00000000 00000000 0000C000 00000000 00000000 0000

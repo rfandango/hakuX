@@ -1,0 +1,17 @@
+name: {Misc} (NTSC+PAL) [Esppiral]
+description: <br>This should work for both NTSC & PAL DLC.<br>DLC xbe located in E:\TDATA\4d530021\default.xbe.<br><br>DLC can be found here: https://digiex.net/threads/xbox-offline-xbox-live-downloadable-content-dlc-installers.675
+author: Esppiral, via Jay's Magic Patches
+region: NTSC, PAL
+
+# Converted from "Crimson Skies - High Road to Revenge DLC {Misc} (NTSC+PAL) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: NTSC&PAL.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Aspect Ratio 16:9
+offset 0x1DA56: 40
+# FPS
+offset 0x122FA8: 00
+# A float switched from "500" to "1000"
+offset 0x29199A: FA43

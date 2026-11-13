@@ -1,0 +1,15 @@
+name: {Misc} (Global) [Jao12345]
+description: 60 FPS
+author: Jao12345, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Driver - Parallel Lines {Misc} (Global) [Jao12345].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jao12345.
+# Region in the file: Global.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 60 FPS
+offset 0x1D53CC: C7466400 0070425E 5B8BE55D C3
+# 60 FPS
+offset 0x23C224: 01

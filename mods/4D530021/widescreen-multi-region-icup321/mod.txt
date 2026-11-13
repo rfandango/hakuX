@@ -1,0 +1,13 @@
+name: {Widescreen} (Multi Region) [icup321]
+description: Widescreen
+author: icup321, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Crimson Skies - High Road to Revenge {Widescreen} (Multi Region) [icup321].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by icup321.
+# Region in the file: Multi Region.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 16:9
+search 04246800 00803F68 0000803F 8BCEE831 060300F3 0F -> 04246800 00803F68 0000403F 8BCEE831 060300F3 0F

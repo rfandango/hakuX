@@ -1,0 +1,13 @@
+name: {60FPS} (NTSC) [Esppiral]
+description: 60FPS
+author: Esppiral, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Silent Hill 2 {60FPS} (NTSC) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# No FPS cap/limit (60fps) - Indoors only?
+search A27F56DF 0033C0C3 90909090 -> A17F56DF 0033C0C3 90909090

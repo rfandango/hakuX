@@ -1,0 +1,15 @@
+name: {Misc} (NTSC) [Jay]
+description: Experimental patch, runs like dogwater on stock RAM and a light overclock.<br>Probably not that much better on 128MB and a 1.0GHz CPU to be quite frank.<br><br>Use one or the other, they both target the same code in the D3DParameters
+author: Jay, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Star Wars - Knights of the Old Republic {Misc} (NTSC) [Jay].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jay.
+# Region in the file: NTSC; XBE CRC32 {6E2085A8}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 4xMSAA[-]
+# [off by default in the source] offset 0x291E54: C7054033 47002222 0000
+# 2xMSAA
+offset 0x291E54: C7054033 47001220 0000

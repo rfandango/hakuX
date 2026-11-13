@@ -1,0 +1,15 @@
+name: {480i Fix} (NTSC) [Sifaw99]
+description: 480i Fix.<br>I'm not confident in this one, there was a PAL patch too.<br>I-Ninja only had a NA release.
+author: Sifaw99, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "I-Ninja {480i Fix} (NTSC) [Sifaw99].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Sifaw99.
+# Region in the file: NTSC; XBE CRC32 {DA260AF1}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 480i Fix
+search 82C92001 0000894A -> 82C94001 0000894A
+# 480i Fix
+search 81C92001 0000894A -> 82C91000 0000894A

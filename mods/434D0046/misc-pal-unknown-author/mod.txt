@@ -1,0 +1,23 @@
+name: {Misc} (PAL) [Author Unknown]
+description: HDD filename Fix for FATX limitations. Download files necessary: (Download necessary: https://jayxbox.com/All-Patches/titles/LMA%20Manager%202005%20%28BDFL%29%20%28Roger%20Lemerre%29/PAL_00000001_434D0046/LMA%20Manager%202005%20%28BDFL%29%20%28Roger%20Lemerre%29%20%7BMisc%7D%20%28PAL%29%20%5BAuthor%20Unknown%5D/LMA%20Manager%202005%20%28BDFL%29%20%28Roger%20Lemerre%29%20-%20%7BMisc%7D%20%28PAL%29%20%5BAuthor%20Unknown%5D%20-%20HDD%20Fix%20Files.zip)
+author: Unknown author, via Jay's Magic Patches
+region: PAL
+
+# Converted from "LMA Manager 2005 (BDFL) (Roger Lemerre) {Misc} (PAL) [Author Unknown].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Unknown author.
+# Region in the file: PAL.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Region change for whatever reason
+offset 0x220: FF010040
+# File 1 - Null filename ending (Download necessary: https://jayxbox.com/All-Patches/titles/LMA%20Manager%202005%20%28BDFL%29%20%28Roger%20Lemerre%29/PAL_00000001_434D0046/LMA%20Manager%202005%20%28BDFL%29%20%28Roger%20Lemerre%29%20%7BMisc%7D%20%28PAL%29%20%5BAuthor%20Unknown%5D/LMA%20Manager%202005%20%28BDFL%29%20%28Roger%20Lemerre%29%20-%20%7BMisc%7D%20%28PAL%29%20%5BAuthor%20Unknown%5D%20-%20HDD%20Fix%20Files.zip)
+offset 0x3FAEA6: 00000000 00000000 00000000 00000000 00000000 00000000 000000
+# File 2 - Null filename ending (Download necessary: https://jayxbox.com/All-Patches/titles/LMA%20Manager%202005%20%28BDFL%29%20%28Roger%20Lemerre%29/PAL_00000001_434D0046/LMA%20Manager%202005%20%28BDFL%29%20%28Roger%20Lemerre%29%20%7BMisc%7D%20%28PAL%29%20%5BAuthor%20Unknown%5D/LMA%20Manager%202005%20%28BDFL%29%20%28Roger%20Lemerre%29%20-%20%7BMisc%7D%20%28PAL%29%20%5BAuthor%20Unknown%5D%20-%20HDD%20Fix%20Files.zip)
+offset 0x3FB758: 00000000 00000000 00000000 00000000 00000000 00000000 000000
+# File 3 - Null filename ending (Download necessary: https://jayxbox.com/All-Patches/titles/LMA%20Manager%202005%20%28BDFL%29%20%28Roger%20Lemerre%29/PAL_00000001_434D0046/LMA%20Manager%202005%20%28BDFL%29%20%28Roger%20Lemerre%29%20%7BMisc%7D%20%28PAL%29%20%5BAuthor%20Unknown%5D/LMA%20Manager%202005%20%28BDFL%29%20%28Roger%20Lemerre%29%20-%20%7BMisc%7D%20%28PAL%29%20%5BAuthor%20Unknown%5D%20-%20HDD%20Fix%20Files.zip)
+offset 0x3FB7AF: 00000000 00000000 00000000 00000000 00000000 00000000 000000
+# File 4 - Null filename ending (Download necessary: https://jayxbox.com/All-Patches/titles/LMA%20Manager%202005%20%28BDFL%29%20%28Roger%20Lemerre%29/PAL_00000001_434D0046/LMA%20Manager%202005%20%28BDFL%29%20%28Roger%20Lemerre%29%20%7BMisc%7D%20%28PAL%29%20%5BAuthor%20Unknown%5D/LMA%20Manager%202005%20%28BDFL%29%20%28Roger%20Lemerre%29%20-%20%7BMisc%7D%20%28PAL%29%20%5BAuthor%20Unknown%5D%20-%20HDD%20Fix%20Files.zip)
+offset 0x3FB804: 00000000 00000000 00000000 00000000 00000000 00000000 000000
+# File 5 - Null filename ending (Download necessary: https://jayxbox.com/All-Patches/titles/LMA%20Manager%202005%20%28BDFL%29%20%28Roger%20Lemerre%29/PAL_00000001_434D0046/LMA%20Manager%202005%20%28BDFL%29%20%28Roger%20Lemerre%29%20%7BMisc%7D%20%28PAL%29%20%5BAuthor%20Unknown%5D/LMA%20Manager%202005%20%28BDFL%29%20%28Roger%20Lemerre%29%20-%20%7BMisc%7D%20%28PAL%29%20%5BAuthor%20Unknown%5D%20-%20HDD%20Fix%20Files.zip)
+offset 0x3FB854: 00000000 00000000 00000000 00000000 00000000 00000000 000000

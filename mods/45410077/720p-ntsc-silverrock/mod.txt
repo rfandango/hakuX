@@ -1,0 +1,23 @@
+name: {720p} (NTSC) [Silverrock]
+description: "Some Slowdowns."
+author: Silverrock, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Harry Potter and the Goblet of Fire {720p} (NTSC) [Silverrock].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Silverrock.
+# Region in the file: NTSC; XBE CRC32 {A67A2F07}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Limit RAM 64MB (OFF)
+offset 0x124: 01
+# Video Mode Table
+offset 0x288857: 020A0B88 741481FB 020A0B88 740C81FB 020A0B
+# Video Mode Table
+offset 0x2965C0: 020A0B88 04014900 8002E001 020A0B88 04014800 D002E001 020A0B88 04014900 D002E001 020A0B88 04014802 8002E001 020A0B88 04014902 0005D002 020A0B
+# Video Mode Table
+offset 0x2967DC: 020A0B88 04024900 8002E001 020A0B88 04024800 D002E001 020A0B88 04024900 D002E001 020A0B88 04024802 8002E001 020A0B88 04024902 8002E001 020A0B
+# 640x480 -> 1280x720
+offset 0x93F27: 0005
+# 640x480 -> 1280x720
+offset 0x93F7C: D002

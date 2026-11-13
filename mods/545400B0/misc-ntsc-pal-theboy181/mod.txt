@@ -1,0 +1,15 @@
+name: {Misc} (NTSC-PAL) [theboy181]
+description: 60 FPS
+author: theboy181, via Jay's Magic Patches
+region: NTSC, PAL
+
+# Converted from "Family Guy - Video Game! {Misc} (NTSC-PAL) [theboy181].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by theboy181.
+# Region in the file: NTSC+PAL; XBE CRC32 {DF87141E}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 60 FPS
+offset 0x18096: 9DD606
+# 60 FPS
+offset 0x642A8: 9DD606

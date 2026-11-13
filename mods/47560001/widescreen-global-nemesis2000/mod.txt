@@ -1,0 +1,13 @@
+name: {Widescreen} (GLOBAL) [Nemesis2000]
+description: Widescreen
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Pariah {Widescreen} (GLOBAL) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: GLOBAL; XBE CRC32 {3CC8AAB3}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen - Gameplay
+search F30F1005 F4CB4400 8DBB1001 00008D75 F0A533C0 A5F30F11 83A80000 00F30F11 83A40000 00 -> 8DBB1001 00008D75 F0A533C0 A5C783A4 00000000 00403FC7 83A80000 00000080 3F909090 90

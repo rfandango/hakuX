@@ -1,0 +1,21 @@
+name: {720p} (Global) [Silverrock]
+description: 128MB only - HUD/Text small 6/11/24. Multiple people have reported a black screen when patching this game. Could be an xbe/xbox revision thing.
+author: Silverrock, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Cold Fear {720p} (Global) [Silverrock].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Silverrock.
+# Region in the file: Global.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Limit RAM 64MB (OFF)
+search 01000E00 00007003 01000700 0000E5ED FDA8CC75 30 -> 01000E00 00007003 01000300 0000E5ED FDA8CC75 30
+# Header Edit - Allowed Media & Region Flags
+search 00000000 00000000 00000000 00000000 00000000 00000202 00000700 00000200 00000000 -> 00000000 00000000 0000FFFF FF000000 00000000 0000FF01 00400700 00000200 00000000
+# 640x480 -> 1280x720 & Window View change
+search 0F0D0F14 04024800 8002E001 01070788 04024900 8002E001 01070788 04024800 -> 0F0D0F14 04024800 8002D002 020A0B88 04024900 0005E001 01070788 04024800
+# 640x480 -> 1280x720 1
+search 30BE3C00 0000C744 2450E001 00008974 2434740E B8D00200 00894424 4C83C940 EB -> 30BE3C00 0000C744 2450D002 00008974 2434740E B8000500 00894424 4C83C940 EB
+# 640x480 -> 1280x720 2
+search 8B4C2454 53525650 5168E001 00005568 38293100 E8EE -> 8B4C2454 53525650 5168D002 00005568 38293100 E8EE

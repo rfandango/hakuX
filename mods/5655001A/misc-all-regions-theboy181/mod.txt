@@ -1,0 +1,13 @@
+name: {Misc} (All Regions) [theboy181]
+description: Force Level of Detail High
+author: theboy181, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Baldur's Gate - Dark Alliance {Misc} (All Regions) [theboy181].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by theboy181.
+# Region in the file: NTSC; XBE CRC32 {DF0DB6D8}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Increase Level of Detail
+search 668B8BAA 02000066 85C97D61 8B8B9402 0000518D 54 -> 668B8BAA 02000066 85C97E61 8B8B9402 0000518D 54

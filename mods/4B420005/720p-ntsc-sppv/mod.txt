@@ -1,0 +1,237 @@
+name: {720p} (NTSC) [SPPV]
+description: If game freezes, reboot, clear cache. Both Default.XBE and chicagoEnf.XBE edits required.
+author: SPPV, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Chicago Enforcer {720p} (NTSC) [SPPV].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by SPPV.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Apply to Default.xbe AND ChicagoEnf.xbe [Header Edit - Allowed Media & Region Flags]
+# (not imported: media and region flags of a real console) offset 0x220: FF010040 07
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x2EBE79: 0000D243
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x3B05B0: 40
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x416E26: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41AA36: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41AEF6: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41AF7E: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41B0F2: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41B22E: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41B34A: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41B52E: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41B89E: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41B9BA: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41BADA: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41BFD2: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41C05A: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41C0D2: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41C256: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41C2DE: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41C4EA: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41C8AA: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41C95E: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41CA3E: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41CAB2: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41D2EE: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41D74A: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41D96E: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41DCBA: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41E1C2: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41EB96: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41ECDA: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41F052: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41F272: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x41F3DA: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x420126: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x420572: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x4209AA: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x420BF2: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x421722: 803F0000 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x421966: 803F0000 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x421A4E: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x421C5A: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x421D42: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x4220D2: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x4220F2: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x422226: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x4222D2: 803F0000 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x4223F2: 803F0000 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x42251A: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x42257A: 803F0000 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x4225BE: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x42262E: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x422706: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x42283E: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x422876: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x42531E: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x4273BE: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x427EDE: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x42EBE0: 398EE3
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x4392A0: 398EE3
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x439D9A: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x47ABD0: 398EE3
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x49975A: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x499802: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x499A1A: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x499CFA: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x499F2E: 803F
+# Apply to ChicagoEnf.xbe - 16:9
+offset 0x50F194: 398EE3
+# Apply to ChicagoEnf.xbe - Video Modes
+offset 0x407AE4: 0005D002 020A0B88 04014900 0005D002 020A0B88 04014800 D002D002 020A0B88 04014900 D002D002 020A0B88 04014802 0005D002 020A0B88 04014902 0005D002 020A0B88 04014300 0005D002 020A0B88 04016000 0005D002 0D010108 04016100 0005D002 0D010118 04016000 D002D002 0E020208 04016100 D002D002 0E020218 04014001 0005F000 0D010108 04014101 0005
+# Apply to ChicagoEnf.xbe - Video Modes
+offset 0x407CD0: 0005D002 0F0D0F04 00016102 0005D002 0F0D0F14 00014003 0005F000 0F0D0F04 00014103 0005F000 0F0D0F14 04024800 0005D002 020A0B88 04024900 0005D002 020A0B88 04024800 D002D002 020A0B88 04024900 D002D002 020A0B88 04024802 0005D002 020A0B88 04024902 0005D002 020A0B88 04024300 0005D002 020A0B88 04026000 0005D002 0D010108 04026100 0005D002 0D010118 04026000 D002D002 0E020208 04026100 D002D002 0E020218 04024001 0005F000 0D010108 04024101 0005
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x1EF75: 00050000 C74560D0 02
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x1EFE8: 00050000 C74560D0 02
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x2626F: 00050000 C74580D0 02
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x2A9E8: 00050000 C745F8D0 02
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x2AF45: 00050000 C745F8D0 02
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x3878A: 00050000 C745C4D0 02
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x3B48A: 00050000 C745F4D0 02
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x3B78B: 00050000 C745FCD0 02
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x3DE73: 00050000 C7869C05 0000D002
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x526BD: 00050000 2B450899 2BC20FB7 55F48BC8 B8D002
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x52AA9: 00050000 75098178 64D002
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x6536C: 00050000 2B450899 2BC20FB7 55108BC8 B8D002
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x8FE83: 00050000 2B434483 C60C992B C2D1F889 4584B8D0 02
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x90115: 00050000 C745FCD0 02
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x97217: 00050000 2B434483 C618992B C2D1F889 45F8B8D0 02
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x11469D: 00050000 C7467CD0 02
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x13E10A: 0005
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x13E121: D002
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x13E24C: D002
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x13E285: 0005
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x3F68E0: 00050005 9D02D002
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x3F6900: D002
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x407AB4: 0005D002 010606C0 05016000 0005D002
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x407B9A: D002120D 0F080401 61020005 D002120D 0F180401 40030005 F000120D 0F080401 41030005
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x407BE0: 0005D002 01010120 03016100 8002D002 01010130 03016000 D002D002 02020220 03016100 D002D002 02020230 03014001 0005F000 01010120 03014101 0005
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x407C40: 0005D002 0F0D0F20 03016102 0005D002 0F0D0F30 03014003 0005F000 0F0D0F20 03014103 0005F000 0F0D0F30 00016000 8002D002 01010104 00016100 8002D002 01010114 00016000 D002D002 02020204 00016100 D002D002 02020214 00014001 0005F000 01010104 00014101 0005
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x407DB6: D002120D 0F080402 61020005 D002120D 0F180402 40030005 F000120D 0F080402 41030005
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x407DFC: 0005D002 03010120 03026100 8002D002 03010130 03026000 D002D002 04020220 03026100 D002D002 04020230 03024001 0005F000 03010120 03024101 0005
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x407E5C: 0005D002 100D0F20 03026102 0005D002 100D0F30 03024003 0005F000 100D0F20 03024103 0005F000 100D0F30 00026000 8002D002 03010104 00026100 8002D002 03010114 00026000 D002D002 04020204 00026100 D002D002 04020214 00024001 0005F000 03010104 00024101 0005
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x407EEC: 0005D002 100D0F04 00026102 0005D002 100D0F14 00024003 0005F000 100D0F04 00024103 0005F000 100D0F14 0403A000 8002D002 14030348 0403A100 8002D002 14030358 0403A000 D002D002 15040448 0403A100 D002D002
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x407F7C: 00052001 16050548 04038101 0005
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x407FAE: D002180E 10480403 A1020005 D002180E 10580403 A0020005 40021D10 12480403 A1020005 40021D10 12580403 80030005
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x407FF6: D0021901 01080403 61008002 D0021901 01180403 6000D002 D0021A02 02080403 6100D002 D0021A02 02180403 40010005 F0001901 01080403 41010005
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x408054: 0005D002 1B0D0F08 04036102 0005D002 1B0D0F18 04034003 0005F000 1B0D0F08 04034103 0005F000 1B0D0F18 0303A000 8002D002 07030360 0303A100 8002D002 07030370 0303A000 D002D002 08040460 0303A100 D002D002
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x4080E4: 00052001 09050560 03038101 0005
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x408116: D002130E 10600303 A1020005 D002130E 10700303 A0020005 40021C10 12600303 A1020005 40021C10 12700303 80030005
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x40815E: D0020B01 01200303 61008002 D0020B01 01300303 6000D002 D0020C02 02200303 6100D002 D0020C02 02300303 40010005 F0000B01 01200303 41010005
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x4081BC: 0005D002 110D0F20 03036102 0005D002 110D0F30 03034003 0005F000 110D0F20 03034103 0005F000 110D0F30 0003A000 8002D002 07030344 0003A100 8002D002 07030354 0003A000 D002D002 08040444 0003A100 D002D002
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x40824C: 00052001 09050544 00038101 0005
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x40827E: D002130E 10440003 A1020005 D002130E 10540003 A0020005 40021C10 12440003 A1020005 40021C10 12540003 80030005
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x4082C6: D0020B01 01040003 61008002 D0020B01 01140003 6000D002 D0020C02 02040003 6100D002 D0020C02 02140003 40010005 F0000B01 01040003 41010005
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x408326: D002110D 0F040003 61028002 D002
+# Apply to ChicagoEnf.xbe - 640x480 -> 1280x720
+offset 0x4C0854: 00050000 D002

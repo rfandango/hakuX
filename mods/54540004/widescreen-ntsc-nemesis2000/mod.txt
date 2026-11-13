@@ -1,0 +1,18 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Serious Sam {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen A
+search D9C9DCC0 D83D8C9E 3A00 -> D9C9DCC0 D83D3885 0400
+# Widescreen B
+search D9C9DCC0 D83D8C9E 3A00 -> D9C9DCC0 D83D3885 0400
+# Widescreen C
+search D80D2CA0 3A00D945 C4E8ECFE 1D008B56 -> D80DEC05 3B00D945 C4E8ECFE 1D008B56
+# FMV's Fix
+search C745FCE0 010000C7 45F00000 0000C745 F4000000 0033C057 -> C745FC20 020000C7 45F00000 0000C745 F4C0FFFF FF33C057

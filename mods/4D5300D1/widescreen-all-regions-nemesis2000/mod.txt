@@ -1,0 +1,12 @@
+name: {Widescreen} (All Regions) [Nemesis2000]
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Fable - The Lost Chapters {Widescreen} (All Regions) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: All Regions.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search D83DA80B 9100D95C 2414F30F 107C2414 -> D83D500D 9100D95C 2414F30F 107C2414

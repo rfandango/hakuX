@@ -1,0 +1,23 @@
+name: {Widescreen} (NTSC+PAL) [Esppiral]
+description: Reported working for both regions of the game, thanks nikeymikey!
+author: Esppiral, via Jay's Magic Patches
+region: NTSC, PAL
+
+# Converted from "Max Payne {Widescreen} (NTSC+PAL) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: NTSC+PAL; XBE CRC32 {E6094953}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen [NTSC]
+search 00002044 8988883B 0000A043 00 -> 74496B67 8988883B 0000F043 00
+# Widescreen [NTSC]
+search 0000803F C7055485 4E000000 0000C705 58854E00 00000000 -> 0000403F C7055485 4E000000 0000C705 58854E00 00000000
+# Widescreen [NTSC]
+search D80D10CB 3B00D805 88263B00 D95C240C D9C0D84C C110D805 D4213B00 D80D8426 3B00D80D 14CB3B00 D8058826 3B00D95C -> D80D14CB 3B00D805 88263B00 D95C240C D9C0D84C C110D805 D4213B00 D80D8426 3B00D80D 14CB3B00 D8058826 3B00D95C
+# Widescreen [NTSC]
+search D8251CCB 3B00D88E 0C020000 D80D94C9 3B00D91D C4834E00 D905E478 3B00D864 240CD88E 10020000 C705CC83 4E000000 803FD80D 18CB3B00 D91DC883 4E008A96 EC000000 C0EA0584 -> D82510CB 3B00D88E 0C020000 D80D94C9 3B00D91D C4834E00 D905E478 3B00D864 240CD88E 10020000 C705CC83 4E000000 803FD80D 18CB3B00 D91DC883 4E008A96 EC000000 C0EA0584
+# Widescreen [PAL] [-]
+# [off by default in the source] search 00002044 8988883B 0000A043 00 -> 74496B67 8988883B 0000F043 00
+# Widescreen [PAL] [-]
+# [off by default in the source] offset 0xC781E: 40

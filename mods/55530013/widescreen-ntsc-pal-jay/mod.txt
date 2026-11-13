@@ -1,0 +1,12 @@
+name: {Widescreen} (NTSC+PAL) [Jay]
+author: Jay, via Jay's Magic Patches
+region: NTSC, PAL
+
+# Converted from "Tom Clancy's Rainbow Six 3 - Title Update {Widescreen} (NTSC+PAL) [Jay].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jay.
+# Region in the file: NTSC & PAL (German).
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search F30F1187 B8000000 F30F1005 90544900 89480889 9F100100 00899F18 01000089 9F140100 00C787C0 00000004 00000089 9FAC0000 00899FA8 00000089 9F2C0100 00F30F11 87300100 00 -> 894808B8 0000403F 8987B800 0000B8E1 7AD43F89 9F100100 00899F18 01000089 9F140100 00C787C0 00000004 00000089 9FAC0000 00899FA8 00000089 9F2C0100 00898730 01000090 90

@@ -1,0 +1,15 @@
+name: {Widescreen} (Multi Region) [icup321]
+description: Widescreen
+author: icup321, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Digimon World 4 {Widescreen} (Multi Region) [icup321].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by icup321.
+# Region in the file: Multi Region; XBE CRC32 {B1399EC5}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 480 -> 720 (Height increase of vertical pixels to 720)
+search CCCCCC51 D9442408 D80D94B9 3000D91C 24D94424 0CD80D -> CCCCCC51 D9442408 D80D8642 1800D91C 24D94424 0CD80D
+# 480 -> 360 (Possibly a modifier for the HUD to fit)
+search 2408C700 80020000 C701E001 0000C208 00CCCCCC CC -> 2408C700 80020000 C7016801 0000C208 00CCCCCC CC

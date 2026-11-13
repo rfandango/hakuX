@@ -1,0 +1,17 @@
+name: {480i Fix} (Multi) [Zorlon]
+description: 480i Fix
+author: Zorlon, via Jay's Magic Patches
+region: NTSC, PAL
+
+# Converted from "Bionicle {480i Fix} (Multi) [Zorlon].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Zorlon.
+# Region in the file: NTSC&PAL.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 480p Fix
+search 00000000 00000000 00000000 00000000 00000000 00000000 00000200 -> 00000000 00000000 00005172 1858C276 1D670000 00000000 00000200
+# 480p Fix
+search 65F80174 036A0258 83F80274 0733C0E9 7B010000 6A -> 65F80174 036A0258 83F80074 0733C0E9 7B010000 6A
+# 480p Fix
+search 0052E8A2 89FFFF8B 4F088B57 28508B47 30508B47 2C518B4F 04528B17 5051528B CEE8C00D -> 0052E8A2 89FFFF8B 4F08508B 4730508B 472C518B 4F04906A 00908B17 5051528B CEE8C00D

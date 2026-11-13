@@ -1,0 +1,14 @@
+name: {Widescreen} (NTSC) [Esppiral]
+author: Esppiral, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "The Simpsons - Road Rage {Widescreen} (NTSC) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen A
+search ABAAAA3F D80D50A9 1B008986 28010000 8B1151D9 -> 398EE33F D80D50A9 1B008986 28010000 8B1151D9
+# Widescreen B
+search 00008C42 00008842 00004042 0000C040 0000A040 0000C842 CDCC4C3D AC861D00 -> 0000BA42 00008842 00004042 0000C040 0000A040 0000C842 CDCC4C3D AC861D00

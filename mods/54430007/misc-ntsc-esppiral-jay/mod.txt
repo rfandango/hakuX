@@ -1,0 +1,15 @@
+name: {Misc} (NTSC) [Combo Authors]
+description: Enable one or the other depending on your version of game. I've added the PAL version.
+author: Esppiral & Jay, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Dead or Alive - Extreme Beach Volleyball {Misc} (NTSC) [Combo Authors].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral & Jay.
+# Region in the file: All regions.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# All other versions - 21:9 Aspect Ratio -  Float adjusted from 1.777 to 2.333
+search 2440398E E33F7508 -> 24405555 15407508
+# PAL - 21:9 Aspect Ratio -  Float adjusted from 1.777 to 2.333
+offset 0x21D66: 55551540

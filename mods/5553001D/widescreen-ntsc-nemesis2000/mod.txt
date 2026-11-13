@@ -1,0 +1,29 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+description: Widescreen and Cutscene Fix
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Prince of Persia - The Sands of Time {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC, JAPAN; XBE CRC32 {C39268AA}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen - Gameplay
+offset 0xBFDC5: EC827600 A1348E75 0083E6C3 F30F2CD2 89542414 8935F082 7600F680 AC000000 04DDD8D8 3DD89342 00D95C24 10F30F10 44241074 110F28D0 F30F59D3 F30F1115 B0827600 EB0CF30F 1105B082 7600F30F 5EC30F28 D1F30F5C D0F30F5E 15D89342 009090
+# Render Fix
+offset 0x2ED823: BC94
+# Menu Fix
+offset 0x3161B5: 0DD2D041 00F30F10 05B53C20 00F30F58 C8F30F2A 87100100 00F30F11 442418F3 0F114C24 0CF30F10 4B04F30F 598FF800 0000F30F 58C8F30F 1144241C F30F1043 08F30F59 05D2D041
+# HUD Position Fix
+offset 0x425B5C: DDDDDDBD
+# Cutscenes Letterbox Fix
+offset 0x1CB442: 709A
+# Cutscenes Letterbox Fix
+offset 0x1F6B6C: 709A
+# Cutscenes Letterbox Fix
+offset 0x247457: 709A
+# Cutscenes Letterbox Fix
+offset 0x29E384: 709A
+# FMV's Fix
+offset 0xEC48: 90909090 90908B35 1CAA4400 8B06DB06 85C0557D 06D8055C 934200D8 0DD89342 008B3D34 8E7500DB 87A40000 00D8E1D8 0D549342 00E8A694 32008BD8 895C2410 DB442410 D8C1E895 943200DD D88B4E04 DB460485 C98BE87D 06D8055C 934200D8 0D4493

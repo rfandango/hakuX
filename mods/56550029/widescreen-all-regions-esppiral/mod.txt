@@ -1,0 +1,15 @@
+name: {Widescreen} (All Regions) [Esppiral]
+description: 16:9 with optional 21:9 Widescreen.<br>Great for emulator, unsure how it performs on real hardware.
+author: Esppiral, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Van Helsing {Widescreen} (All Regions) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: All Regions; XBE CRC32 {DEB923FD}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 16:9 Widescreen
+search AAAAAA3F 00002044 0000F043 01010101 8988083D 05050101 -> 398EE33F 00002044 0000F043 01010101 8988083D 05050101
+# [OPTIONAL] 21:9 Widescreen [Untested on real hardware - Uncheck 16:9 if using this] [-]
+# [off by default in the source] search AAAAAA3F 00002044 0000F043 01010101 8988083D 05050101 -> EC511840 00002044 0000F043 01010101 8988083D 05050101

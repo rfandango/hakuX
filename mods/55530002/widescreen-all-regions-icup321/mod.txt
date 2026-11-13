@@ -1,0 +1,27 @@
+name: {Widescreen} (All Regions) [icup321]
+description: Widescreen.<br>Don't forget to apply the various fixes to their corresponding files.
+author: icup321, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Rayman 3 - Hoodlum Havoc {Widescreen} (All Regions) [icup321].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by icup321.
+# Region in the file: All Regions; XBE CRC32 {D51FBDFC}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreeen
+offset 0x2F3B3: D83DF401
+# Widescreeen
+offset 0x2F3F0: D83DF401
+# Widescreeen
+offset 0x2F55E: 9090D80D F401
+# Widescreeen
+offset 0x2F58C: 9090D80D F401
+# Widescreeen
+offset 0x8D0F0: 90909090 9090D80D 0800
+# Fixes - Patch file "ten_map.lvl" [Reflux Face Fix]
+offset 0xE08F8: 02020000 00
+# Fixes - Patch file "knaar_60.lvl" [Reflux Face Fix]
+offset 0x1A755C: 02020000 00
+# Fixes - Patch file "intro_17.lvl" [Fairy Council Windows Fix]
+offset 0x8C078: 01020000 20

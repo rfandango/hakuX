@@ -1,0 +1,18 @@
+name: {Widescreen} (JPN) [Nemesis2000]
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC-J
+
+# Converted from "Metal Wolf Chaos {Widescreen} (JPN) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: JPN.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Gameplay & Cutscenes A
+search 298AA23F -> 30B8DB3F
+# Gameplay & Cutscenes B
+search 298AA23F -> 30B8DB3F
+# Render Fix
+search 68000040 3F51B820 D59200BB 20E79200 E8269700 008B15B4 D49200A1 B8D49200 -> 68000010 3F51B820 D59200BB 20E79200 E8269700 008B15B4 D49200A1 B8D49200
+# Cutscenes Letterbox Fix
+search 3E000000 C744241C A2010000 894C2420 C7442424 E0010000 -> 00000000 C744241C E0010000 894C2420 C7442424 E0010000

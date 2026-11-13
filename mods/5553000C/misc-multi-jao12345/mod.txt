@@ -1,0 +1,15 @@
+name: {Misc} (Multi) [Jao12345]
+description: 60 FPS
+author: Jao12345, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Tom Clancy's Splinter Cell {Misc} (Multi) [Jao12345].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jao12345.
+# Region in the file: Multi; XBE CRC32 {C14FA9A0}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 60 FPS
+search 00890D6C D11F00EB 15B80200 00803BC8 74118B15 6C -> 00890D6C D11F00EB 15B80100 00803BC8 74118B15 6C
+# 60 FPS
+search B88C3800 C705C88C 38000200 0080A3C0 8C380074 0A -> B88C3800 C705C88C 38000100 0080A3C0 8C380074 0A

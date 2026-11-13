@@ -1,0 +1,19 @@
+name: {Misc} (NTSC) [Author Unknown]
+description: HDD Fix
+author: Unknown author, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Grand Theft Auto - San Andreas {Misc} (NTSC) [Author Unknown].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Unknown author.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# HDD Fix
+search 00007003 01000500 000012DD DBA81858 37000000 01000000 -> 00007003 01000500 0000F217 A2941858 37000000 01000000
+# HDD Fix
+search 0100E507 01008407 01003610 5A5B0000 00000900 0000F406 -> 0100E507 01008407 0100D2A1 86EF0000 00000900 0000F406
+# HDD Fix
+search 00000000 00000000 00000000 00000000 00000202 00000100 00000200 00000000 00 -> 00000000 00000000 00003538 34343435 3436FF01 00C00700 00000200 00000000 00
+# HDD Fix
+search 508D45F8 50680401 0000E8FF 4A000085 C07C058B 45FCC9C3 33C0C9C3 55 -> 508D45F8 50680401 0000C745 FC010000 0090908B 45FCC9C3 33C0C9C3 55

@@ -1,0 +1,14 @@
+name: {Widescreen} (NTSC+JPN) [Nemesis2000]
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Auto Modellista {Widescreen} (NTSC+JPN) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen - Gameplay
+search ABAAAA3F 00000000 00000000 40010000 -> 388EE33F 00000000 00000000 40010000
+# Widescreen - Car Select
+search 164200AB AAAA3FA3 40174200 890D4417 -> 16420038 8EE33FA3 40174200 890D4417

@@ -1,0 +1,25 @@
+name: (NTSC) [OldGreenAndWise]
+description: Native Widescreen Support, Fixes Menus
+author: OldGreenAndWise, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "NASCAR Thunder 2002 (NTSC) [OldGreenAndWise].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by OldGreenAndWise.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Menu Fix A
+search 68ABAAAA 3F -> 68398EE3 3F
+# Menu Fix B
+search 68ABAAAA 3F -> 68398EE3 3F
+# Menu Fix C
+search 68ABAAAA 3F -> 68398EE3 3F
+# Menu Fix D
+search 68ABAAAA 3F -> 68398EE3 3F
+# Menu Fix E
+search 68ABAAAA 3F -> 68398EE3 3F
+# Menu Fix F
+search 68ABAAAA 3F -> 68398EE3 3F
+# Menu Fix G
+search 68ABAAAA 3F -> 68398EE3 3F

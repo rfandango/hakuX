@@ -1,0 +1,19 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+description: Widescreen
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Kingdom Under Fire - The Crusaders {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC, JAPAN; XBE CRC32 {F4C0DB19}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search F30F2A4E 1C57F30F 5EC1 -> F30F1005 507F3B00 5790
+# Widescreen
+search F30F2A4E 1C8B4C24 0C57F30F 5EC1 -> F30F1005 507F3B00 8B4C240C 5790
+# Widescreen
+search F30F2A4E 1C8B566C 51F30F5E C1 -> F30F1005 507F3B00 8B566C51 90
+# Widescreen
+search 98CA3800 EB06D80D 7CCA3800 -> C80A3900 EB06D80D D8173A00

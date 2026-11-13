@@ -1,0 +1,15 @@
+name: {128mb D3D} (US_CANADA) [iroiry]
+description: 128mb D3D allocation patch. Credit to Andy Anderson for these values. These follow a known working pattern of data values! Not guaranteed to work, give it a try!
+author: iroiry, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Haunted Mansion {128mb D3D} (US_CANADA) [iroiry].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by iroiry.
+# Region in the file: US/CANADA.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Remove Ram Limit Flag @ 0x124
+search 05000000 6F07F4A8 7CE53100 00000200 -> 01000000 6F07F4A8 7CE53100 00000200
+# 64mb D3D Data Value Change 1 @ 0x003143E3 (XPP)
+search 00B0FF03 0030E11A 0010FC03 00D00E1A -> 00B0FF07 0030E11A 0010FC03 00D00E1A

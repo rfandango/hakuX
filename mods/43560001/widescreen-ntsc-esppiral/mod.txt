@@ -1,0 +1,15 @@
+name: {Widescreen} (NTSC) [Esppiral]
+description: Widescreen
+author: Esppiral, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Kabuki Warriors {Widescreen} (NTSC) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: NTSC; XBE CRC32 {41FE34F6}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search 680000A0 3F68DB0F 493F8D8C 2494 -> 685555D5 3F68DB0F 493F8D8C 2494
+# Widescreen
+search ABAAAA3F 68DB0F49 3F -> 398EE33F 68DB0F49 3F

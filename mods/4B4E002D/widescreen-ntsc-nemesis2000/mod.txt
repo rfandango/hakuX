@@ -1,0 +1,24 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Castlevania - Curse of Darkness {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC&JPN.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+offset 0x2D83: F0D80A00 F30F5905 B7BF3A
+# FMV's Fix A
+offset 0x38D31D: DF435768 00000842
+# FMV's Fix B
+offset 0x38D385: DF435768 00000842
+# Item position fix
+offset 0x42BBA6: 56
+# Draw distance 4x (Optional)
+offset 0x2AF7: 900243
+# Draw distance 4x cont'd (Optional)
+offset 0x2B9B: 6BC004A3 2CC22F01 C3
+# Camera axis inversion (Optional)
+offset 0x2EDFA5: A1000000 8B442410 85C00F84 95000000 566A00E8 B3110200 8B742414 6A00D91E E8E61102 00D95E04 6A00E81C 120200D9 5E086A00 E8521202 000FB7C0 6A008946 0CE88512 02000FB7 C0894610 83C414F3 0F104600 F30F5905 0CD34200 F30F1146 00F30F10 4604F30F 59050CD3 4200F30F 1146048B 4E0CF6C5 40741181 E1FFBFFF FF894E0C 8B57040B D189560C F6C44074 1025FFBF FFFF8946 108B4F04 0BC8894E 105E5F5B C38B4424 0C0F57C0 5FF30F11 00F30F11 4004F30F 114008C7 400C0000 0000C740 10000000 005BC3

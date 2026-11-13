@@ -107,7 +107,6 @@ import com.rfandango.haku_x.R
 import com.rfandango.haku_x.data.DiscInfo
 import com.rfandango.haku_x.data.Game
 import com.rfandango.haku_x.data.GameOverrides
-import com.rfandango.haku_x.data.ModCatalog
 import com.rfandango.haku_x.data.SaveStateStore
 import com.rfandango.haku_x.data.Updates
 import com.rfandango.haku_x.data.XisoConverter
@@ -370,7 +369,7 @@ private fun GameList(
                 },
               )
             }
-            if (disc != null && ModCatalog.has(context, key)) {
+            if (disc != null) {
               DropdownMenuItem(
                 text = { Text(stringResource(R.string.library_menu_mods)) },
                 leadingIcon = { Icon(Icons.Filled.Star, contentDescription = null) },

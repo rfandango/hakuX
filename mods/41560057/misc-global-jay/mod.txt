@@ -1,0 +1,19 @@
+name: {Misc} (GLOBAL) [Jay]
+description: Migrated HDD Fix from prequel. Haven't tested yet, let me know!
+author: Jay, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Greg Hastings' Tournament Paintball - Max'd {Misc} (GLOBAL) [Jay].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jay.
+# Region in the file: GLOBAL.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Limit RAM 64MB (OFF)
+offset 0x124: 01
+# Header Edit - Allowed Media & Region Flags
+# (not imported: media and region flags of a real console) offset 0x220: FF02
+# HDD Fix
+offset 0xDB064: EB4341
+# HDD Fix
+search 7D1B50E8 B9150000 E85E1500 0083F802 75076A03 E87A1500 0033C0EB 33 -> 7C46EB19 8B450850 8B000C20 3D643A5C 0075AF58 56B80008 0000EB33 90

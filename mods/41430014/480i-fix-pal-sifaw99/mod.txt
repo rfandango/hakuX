@@ -1,0 +1,13 @@
+name: {480i Fix} (PAL) [Sifaw99]
+description: 480i Fix
+author: Sifaw99, via Jay's Magic Patches
+region: PAL
+
+# Converted from "XGRA - Extreme G Racing Association {480i Fix} (PAL) [Sifaw99].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Sifaw99.
+# Region in the file: PAL; XBE CRC32 {0A711BDB}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 480i (Interlaced) -> 480p (Progressive)
+search 8B572850 8B473050 8B472C51 8B4F0452 -> 508B4730 508B472C 518B4F04 906A0090

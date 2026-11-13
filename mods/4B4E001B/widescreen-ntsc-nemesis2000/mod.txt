@@ -1,0 +1,15 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+description: Widescreen
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Teenage Mutant Ninja Turtles {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC; XBE CRC32 {1EFDB4F7}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search 894C2408 E8A1870E 0083C410 C3CCCCCC CCCCCCCC CCCCCCCC CCCC8B44 24048B15 -> D9442414 D80D0845 1F00D95C 2408E897 870E0083 C410C3CC CCCC8B44 24048B15
+# FMV's Fix
+search BE800200 00D80D8C 091F00BF E0010000 D91C2452 5283EC10 8BDC890B 89530489 73085089 7B0CE801 E3FBFF83 C4285F5E 5B59C3CC CCCCCCCC CCCCCCCC 565733C0 -> BEE00100 00D80D8C 091F00BF E0010000 D91C2452 5283EC10 8BDCC703 50000000 89530489 73085089 7B0CE8FD E2FBFF83 C4285F5E 5B59C3CC CCCCCCCC 565733C0

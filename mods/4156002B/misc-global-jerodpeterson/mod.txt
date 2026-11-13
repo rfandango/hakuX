@@ -1,0 +1,13 @@
+name: {Misc} (GLOBAL) [JerodPeterson]
+description: 60FPS
+author: JerodPeterson, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Spider-Man 2 {Misc} (GLOBAL) [JerodPeterson].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by JerodPeterson.
+# Region in the file: NTSC, JAPAN, PAL; XBE CRC32 {DD47E5DA}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 60Fps
+search 00008000 00000001 00000100 00000000 0000443A 5C -> 00008000 00000001 00000000 00000000 0000443A 5C

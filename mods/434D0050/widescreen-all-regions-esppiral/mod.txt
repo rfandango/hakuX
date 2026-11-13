@@ -1,0 +1,13 @@
+name: {Widescreen} (All Regions) [Esppiral]
+description: 21:9
+author: Esppiral, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "TOCA Race Driver 3 {Widescreen} (All Regions) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: All Regions; XBE CRC32 {0045879E}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Ultra Widescreen 21:9 - Test on real hardware?
+search 9A99593F -> 3333233F

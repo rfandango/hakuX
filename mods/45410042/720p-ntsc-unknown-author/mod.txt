@@ -1,0 +1,27 @@
+name: {720p} (NTSC) [Author Unknown]
+description: Apply to default.xbe. No patch was ever made for "driving.xbe".
+author: Unknown author, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "007 - Everything or Nothing {720p} (NTSC) [Author Unknown].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Unknown author.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 16:9
+offset 0x52110: EB4341
+# 16:9
+offset 0x52151: 7C46EB19 8B450850 8B000C20 3D643A5C 0075AF58 56B80008 0000EB33 90
+# 16:9
+offset 0x539A3: 7D
+# 640x480 -> 1280x720
+offset 0x4FCDE: 00050000 C70594AC 3500D002
+# 640x480 -> 1280x720
+offset 0x4FD8D: D0020000 C70590AC 35000005
+# 640x480 -> 1280x720
+offset 0x4FDB3: D0020000 C70590AC 35000005
+# Window Views
+offset 0x269690: 020A0B88 04014900 8002E001 020A0B88 04014800 D002E001 020A0B88 04014900 D002E001 020A0B88 04014802 0005D002 020A0B88 04014902 8002E001 020A0B
+# Window Views
+offset 0x2698AC: 020A0B88 04024900 8002E001 020A0B88 04024800 D002E001 020A0B88 04024900 D002E001 020A0B88 04024802 8002E001 020A0B88 04024902 8002E001 020A0B

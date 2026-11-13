@@ -1,0 +1,29 @@
+name: {128mb D3D} (ELSEWHERE) [iroiry]
+description: 128mb D3D allocation patch. Credit to Andy Anderson for these values. These follow a known working pattern of data values! Not guaranteed to work, give it a try!
+author: iroiry, via Jay's Magic Patches
+region: PAL
+
+# Converted from "CM 2002 03 {128mb D3D} (ELSEWHERE) [iroiry].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by iroiry.
+# Region in the file: ELSEWHERE.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 64mb D3D Data Value Change 1 @ 0x0058BEBF (XACTENG)
+search 00B0FF03 00200E09 00D00F09 00108026 -> 00B0FF07 00200E09 00D00F09 00108026
+# 64mb D3D Data Value Change 2 @ 0x0058BFA7 (XACTENG)
+search 00B0FF03 00200E09 00D00F09 00108026 -> 00B0FF07 00200E09 00D00F09 00108026
+# 64mb D3D Data Value Change 3 @ 0x0058C087 (XACTENG)
+search 00B0FF03 00200E09 00D00F09 00108026 -> 00B0FF07 00200E09 00D00F09 00108026
+# 64mb D3D Data Value Change 4 @ 0x0058C167 (XACTENG)
+search 00B0FF03 00200E09 00D00F09 00108026 -> 00B0FF07 00200E09 00D00F09 00108026
+# 64mb D3D Data Value Change 5 @ 0x0058C32F (XACTENG)
+search 00B0FF03 00200E09 00D00F09 00108026 -> 00B0FF07 00200E09 00D00F09 00108026
+# 64mb D3D Data Value Change 6 @ 0x0058C417 (XACTENG)
+search 00B0FF03 00200E09 00D00F09 00108026 -> 00B0FF07 00200E09 00D00F09 00108026
+# 64mb D3D Data Value Change 7 @ 0x0058C5D7 (XACTENG)
+search 00B0FF03 00200E09 00D00F09 00108026 -> 00B0FF07 00200E09 00D00F09 00108026
+# 64mb D3D Data Value Change 8 @ 0x0058C797 (XACTENG)
+search 00B0FF03 00200E09 00D00F09 00108026 -> 00B0FF07 00200E09 00D00F09 00108026
+# 64mb D3D Data Value Change 9 @ 0x0058C877 (XACTENG)
+search 00B0FF03 00200E09 00D00F09 00108026 -> 00B0FF07 00200E09 00D00F09 00108026

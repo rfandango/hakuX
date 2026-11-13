@@ -1,0 +1,13 @@
+name: {480i Fix} (All Regions) [ProgScan]
+description: 480i Fix
+author: ProgScan, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "The Thing {480i Fix} (All Regions) [ProgScan].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by ProgScan.
+# Region in the file: All Regions; XBE CRC32 {765B18EA}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 480i (Interlaced) -> 480p (Progressive)
+search 0BCA898D -> D1E28995

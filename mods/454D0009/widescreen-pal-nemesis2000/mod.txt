@@ -1,0 +1,19 @@
+name: {Widescreen} (PAL) [Nemesis2000]
+description: Widescreen<br>Should work for both PAL versions.
+author: Nemesis2000, via Jay's Magic Patches
+region: PAL
+
+# Converted from "FlatOut {Widescreen} (PAL) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: PAL; XBE CRC32 {34E26A43}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search F30F1005 4CE52600 F30F1101 C20800CC -> F30F1005 54F22600 F30F1101 C20800CC
+# Widescreen
+search F30F1015 40F52600 568BF18B 460433C9 -> F30F1015 F0122900 568BF18B 460433C9
+# Widescreen
+search 0D40F526 0083C408 -> 0DF01229 0083C408
+# Widescreen
+search 0F2A470C F30F590D 3C1B2700 F30F5905 -> 0F2A470C F30F590D 9DB52500 F30F5905

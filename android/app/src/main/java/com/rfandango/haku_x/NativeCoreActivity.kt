@@ -619,7 +619,7 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
     if (discUri == null) return null
     val key = gameKey()
     if (!ModCatalog.has(this, key)) return null
-    return runCatching { ModRun.write(this, key) }
+    return runCatching { ModRun.write(this, key, discUri) }
       .onFailure { Log.e(TAG, "mods: ${it.message}") }
       .getOrNull()
       ?.let { (file, cheats) ->

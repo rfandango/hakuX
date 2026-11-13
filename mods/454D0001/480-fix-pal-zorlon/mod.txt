@@ -1,0 +1,17 @@
+name: {480 Fix} (PAL) [Zorlon]
+description: 480i Fix
+author: Zorlon, via Jay's Magic Patches
+region: PAL
+
+# Converted from "Antz Extreme Racing {480 Fix} (PAL) [Zorlon].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Zorlon.
+# Region in the file: PAL.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 480i Fix
+offset 0x214: FFFFFF
+# 480i Fix
+offset 0x10E9B1: EB71
+# 480i Fix
+offset 0x10EA24: 8061289F 8BCFE984 FFFFFF

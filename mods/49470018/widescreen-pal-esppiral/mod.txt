@@ -1,0 +1,21 @@
+name: {Widescreen} (PAL) [Esppiral]
+description: Widescreen. Some graphical issues.<br>Use version 2 patch group if version 1 doesn't work.
+author: Esppiral, via Jay's Magic Patches
+region: PAL
+
+# Converted from "JSRF - Jet Set Radio Future {Widescreen} (PAL) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: PAL; XBE CRC32 {0491D477}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen V1
+search 0000803F B9000000 00891089 48048948 08894810 F30F1148 14F30F11 40188948 20F30F11 5024F30F 1148288B C8E8AAFD FFFFE9E3 000000EB 038D4900 F30F58CA F30F52C1 F30F53D0 F30F10C8 F3 -> 0000403F B9000000 00891089 48048948 08894810 F30F1148 14F30F11 40188948 20F30F11 5024F30F 1148288B C8E8AAFD FFFFE9E3 000000EB 038D4900 F30F58CA F30F52C1 F30F53D0 F30F10C8 F3
+# Widescreen v2 [-]
+# [off by default in the source] search ECF9328C F0F9328C 60F92A8C -> 9881FF8C F0F9328C 60F92A8C
+# Widescreen v2 [-]
+# [off by default in the source] search ECF9328C F0F9328C 80F92A8C -> 9881FF8C F0F9328C 80F92A8C
+# Widescreen v2 [-]
+# [off by default in the source] search ECF9328C F0F9328C 28FA328C -> 9881FF8C F0F9328C 28FA328C
+# Widescreen v2 [-]
+# [off by default in the source] search ECF9328C F0F9328C 6867348C -> 9881FF8C F0F9328C 6867348C

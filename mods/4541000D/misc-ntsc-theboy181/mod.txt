@@ -1,0 +1,13 @@
+name: {Misc} (NTSC) [theboy181]
+description: 60FPS. Apply this patch to "Bond.xbe", not "default.xbe".
+author: theboy181, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "007 - Agent Under Fire {Misc} (NTSC) [theboy181].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by theboy181.
+# Region in the file: NTSC; XBE CRC32 {77E7B0E9}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 60FPS
+search 5C603400 C7057860 34000200 00008935 70603400 E8 -> 5C603400 C7057860 34000100 00008935 70603400 E8
