@@ -4,12 +4,14 @@ import android.app.Application
 import android.content.Context
 import androidx.core.content.edit
 import com.rfandango.haku_x.BuildConfig
+import com.rfandango.haku_x.NativeCoreActivity
 import java.util.Locale
 
 /** The settings a game can override; the rest are the app's for every game. */
 enum class GameSetting(val key: String) {
   UNCAPPED("uncapped"),
   RENDER_SCALE("render_scale"),
+  FPS_LOCK("fps_lock"),
   ASYNC_SHADERS("async_shaders"),
   PREBUILD_SHADERS("prebuild_shaders"),
   CONSOLE_TIMING("console_timing"),
@@ -87,6 +89,7 @@ class RunSettings(private val app: AppPrefs, private val game: GameOverrides?) {
 
   val uncapped get() = bool(GameSetting.UNCAPPED, app.uncapped)
   val renderScale get() = game?.get(GameSetting.RENDER_SCALE)?.toIntOrNull() ?: app.renderScale
+  val fpsLock get() = game?.get(GameSetting.FPS_LOCK)?.toIntOrNull() ?: app.fpsLock
   val asyncShaders get() = bool(GameSetting.ASYNC_SHADERS, app.asyncShaders)
   val prebuildShaders get() = bool(GameSetting.PREBUILD_SHADERS, app.prebuildShaders)
   /** A debug build's setting (off for A/B); always on in the others. */
@@ -102,6 +105,13 @@ class RunSettings(private val app: AppPrefs, private val game: GameOverrides?) {
   val pal60 get() = bool(GameSetting.PAL60, app.pal60)
   val avPack get() = text(GameSetting.AV_PACK, app.avPack)
 
-  fun videoFlags(): Int = AppPrefs.videoFlags(screenFormat, video480p, video720p, video1080i, pal60)
+  /**
+   * The console's video format: the setting, except that "stretch" puts the console in widescreen,
+   * so the games that support it render at 16:9 (the picture is then stretched over the screen).
+   */
+  private val consoleFormat
+    get() = if (aspectRatio == NativeCoreActivity.ASPECT_STRETCH) AppPrefs.FORMAT_WIDESCREEN else screenFormat
+
+  fun videoFlags(): Int = AppPrefs.videoFlags(consoleFormat, video480p, video720p, video1080i, pal60)
   fun xboxLanguage(): Int = AppPrefs.xboxLanguage(language)
 }

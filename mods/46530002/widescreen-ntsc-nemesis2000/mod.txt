@@ -1,0 +1,18 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Otogi - Myth of Demons {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC&JPN.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen A
+search DB442468 85C97D06 D805BC44 1700DEF9 8B151868 -> DB442468 90909090 D80D7444 1700DEF9 8B151868
+# Widescreen B
+search DB442454 85C97D06 D805BC44 1700DEF9 8B151868 -> DB442454 90909090 D80D7444 1700DEF9 8B151868
+# Render Fix
+search 85C07D06 D805BC44 1700DEF9 518B0D18 -> 90909090 D8357444 1700DEF9 518B0D18
+# Cutscenes Letterbox Fix
+search 2C3E0000 00C74424 10000000 00C74424 14A20100 -> 2C000000 00C74424 10000000 00C74424 14E00100

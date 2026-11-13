@@ -1,0 +1,55 @@
+name: {720p} (NTSC) [SPPV]
+description: <br>Do not patch "default.xbe".<br>Instead, patch "espn_mlb.xbe".
+author: SPPV, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "ESPN Major League Baseball {720p} (NTSC) [SPPV].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by SPPV.
+# Region in the file: NTSC; XBE CRC32 {087DA5B3}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Allowed Media & Region Flags
+# (not imported: media and region flags of a real console) offset 0x220: FF010040 07
+# 16:9
+offset 0x8241: 40
+# 16:9
+offset 0x127394: 0000D243
+# 16:9
+offset 0x133927: 0000D243
+# 16:9
+offset 0x1661B9: 0000D243
+# 16:9
+offset 0x1662D9: 0000D243
+# 16:9
+offset 0x1663F9: 0000D243
+# 16:9
+offset 0x166644: 0000D243
+# 16:9
+offset 0x166768: 0000D243
+# 16:9
+offset 0x1669B4: 0000D243
+# 16:9
+offset 0x1670B4: 0000D243
+# 16:9
+offset 0x167849: 0000D243
+# 16:9
+offset 0x1CEA99: 0000D243
+# 16:9
+offset 0x2254DA: 40
+# 16:9
+offset 0x264CD6: 803F
+# 16:9
+offset 0x2ED9A8: 398EE3
+# 16:9
+offset 0x2EDA38: 398EE3
+# 16:9
+offset 0x2EE112: 803F0000 5040398E E3
+# 16:9
+offset 0x332C58: 398EE3
+# 16:9
+offset 0x3397D8: 803F
+# 16:9
+offset 0x3441E0: 398EE3
+# 640x480 -> 1280x720
+offset 0x1525C9: D0020000 680005

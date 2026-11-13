@@ -1,0 +1,17 @@
+name: {Widescreen} (NTSC) [icup321]
+description: Widescreen
+author: icup321, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Rayman Arena {Widescreen} (NTSC) [icup321].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by icup321.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search 565C6800 00003F52 DDD8DC3D 08151D00 D99E8400 0000E88D -> 565C6800 00003F52 DDD8D83D B0161D00 D99E8400 0000E88D
+# Widescreen
+search 2414D95C 2408DB44 24147D06 D8054015 1D008B56 58D95C24 1468 -> 2414D95C 2408DB44 24149090 D80DB016 1D008B56 58D95C24 1468
+# Widescreen
+search 15B0161D 00DFE0F6 C4050F8A A3FEFFFF D80DB416 1D00D91D E8231E00 E994 -> 15B0161D 00DFE0F6 C4059090 90909090 D80DF014 1D00D91D E8231E00 E994

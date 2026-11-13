@@ -1,0 +1,13 @@
+name: {128mb D3D} (ELSEWHERE) [iroiry]
+description: 128mb D3D allocation patch. Credit to Andy Anderson for these values. These follow a known working pattern of data values! Not guaranteed to work, give it a try!
+author: iroiry, via Jay's Magic Patches
+region: PAL
+
+# Converted from "DynastyWarriors3 {128mb D3D} (ELSEWHERE) [iroiry].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by iroiry.
+# Region in the file: ELSEWHERE.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 64mb D3D Data Value Change 1 @ 0x0025BDA7 (.rdata)
+search 00B0FF03 00000000 00484D01 00EE0000 -> 00B0FF07 00000000 00484D01 00EE0000

@@ -1,0 +1,13 @@
+name: {Misc} (NTSC) [Jao12345]
+description: 60 FPS
+author: Jao12345, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Reservoir Dogs {Misc} (NTSC) [Jao12345].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jao12345.
+# Region in the file: NTSC; XBE CRC32 {17D903D7}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 60 FPS
+offset 0x2554B7: 9090

@@ -1,0 +1,17 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+description: Widescreen
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Medal of Honor - Frontline {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC; XBE CRC32 {6D5DA6A4}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search D9442404 32C0D9F2 88814201 00008881 43010000 C6814001 000001DD D8D9592C D9442408 D9F2DDD8 D95930C2 08009090 -> D9442404 D9F2DDD8 D80DE0DB 1200D959 2CD94424 08D9F2DD D8D95930 81C14001 0000C601 01C64102 00C64103 00C20800
+# Widescreen
+search D9051CF6 1200D84C 2434D80D 48DA1200 D9F2DDD8 D95C2404 D9442434 D80DA406 1300D9F2 DDD8 -> D90520F6 1200D84C 2434D9F2 DDD8D95C 2404D944 2434D80D A4061300 D9F2DDD8 D80DA406 1300
+# Widescreen
+search D91C24E8 13EDFEFF -> EB4C90E8 13EDFEFF

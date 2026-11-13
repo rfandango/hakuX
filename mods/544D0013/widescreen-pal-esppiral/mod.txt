@@ -1,0 +1,19 @@
+name: {Widescreen} (PAL) [Esppiral]
+description: Widescreen
+author: Esppiral, via Jay's Magic Patches
+region: PAL
+
+# Converted from "Knights of the Temple 2 {Widescreen} (PAL) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: PAL; XBE CRC32 {A79F2B0B}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search D905C025 1D00D874 2410DEC9 D95A14D9 -> D9056CDF 0200D874 2410DEC9 D95A14D9
+# Widescreen
+search AA3F0000 00C00000 40C0CDCC AC3F0000 -> E33F0000 00C00000 40C0CDCC AC3F0000
+# Widescreen
+search D80DD825 1D00D9C0 D9FFD9C9 D9FED9C9 D9C9DEF9 D91AD944 240CD80D D8251D00 D9C0D9FF D9C9D9FE D9C9D9C9 DEF9D905 6CDF0200 D8742410 DEC9D95A 14D95228 -> D80D054E 0200D9C0 D9FFD9C9 D9FED9C9 D9C9DEF9 D91AD944 240CD80D 054E0200 D9C0D9FF D9C9D9FE D9C9D9C9 DEF9D905 6CDF0200 D8742410 DEC9D95A 14D95228
+# Widescreen
+search 00002044 0000F043 25640000 0000AF43 -> 00805544 0000F043 25640000 0000AF43

@@ -90,6 +90,11 @@ class AppPrefs(context: Context) {
     get() = sp.getInt(NativeCoreActivity.PREF_SCALE, NativeCoreActivity.DEFAULT_SCALE)
     set(value) = sp.edit { putInt(NativeCoreActivity.PREF_SCALE, value) }
 
+  /** The FPS lock: the console's refresh rate in Hz (read at game start), 0: none. */
+  var fpsLock: Int
+    get() = sp.getInt(KEY_FPS_LOCK, 0)
+    set(value) = sp.edit { putInt(KEY_FPS_LOCK, value) }
+
   /** The picture's shape: auto, 4:3, 16:9 or stretch (read at game start). */
   var aspectRatio: String
     get() = sp.getString(NativeCoreActivity.PREF_ASPECT, NativeCoreActivity.ASPECT_AUTO) ?: NativeCoreActivity.ASPECT_AUTO
@@ -235,6 +240,7 @@ class AppPrefs(context: Context) {
     private const val KEY_SETUP_COMPLETE = "setup_complete"
     private const val KEY_PREVIOUS_MIGRATED = "previous_version_migrated"
     private const val KEY_SHOW_FPS = "show_fps"
+    private const val KEY_FPS_LOCK = "fps_lock"
     private const val KEY_CONSOLE_TIMING = "console_timing"
     private const val KEY_THEME = "app_theme"
     private const val KEY_TURNIP_NOTE = "turnip_note_shown"

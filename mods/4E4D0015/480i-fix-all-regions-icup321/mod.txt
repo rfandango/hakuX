@@ -1,0 +1,12 @@
+name: {480i Fix} (All Regions) [icup321]
+author: icup321, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Dead to Rights II {480i Fix} (All Regions) [icup321].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by icup321.
+# Region in the file: All Regions.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 480i -> 480p fix
+search 8B8424D4 0000008B 50088B48 28528B50 2C518B48 04528B10 51528BF3 -> 8B8424D4 0000008B 50089090 528B502C 6A008B48 04528B10 51528BF3

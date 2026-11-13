@@ -1,0 +1,17 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+description: Both authors made this identical patch
+author: Nemesis2000/icup321, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Digimon Rumble Arena 2 {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000/icup321.
+# Region in the file: NTSC; XBE CRC32 {8B64357B}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+offset 0x80B5B: 02AF27
+# Widescreen
+offset 0x80B77: 8B154494 2900D905 FC2C2900 9090
+# Widescreen
+offset 0xC5F2E: 8B1548F3 2900D905 FC2C2900 9090

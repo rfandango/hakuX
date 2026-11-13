@@ -1,0 +1,13 @@
+name: {128mb D3D} (JAPAN) [iroiry]
+description: 128mb D3D allocation patch. Credit to Andy Anderson for these values. These follow a known working pattern of data values! Not guaranteed to work, give it a try!
+author: iroiry, via Jay's Magic Patches
+region: NTSC-J
+
+# Converted from "ShikigaminoShiroEvolution {128mb D3D} (JAPAN) [iroiry].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by iroiry.
+# Region in the file: JAPAN.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 64mb D3D Data Value Change 1 @ 0x00236BDD (.rdata)
+search 00B0FF03 000C001E 00300000 00640003 -> 00B0FF07 000C001E 00300000 00640003

@@ -1,0 +1,37 @@
+name: {720p} (All Regions) [Author Unknown]
+description: Fixed to suit both regions, intended for NTSC, untested on PAL. ~Jay
+author: Unknown author, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Burnout 2 - Point of Impact {720p} (All Regions) [Author Unknown].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Unknown author.
+# Region in the file: All regions.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Limit RAM 64MB (OFF)
+offset 0x124: 01
+# Header Edit - Allowed Media & Region Flags
+# (not imported: media and region flags of a real console) offset 0x21C: FFFFFF
+# ???
+offset 0x358: 02
+# 16:9
+offset 0xA8B98: D002
+# 16:9
+offset 0xD60B1: EB
+# Window Views
+offset 0x214014: 0005D002 020A0B88 04014900 0005D002 020A0B88 04014800 D002D002 020A0B88 04014900 D002D002 020A0B88 04014802 0005D002 020A0B88 04014902 0005D002 020A0B88 04014300 0005D002 020A0B88 04016000 0005D002
+# 640x480 -> 1280x720
+offset 0xA8C06: 0005
+# 640x480 -> 1280x720
+offset 0xACCD8: D0020000 7E09BED2 01000089 7424108D 500E81FA 0005
+# 640x480 -> 1280x720
+offset 0x103EE9: 0005
+# 640x480 -> 1280x720
+offset 0x10407E: D002
+# 640x480 -> 1280x720
+offset 0x13D9EE: 0005
+# 640x480 -> 1280x720
+offset 0x13DA64: D002
+# 640x480 -> 1280x720
+offset 0x213FE4: 0005D002 010606C0 05016000 0005D002

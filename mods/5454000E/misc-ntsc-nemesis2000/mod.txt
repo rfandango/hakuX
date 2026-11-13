@@ -1,0 +1,21 @@
+name: {Misc} (NTSC) [Nemesis2000]
+description: Cutscene bar Fix.
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Grand Theft Auto III {Misc} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC; XBE CRC32 {84B5E974}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Cutscene Fix
+search 74558B0D 105F2B00 F30F100D 2CB52A00 -> EB558B0D 105F2B00 F30F100D 2CB52A00
+# Cutscene Fix
+search 740C57BF 50884000 E8281901 005FE883 -> EB0C57BF 50884000 E8281901 005FE883
+# Cutscene Fix
+search 740ABF50 884000E8 490A0700 8B45FC8B -> EB0ABF50 884000E8 490A0700 8B45FC8B
+# Cutscene Fix
+search 4DF47452 F30F100D 2CB52A00 8BC1992B -> 4DF4EB52 F30F100D 2CB52A00 8BC1992B
+# Cutscene Fix
+search 4DF47452 F30F100D 2CB52A00 8BC1992B -> 4DF4EB52 F30F100D 2CB52A00 8BC1992B

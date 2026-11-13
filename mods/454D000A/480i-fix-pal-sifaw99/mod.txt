@@ -1,0 +1,13 @@
+name: {480i Fix} (PAL) [Sifaw99]
+description: 480p Auto
+author: Sifaw99, via Jay's Magic Patches
+region: PAL
+
+# Converted from "Mashed {480i Fix} (PAL) [Sifaw99].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Sifaw99.
+# Region in the file: PAL.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 480i (Interlaced) -> 480p (Progressive)
+search C705749D 47002000 00 -> C705749D 47000000 00

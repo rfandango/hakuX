@@ -1,0 +1,17 @@
+name: {Widescreen} (All Regions) [steocullen91]
+description: Widescreen, Cutscene and render fixes.
+author: steocullen91, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Rayman 3 - Hoodlum Havoc {Widescreen} (All Regions) [steocullen91].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by steocullen91.
+# Region in the file: All Regions; XBE CRC32 {D51FBDFC}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search D9442410 68000000 3F -> D9442410 6800001C 3F
+# Render Fix
+search 8B4658D9 5C241868 0000003F -> 8B4658D9 5C241868 00001C3F
+# Cutscene Fix
+search 5C241868 0000003F D9465851 -> 5C241868 00001C3F D9465851

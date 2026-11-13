@@ -1,0 +1,13 @@
+name: {Widescreen} (NTSC) [icup321]
+description: Widescreen
+author: icup321, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "JSRF - Jet Set Radio Future {Widescreen} (NTSC) [icup321].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by icup321.
+# Region in the file: NTSC; XBE CRC32 {3A4A7CC8}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search 1E00A100 E62200BA 0000803F B9000000 00891089 48 -> 1E00A100 E62200BA 0000403F B9000000 00891089 48

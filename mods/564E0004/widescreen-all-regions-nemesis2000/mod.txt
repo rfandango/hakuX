@@ -1,0 +1,13 @@
+name: {Widescreen} (All Regions) [Nemesis2000]
+description: Widescreen
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Hunter - The Reckoning {Widescreen} (All Regions) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: All Regions; XBE CRC32 {6799299E}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search D9C0D9E0 D9593CD9 5944D9C0 D9E0D959 40D95948 E8ACFEFF FFC21000 90909090 90909090 -> D80DE635 1100D9C0 D9E0D959 3CD95944 D9C0D9E0 D95940D9 5948E8A6 FEFFFFC2 10009090

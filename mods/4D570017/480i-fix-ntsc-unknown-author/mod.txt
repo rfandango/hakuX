@@ -1,0 +1,17 @@
+name: {480i Fix} (NTSC) [Author Unknown]
+description: 480i Fix
+author: Unknown author, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Freestyle MetalX {480i Fix} (NTSC) [Author Unknown].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Unknown author.
+# Region in the file: NTSC; XBE CRC32 {97C75656}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 480i Fix
+offset 0x7514C: E8CAFDFF FF85C0EB
+# 480i Fix
+offset 0xCA0F5: E8CAFDFF FF85C0EB
+# 480i Fix
+offset 0x1D164C: 9090518B 4E2C528B 56046A00

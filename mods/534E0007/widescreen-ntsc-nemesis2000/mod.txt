@@ -1,0 +1,16 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "The King of Fighters - Maximum Impact - Maniax {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen A
+search D80DF0ED 33008B06 8D55F852 DC0D48F2 -> D80D32B3 3B008B06 8D55F852 DC0D48F2
+# Widescreen B
+search 0000FA44 80020000 E0010000 ABAAAA3F -> 0000FA44 80020000 E0010000 398EE33F
+# Widescreen C
+search D80DF0ED 3300F30F 1005D0ED 33000F28 -> D80D32B3 3B00F30F 1005D0ED 33000F28

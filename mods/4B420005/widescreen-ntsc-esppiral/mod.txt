@@ -1,0 +1,15 @@
+name: {Widescreen} (NTSC) [Esppiral]
+description: Widescreen
+author: Esppiral, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Chicago Enforcer {Widescreen} (NTSC) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen A
+search D80D9094 4800F30F 104508F3 0F114018 0F57C0D8 2D089548 00D94510 F30F1100 D80D9094 4800F30F 114004F3 0F100548 -> D80DD828 0400F30F 104508F3 0F114018 0F57C0D8 2D089548 00D94510 F30F1100 D80D9094 4800F30F 114004F3 0F100548
+# Widescreen B
+search D9055899 5000D95C 2404F30F 11042450 E812B11F 0033C08D 561840E8 E1632900 8D565833 C0E8D763 290033C0 8D9568FF -> D9052860 3800D95C 2404F30F 11042450 E812B11F 0033C08D 561840E8 E1632900 8D565833 C0E8D763 290033C0 8D9568FF

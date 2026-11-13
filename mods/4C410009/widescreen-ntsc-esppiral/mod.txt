@@ -1,0 +1,15 @@
+name: {Widescreen} (NTSC) [Esppiral]
+description: Widescreen.
+author: Esppiral, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Star Wars - Jedi Knight II - Jedi Outcast {Widescreen} (NTSC) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: All Regions; XBE CRC32 {F06C0A1B}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search 38300000 63675F66 -> 39300000 63675F66
+# Widescreen
+search 0000803F 00000000 00000000 00000000 00000000 00000000 0000803F 0A -> ABAAAA3F 00000000 00000000 00000000 00000040 00000000 0000803F 0A

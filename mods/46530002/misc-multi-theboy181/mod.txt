@@ -1,0 +1,15 @@
+name: {Misc} (Multi) [theboy181]
+description: 60 FPS.<br>Both codes exist only in [USA - 00000002] and JPN [00000004]
+author: theboy181, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Otogi - Myth of Demons {Misc} (Multi) [theboy181].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by theboy181.
+# Region in the file: Multi; XBE CRC32 {52E057EA}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 60 FPS
+search C03C8944 2448C744 244C0200 0080C744 24440001 00 -> C03C8944 2448C744 244C0100 0080C744 24440001 00
+# 60 FPS
+search 74421700 58421700 0000803F 02000000 00000000 00 -> 74421700 58421700 0000003F 02000000 00000000 00

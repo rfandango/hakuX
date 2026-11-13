@@ -1,0 +1,13 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+description: Should work on all regions, originally intended for NTSC.
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Crash Bandicoot - The Wrath of Cortex {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: All Regions.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search B8000040 3F894640 894644B8 0000803F 89465C89 46588946 5483C408 C746489A 99993EC7 46500000 0000C746 4C00007A 448BC65E C3909090 9090 -> B8000040 3F894640 B8000010 3F894644 B8000080 3F89465C 89465889 465483C4 08C74648 9A99993E C7465000 000000C7 464C0000 7A448BC6 5EC3

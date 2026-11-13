@@ -1,0 +1,15 @@
+name: {480i Fix} (Multi Region) [Zorlon]
+description: 480i Fix
+author: Zorlon, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Hitman 2 - Silent Assassin {480i Fix} (Multi Region) [Zorlon].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Zorlon.
+# Region in the file: Multi Region; XBE CRC32 {41C771AD}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 480i Fix
+search C0143100 83E0100B F0518BCF 893DC03F 3100893D C43F -> C0143100 83E0100B F051EB71 893DC03F 3100893D C43F
+# 480i Fix
+search 0289385F 33C05EC2 18009090 90909090 90909090 90908B4C 2404A1C0 3F3100 -> 0289385F 33C05EC2 18008061 289F8BCF E984FFFF FF908B4C 2404A1C0 3F3100

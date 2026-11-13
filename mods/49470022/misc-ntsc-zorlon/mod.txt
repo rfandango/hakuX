@@ -1,0 +1,65 @@
+name: {Misc} (NTSC) [Zorlon]
+description: File Name Fix [FATX limitation].<br>After patching xbe, download these patched files to complete patch: https://jayxbox.com/All-Patches/titles/Enter%20The%20Matrix/EtM-FileNameFix.zip
+author: Zorlon, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Enter The Matrix {Misc} (NTSC) [Zorlon].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Zorlon.
+# Region in the file: NTSC; XBE CRC32 {4CC47E1E}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# File Name Fix [https://jayxbox.com/All-Patches/titles/Enter%20The%20Matrix/EtM-FileNameFix.zip]
+offset 0x21C: FF
+# File Name Fix
+offset 0x358: 02
+# File Name Fix
+offset 0x27CA14: 7D
+# File Name Fix
+offset 0x315336: 50583030 30300000 00000000 00000000 00000000
+# File Name Fix
+offset 0x315392: 50583030 30310000 00000000 00000000 00000000
+# File Name Fix
+offset 0x3155C5: 50583030 30320000 00000000 00000000 000000
+# File Name Fix
+offset 0x315625: 50583030 30330000 00000000 00000000 000000
+# File Name Fix
+offset 0x315685: 50583030 30340000 00000000 00000000 000000
+# File Name Fix
+offset 0x3156FD: 50583030 30350000 00000000 00000000 000000
+# File Name Fix
+offset 0x315CB9: 50583030 30360000 00000000 00000000 00000000
+# File Name Fix
+offset 0x315E71: 50583030 30370000 00000000 00000000 00000000
+# File Name Fix
+offset 0x316432: 50583030 30380000 00000000 00000000 00000000
+# File Name Fix
+offset 0x316572: 50583030 30390000 00000000 00000000 00000000
+# File Name Fix
+offset 0x31669E: 50583030 31300000 00000000 00000000 00000000
+# File Name Fix
+offset 0x3166FA: 50583030 31310000 00000000 00000000 000000
+# File Name Fix
+offset 0x316876: 50583030 31320000 00000000 00000000 000000
+# File Name Fix
+offset 0x3168D2: 50583030 31330000 00000000 00000000 000000
+# File Name Fix
+offset 0x316A4E: 50583030 31340000 00000000 00000000 000000
+# File Name Fix
+offset 0x316BBA: 50583030 31350000 00000000 00000000 00000000
+# File Name Fix
+offset 0x316C52: 50583030 31360000 00000000 00000000 00000000 00
+# File Name Fix
+offset 0x316DBA: 50583030 31370000 00000000 00000000 000000
+# File Name Fix
+offset 0x31703D: 50583030 31380000 00000000 00000000 0000
+# File Name Fix
+offset 0x31709A: 58303031 39000000 00000000 00000000 00
+# File Name Fix
+offset 0x3171A5: 50583030 32300000 00000000 00000000 0000
+# File Name Fix
+offset 0x31736A: 58303032 31000000 00000000 00000000 00
+# File Name Fix
+offset 0x31741D: 50583030 32320000 00000000 00000000 0000
+# File Name Fix
+offset 0x317891: 50583030 32330000 00000000 00000000 0000

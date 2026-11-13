@@ -24,6 +24,7 @@ import com.rfandango.haku_x.R
 import com.rfandango.haku_x.data.AppPrefs
 import com.rfandango.haku_x.data.GameOverrides
 import com.rfandango.haku_x.data.GameSetting
+import com.rfandango.haku_x.overlay.OverlayStore
 import com.rfandango.haku_x.ui.common.ChoiceDialog
 import com.rfandango.haku_x.ui.common.Hint
 import com.rfandango.haku_x.ui.common.Section
@@ -47,6 +48,7 @@ private fun onOff(value: String) =
 private val SECTIONS: List<Pair<Int, List<Overridable>>> = listOf(
   R.string.settings_section_display to listOf(
     Overridable(GameSetting.UNCAPPED, R.string.settings_uncap, ON_OFF, { it.uncapped.toString() }, { onOff(it) }),
+    Overridable(GameSetting.FPS_LOCK, R.string.settings_fps_lock, FPS_LOCKS.map { "$it" }, { it.fpsLock.toString() }, { fpsLockLabel(it.toInt()) }),
     Overridable(GameSetting.ASPECT, R.string.settings_aspect, ASPECTS, { it.aspectRatio }, { stringResource(aspectLabel(it)) }),
   ),
   R.string.settings_section_graphics to listOf(
@@ -75,7 +77,7 @@ private val SECTIONS: List<Pair<Int, List<Overridable>>> = listOf(
 
 /** One game's settings: each follows the app's until the game overrides it. */
 @Composable
-fun GameSettingsScreen(gameKey: String, title: String, onBack: () -> Unit) {
+fun GameSettingsScreen(gameKey: String, title: String, onBack: () -> Unit, onEditControls: () -> Unit) {
   val context = LocalContext.current
   val prefs = remember { AppPrefs(context) }
   val overrides = remember(gameKey) { GameOverrides(context, gameKey) }
@@ -120,6 +122,27 @@ fun GameSettingsScreen(gameKey: String, title: String, onBack: () -> Unit) {
           )
         }
       }
+
+      // the controls: this game's own layout, and its swipe to look, custom buttons and the rest
+      Section(stringResource(R.string.settings_section_controls))
+      var ownLayout by remember(gameKey) { mutableStateOf(OverlayStore.hasOwn(context, gameKey)) }
+      ListItem(
+        headlineContent = { Text(stringResource(R.string.game_settings_edit_layout)) },
+        supportingContent = {
+          Text(stringResource(if (ownLayout) R.string.game_settings_layout_own else R.string.game_settings_layout_app))
+        },
+        modifier = Modifier.clickable(onClick = onEditControls),
+      )
+      if (ownLayout) {
+        ListItem(
+          headlineContent = { Text(stringResource(R.string.overlay_menu_app_layout)) },
+          modifier = Modifier.clickable {
+            OverlayStore.reset(context, gameKey)
+            ownLayout = false
+          },
+        )
+      }
+      TouchLookSettings(gameKey)
     }
   }
 

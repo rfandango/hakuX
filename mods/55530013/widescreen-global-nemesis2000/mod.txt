@@ -1,0 +1,13 @@
+name: {Widescreen} (Global) [Nemesis2000]
+description: Widescreen
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Tom Clancy's Rainbow Six 3 {Widescreen} (Global) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: Global; XBE CRC32 {36AD596A}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search F30F1187 B8000000 F30F1005 C84B4900 89480889 9F100100 00899F18 01000089 9F140100 00C787C0 00000004 00000089 9FAC0000 00899FA8 00000089 9F2C0100 00F30F11 87300100 00 -> 894808B8 0000403F 8987B800 0000B8E1 7AD43F89 9F100100 00899F18 01000089 9F140100 00C787C0 00000004 00000089 9FAC0000 00899FA8 00000089 9F2C0100 00898730 01000090 90

@@ -1,0 +1,61 @@
+name: {720p} (NTSC) [Xbox7887]
+description: "TEST_SYSLINK"
+author: xbox7887, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Halo - Combat Evolved {720p} (NTSC) [Xbox7887].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by xbox7887.
+# Region in the file: NTSC; XBE CRC32 {55EA3A03}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 720p
+offset 0x1CA9C: C003
+# 720p
+offset 0x1CAB2: F000
+# 720p
+offset 0x22353: C003
+# 720p
+offset 0x22388: C0030000 6A0E68C0 03
+# 720p
+offset 0x223D8: C003
+# 720p
+offset 0x223EE: F000
+# 720p
+offset 0x2241A: BF03
+# 720p
+offset 0x22E77: F000
+# 720p
+offset 0x23C09: C003
+# 720p
+offset 0x23C1F: F000
+# 720p
+offset 0x6F17C: 50
+# 720p
+offset 0x6F1A4: 00050000 C7442428 D002
+# 720p
+offset 0x6FA98: 00050000 BAD002
+# 720p
+offset 0x6FAD1: 600066C7 056A8C1F 00A00466 C705648C 1F003600 66C70568 8C1F009A 02
+# 720p
+offset 0x6FAFA: C7442440 51000000
+# 720p
+offset 0x6FB76: 50
+# 720p
+offset 0x6FD05: 68010000 688002
+# 720p
+offset 0xAC6B6: 00056689 5C246866 C744246C D002
+# 720p
+offset 0xB61F5: 0005
+# 720p
+offset 0xB6212: D002
+# 720p
+offset 0xC36DB: 00056689 5C241066 C7442414 D002
+# 720p
+offset 0xC474B: A044C744 240C0000 3444
+# 720p
+offset 0xC50AC: A044C744 24280000 3444
+# 720p
+offset 0xD1965: D002
+# 720p
+offset 0xF7868: 00056689 5C240866 C744240C D002

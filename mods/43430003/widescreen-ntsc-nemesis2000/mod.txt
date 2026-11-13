@@ -1,0 +1,15 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+description: Widescreen and FMV fix
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Dino Crisis 3 {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC; XBE CRC32 {9AF03B8B}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search 68000080 BF8D4424 6C50E80E AB05008D -> 68000040 BF8D4424 6C50E80E AB05008D
+# FMV's Fix
+search 0000803F 6A006A00 680000F0 43680000 2044E80F FEFFFF83 C424E867 FDFFFFEB 20680000 803F6800 00803F -> 0000403F 6A006A00 680000F0 43680000 2044E80F FEFFFF83 C424E867 FDFFFFEB 20680000 803F6800 00403F

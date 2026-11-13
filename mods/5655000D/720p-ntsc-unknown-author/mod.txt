@@ -1,0 +1,49 @@
+name: {720p} (NTSC) [Author Unknown]
+description: 720p.
+author: Unknown author, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "The Thing {720p} (NTSC) [Author Unknown].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Unknown author.
+# Region in the file: NTSC; XBE CRC32 {765B18EA}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Limit RAM 64MB (OFF)
+offset 0x124: 01
+# Header Edit - Allowed Media & Region Flags
+# (not imported: media and region flags of a real console) offset 0x214: FFFFFF
+# VideoModeTable
+offset 0x40EE1C: 0005D002 010606C0 05016000 0005D002
+# VideoModeTable
+offset 0x40EE4C: 0005D002 020A0B88 04014900 0005D002 020A0B88 04014800 D002D002 020A0B88 04014900 D002D002 020A0B88 04014802 0005D002 020A0B88 04014902 0005D002 020A0B88 04014300 0005D002 020A0B88 04016000 0005D002
+# 640x480 -> 1280x720 [Integers]
+offset 0x30EDDF: D0020000 8D8D9404 00006800 05
+# 640x480 -> 1280x720 [Integers]
+offset 0x30F4ED: D002
+# 640x480 -> 1280x720 [Integers]
+offset 0x30F5A4: 0005
+# 640x480 -> 1280x720 [Integers]
+offset 0x335775: 00050000 C744243C D002
+# 640x480 -> 1280x720 [Integers]
+offset 0x353AD9: D002
+# 640x480 -> 1280x720 [Integers]
+offset 0x353B65: 0005
+# 640x480 -> 1280x720 [Integers]
+offset 0x353C44: D002
+# 640x480 -> 1280x720 [Integers]
+offset 0x3F78C0: 00050005 9D02D002
+# 640x480 -> 1280x720 [Integers]
+offset 0x3F78E0: D002
+# 640x480 -> 1280x720 [Integers]
+offset 0x40EC7D: D002
+# 16:9
+offset 0x4040FF: EB62
+# 16:9
+offset 0x404163: 8061289F 0BF0E993 FFFFFF
+# 16:9
+offset 0x419A04: 398EE3
+# 16:9
+offset 0x41FFBC: 398EE3
+# 16:9
+offset 0x4AF7D4: 803F

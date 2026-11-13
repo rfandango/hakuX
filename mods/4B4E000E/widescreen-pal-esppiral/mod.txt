@@ -1,0 +1,14 @@
+name: {Widescreen} (PAL) [Esppiral]
+author: Esppiral, via Jay's Magic Patches
+region: PAL
+
+# Converted from "Shadow of Memories {Widescreen} (PAL) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: PAL.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen A
+search BB000080 3F895424 288B9424 B0000000 51508978 04897808 89780C89 78108978 1889781C 89782089 78248978 30 -> BB444494 3F895424 288B9424 B0000000 51508978 04897808 89780C89 78108978 1889781C 89782089 78248978 30
+# Widescreen B
+search 00002044 0000003B AA619C3F DB0FC9BF 00000045 000080BD 0000802F 4992243F 0000003C 6223AC4D 90EB3A4C 0000CC42 -> 00805544 0000003B AA619C3F DB0FC9BF 00000045 000080BD 0000802F 4992243F 0000003C 6223AC4D 90EB3A4C 0000CC42

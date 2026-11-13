@@ -1,0 +1,17 @@
+name: {Widescreen} (NTSC) [Combo Patch]
+description: Widescreen & FPS (Combo Patch) - It was reported that FPS patch causes dialogue to become out-of-sync. Recommended to patch widescreen only.
+author: Nemesis2000, ICUP321 & FrankyBuster (Combo Patch), via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Conker - Live & Reloaded {Widescreen} (NTSC) [Combo Patch].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000, ICUP321 & FrankyBuster (Combo Patch).
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen - Nemesis2000
+offset 0x5446A: 590D5099 6400F30F 10840164 020000E9 42010000
+# 60FPS - ICUP321 & FrankyBuster
+offset 0x1E6B23: 01
+# 60FPS cont'd - ICUP321 & FrankyBuster
+offset 0x299DCC: 01

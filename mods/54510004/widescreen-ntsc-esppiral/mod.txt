@@ -1,0 +1,14 @@
+name: {Widescreen} (NTSC) [Esppiral]
+author: Esppiral, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Dark Summit {Widescreen} (NTSC) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen A
+search 0000803F C7442458 00000000 C744245C 00000000 D9E0C744 24640000 00 -> ABAAAA3F C7442458 00000000 C744245C 00000000 D9E0C744 24640000 00
+# Widescreen B
+search ABAAAA3F 01000000 -> 398EE33F 01000000

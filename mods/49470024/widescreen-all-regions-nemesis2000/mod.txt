@@ -1,0 +1,13 @@
+name: {Widescreen} (All Regions) [Nemesis2000]
+description: Widescreen
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Unreal Championship {Widescreen} (All Regions) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: All Regions; XBE CRC32 {4F1A7F48}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search 8986A000 0000899E 30010000 C7863401 0000E17A D43F899E 8C000000 899E9C00 0000899E 98000000 8B82D000 00003BC3 89466074 068B4034 8946388B 4C24245F 899EA401 00008BC6 5E5D6489 0D000000 005B83C4 20C39090 909090 -> B8000040 3F8986A0 00000089 9E300100 00C78634 010000E1 7AD43F89 9E8C0000 00899E9C 00000089 9E980000 008B82D0 0000003B C3894660 74068B40 34894638 8B4C2424 5F899EA4 0100008B C65E5D64 890D0000 00005B83 C420C3

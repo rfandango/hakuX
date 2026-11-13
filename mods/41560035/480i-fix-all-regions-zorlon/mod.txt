@@ -1,0 +1,13 @@
+name: {480i Fix} (All Regions) [Zorlon]
+description: 480i Fix
+author: Zorlon, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Ultimate Spider-Man {480i Fix} (All Regions) [Zorlon].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Zorlon.
+# Region in the file: All Regions; XBE CRC32 {F0BE90BC}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 480i Fix
+search 0000E8AB FCFFFF8B 4B088B53 28508B43 2C518B4B 04528B13 5051528B F5E85196 -> 0000E8AB FCFFFF8B 4B089090 508B432C 518B4B04 6A008B13 5051528B F5E85196

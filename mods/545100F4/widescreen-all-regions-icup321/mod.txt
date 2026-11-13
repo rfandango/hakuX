@@ -1,0 +1,13 @@
+name: {Widescreen} (All Regions) [icup321]
+description: Widescreen
+author: icup321, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Nickelodeon - Tak - The Great Juju Challenge {Widescreen} (All Regions) [icup321].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by icup321.
+# Region in the file: All Regions; XBE CRC32 {39F4617E}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search 80400000 7A440000 7F43ABAA AA3F0AD7 233C0000 A04000 -> 80400000 7A440000 7F43398E E33F0AD7 233C0000 A04000

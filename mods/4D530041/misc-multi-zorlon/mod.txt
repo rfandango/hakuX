@@ -1,0 +1,17 @@
+name: {Misc} (Multi) [Zorlon]
+description: "HDD Freeze Fix & Debug to Retail Fix"
+author: Zorlon, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Amped 2 {Misc} (Multi) [Zorlon].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Zorlon.
+# Region in the file: Multi-Region.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# HDD Fix
+search 00007003 01000500 0000C2D8 A094E473 33000000 01000000 -> 00007003 01000500 00002212 D9A8E473 33000000 01000000
+# HDD Fix
+search 0100A308 01005C08 0100B29B 82EF0000 00000A00 0000BC07 -> 0100A308 01005C08 0100562A 5E5B0000 00000A00 0000BC07
+# HDD Fix
+search 00000000 00000000 00000000 0000FF01 00400700 00000400 00000000 00000000 -> 00000000 00000000 0000FF00 00000200 00000100 00800400 00000000 00000000

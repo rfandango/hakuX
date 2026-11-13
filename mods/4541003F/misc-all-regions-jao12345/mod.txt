@@ -1,0 +1,15 @@
+name: {Misc} (All Regions) [Jao12345]
+description: 60 FPS
+author: Jao12345, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Medal of Honor - Rising Sun {Misc} (All Regions) [Jao12345].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jao12345.
+# Region in the file: All Regions; XBE CRC32 {6E59C78F}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 60 FPS
+search 24002B05 2C642400 83F80273 1B6A01E8 B5A61500 8B -> 24002B05 2C642400 83F80173 1B6A01E8 B5A61500 8B
+# 60 FPS
+search 0D2C6424 0083C404 83F90272 E58B8E84 0000008B 11 -> 0D2C6424 0083C404 83F90172 E58B8E84 0000008B 11

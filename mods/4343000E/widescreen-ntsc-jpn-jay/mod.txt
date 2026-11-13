@@ -1,0 +1,19 @@
+name: {Widescreen} (NTSC+JPN) [Jay]
+description: FOV optional. Because of the way the game is designed, bumping internal resolution does almost nothing for visual fidelity, so main focus was fixing black bars on each side of the screen, which I have achieved.
+author: Jay, via Jay's Magic Patches
+region: NTSC, NTSC-J
+
+# Converted from "Auto Modellista {Widescreen} (NTSC+JPN) [Jay].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jay.
+# Region in the file: NTSC+JPN.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Limit RAM 64MB (OFF)
+search 01001400 00007003 01000500 0000FBF0 EBA878CD 31 -> 01001400 00007003 01000100 0000FBF0 EBA878CD 31
+# Header Edit - Allowed Media & Region Flags
+search 00000000 00000000 00000202 00000700 00000400 00000000 -> 00000000 00000000 0000FF03 00040700 00000400 00000000
+# FOV Increase (1.777~)
+search 80020000 C0010000 0080BB44 0000803F 00003442 ABAAAA3F 00000000 00000000 40010000 C0010000 00007A -> 80020000 C0010000 0080BB44 0000803F 00003442 398EE33F 00000000 00000000 40010000 C0010000 00007A
+# 720x480 -> 1280x720 Window View (Force canvas mode)
+search 8002E001 010F1188 040143 -> 8002E001 02090A88 040143

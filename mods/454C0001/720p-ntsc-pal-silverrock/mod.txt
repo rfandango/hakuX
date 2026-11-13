@@ -1,0 +1,21 @@
+name: {720p} (NTSC+PAL) [Silverrock]
+description: Perfect, no issues other than maybe a slight framerate drop in places. Ran through the first few scenes of gameplay without any issues ~nikeymikey
+author: Silverrock, via Jay's Magic Patches
+region: NTSC, PAL
+
+# Converted from "American McGee Presents - Scrapland {720p} (NTSC+PAL) [Silverrock].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Silverrock.
+# Region in the file: NTSC+PAL.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Allowed Media & Region Flags
+# (not imported: media and region flags of a real console) offset 0x220: FF010040
+# Window Views
+offset 0x2A40C4: 0005D002 020A0B88 04014900 0005D002
+# 640x480 -> 1280x720
+offset 0x1E5A78: 00050000 75208179 FCD002
+# 640x480 -> 1280x720
+offset 0x1E605D: 00050000 C786BC1D 0000D002
+# 640x480 -> 1280x720
+offset 0x2A4094: 0005D002 010606C0 05016000 0005D002

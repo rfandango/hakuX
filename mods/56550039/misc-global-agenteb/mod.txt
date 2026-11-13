@@ -1,0 +1,17 @@
+name: {Misc} (Global) [AgentEB]
+description: Disables media protection
+author: AgentEB, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "The Incredible Hulk - Ultimate Destruction {Misc} (Global) [AgentEB].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by AgentEB.
+# Region in the file: NTSC, JAPAN, PAL.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Supported Media
+offset 0x220: FF0100C0
+# HDD Fix
+offset 0x1F9A94: EB4341
+# HDD Fix
+offset 0x1F9AD5: 7C46EB19 8B450850 8B000C20 3D643A5C 0075AF58 56B80008 0000EB33 90

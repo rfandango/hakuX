@@ -1,0 +1,13 @@
+name: {480i Fix} (NTSC) [Author Unknown]
+description: 480i -> 480p
+author: Unknown author, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Chessmaster {480i Fix} (NTSC) [Author Unknown].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Unknown author.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Disable Interlacing (Set to Auto/Progressive)
+search 8B8424D4 0000008B 50088B48 28528B50 2C518B48 04528B10 51528BF3 -> 8B8424D4 0000008B 50089090 528B502C 6A008B48 04528B10 51528BF3

@@ -1,0 +1,17 @@
+name: {Misc} (Multi Region) [Esppiral]
+description: 16:9 Aspect Ratio & FPS unlock/fix
+author: Esppiral, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Crimson Skies - High Road to Revenge {Misc} (Multi Region) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: Multi Region.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Aspect Ratio 16:9
+search 0000803F 8BCEE831 060300F3 0F1006F3 0F104E0C F30F1144 2440F30F 104604F3 0F114424 44F30F10 4608F30F 114C2450 -> 0000403F 8BCEE831 060300F3 0F1006F3 0F104E0C F30F1144 2440F30F 104604F3 0F114424 44F30F10 4608F30F 114C2450
+# What I'm assuming translates to a "Lock FPS" checkbox (Disabled)
+search 01000000 5B83C408 C3D80D18 EE280089 4610894E 14E8561E 0C005F89 46185E33 C05B83C4 08C3CCCC 83EC0856 8D442404 -> 00000000 5B83C408 C3D80D18 EE280089 4610894E 14E8561E 0C005F89 46185E33 C05B83C4 08C3CCCC 83EC0856 8D442404
+# A float switched from "500" to "1000"
+search 00007A44 00002041 50B70100 50930100 20930100 504F0100 B0AD0100 10F81200 604F0100 704F0100 60041200 60041200 -> 0000FA43 00002041 50B70100 50930100 20930100 504F0100 B0AD0100 10F81200 604F0100 704F0100 60041200 60041200

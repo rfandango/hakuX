@@ -1,0 +1,13 @@
+name: {Widescreen} (Multi) [Jay]
+description: Esppiral & Nemesis2000 both made earlier versions of this same patch, I just combined it for every version as this value appears exactly once in all of them.
+author: Combo Patch, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Blinx - The Time Sweeper {Widescreen} (Multi) [Jay].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Combo Patch.
+# Region in the file: All Regions.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search ABAAAABF -> 388EE3BF

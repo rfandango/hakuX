@@ -1,0 +1,23 @@
+name: {Widescreen} (GLOBAL) [Silverrock]
+description: Widescreen
+author: Silverrock, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Peter Jackson's King Kong - The Official Game of the Movie {Widescreen} (GLOBAL) [Silverrock].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Silverrock.
+# Region in the file: GLOBAL; XBE CRC32 {12E9498A}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Allowed Media & Region Flags
+# (not imported: media and region flags of a real console) offset 0x220: FF0100C0
+# Widescreen
+offset 0x128: BE8C8494
+# Widescreen
+offset 0x158: 52DFFAEF
+# Widescreen
+offset 0x4B77D4: 398EE3
+# Widescreen
+offset 0x4E947A: 10
+# Widescreen
+offset 0x4FE428: 803F

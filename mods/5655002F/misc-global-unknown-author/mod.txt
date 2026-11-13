@@ -1,0 +1,17 @@
+name: {Misc} (GLOBAL) [Author Unknown]
+description: HDD/FATX Fix
+author: Unknown author, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Fight Club {Misc} (GLOBAL) [Author Unknown].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Unknown author.
+# Region in the file: Global; XBE CRC32 {F914447C}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Allowed Media & Region Flags
+# (not imported: media and region flags of a real console) offset 0x220: FF0100C0
+# HDD Fix
+offset 0x2E6C: EB4141
+# HDD Fix
+offset 0x2EAD: 7C178B45 08508B00 0C203D64 3A5C0075 B158B800 080000EB 37

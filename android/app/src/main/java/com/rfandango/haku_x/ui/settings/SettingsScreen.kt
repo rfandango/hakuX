@@ -87,6 +87,8 @@ fun SettingsScreen(
   var showFps by remember { mutableStateOf(prefs.showFps) }
   var showHitches by remember { mutableStateOf(prefs.showHitches) }
   var scale by remember { mutableIntStateOf(prefs.renderScale) }
+  var fpsLock by remember { mutableIntStateOf(prefs.fpsLock) }
+  var fpsLockDialog by remember { mutableStateOf(false) }
   var aspect by remember { mutableStateOf(prefs.aspectRatio) }
   var fxaa by remember { mutableStateOf(prefs.fxaa) }
   var upscale by remember { mutableStateOf(prefs.upscaleFilter) }
@@ -177,6 +179,7 @@ fun SettingsScreen(
         supportingContent = { Text(stringResource(R.string.controllers_settings_desc)) },
         modifier = Modifier.clickable(onClick = onControllers),
       )
+      TouchLookSettings()
 
       Section(stringResource(R.string.settings_section_display))
       ListItem(
@@ -190,6 +193,16 @@ fun SettingsScreen(
           stringResource(R.string.settings_applies_next_start),
         checked = uncapped,
         onChange = { uncapped = it; prefs.uncapped = it },
+      )
+      ListItem(
+        headlineContent = { Text(stringResource(R.string.settings_fps_lock)) },
+        supportingContent = {
+          Text(
+            fpsLockLabel(fpsLock) + ". " + stringResource(R.string.settings_fps_lock_desc) + " " +
+              stringResource(R.string.settings_applies_next_start),
+          )
+        },
+        modifier = Modifier.clickable { fpsLockDialog = true },
       )
       ListItem(
         headlineContent = { Text(stringResource(R.string.settings_aspect)) },
@@ -426,6 +439,15 @@ fun SettingsScreen(
       onDismiss = { cableDialog = false },
     )
   }
+  if (fpsLockDialog) {
+    ChoiceDialog(
+      title = stringResource(R.string.settings_fps_lock),
+      options = FPS_LOCKS.map { it to fpsLockLabel(it) },
+      current = fpsLock,
+      onPick = { fpsLock = it; prefs.fpsLock = it; fpsLockDialog = false },
+      onDismiss = { fpsLockDialog = false },
+    )
+  }
   if (aspectDialog) {
     ChoiceDialog(
       title = stringResource(R.string.settings_aspect),
@@ -493,7 +515,7 @@ internal val SCALES = (1..4).toList()
 @Composable
 internal fun scaleLabel(value: Int) = if (value == 1) stringResource(R.string.settings_scale_native) else "${value}x"
 
-internal val ASPECTS = listOf("auto", "4:3", "16:9", "stretch")
+internal val ASPECTS = listOf("auto", "4:3", "16:9", NativeCoreActivity.ASPECT_STRETCH)
 
 internal val UPSCALERS = listOf(NativeCoreActivity.UPSCALE_BILINEAR, NativeCoreActivity.UPSCALE_SGSR)
 internal val FORMATS = listOf(AppPrefs.FORMAT_NORMAL, AppPrefs.FORMAT_LETTERBOX, AppPrefs.FORMAT_WIDESCREEN)
@@ -576,7 +598,7 @@ internal fun upscaleLabel(value: String) = when (value) {
 internal fun aspectLabel(value: String) = when (value) {
   "4:3" -> R.string.settings_aspect_4_3
   "16:9" -> R.string.settings_aspect_16_9
-  "stretch" -> R.string.settings_aspect_stretch
+  NativeCoreActivity.ASPECT_STRETCH -> R.string.settings_aspect_stretch
   else -> R.string.settings_aspect_auto
 }
 

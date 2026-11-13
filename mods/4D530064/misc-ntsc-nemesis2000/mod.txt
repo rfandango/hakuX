@@ -1,0 +1,13 @@
+name: {Misc} (NTSC) [Nemesis2000]
+description: Horizontal widescreen Split Screen Multiplayer
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Halo 2 {Misc} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Horizontal widescreen Split Screen Multiplayer
+search 740AC744 24100200 0000EB0E C7442410 -> EB0AC744 24100200 0000EB0E C7442410

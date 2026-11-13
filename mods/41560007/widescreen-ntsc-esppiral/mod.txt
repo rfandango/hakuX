@@ -1,0 +1,13 @@
+name: {Widescreen} (NTSC) [Esppiral]
+description: Widescreen
+author: Esppiral, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "X-Men - Next Dimension {Widescreen} (NTSC) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: NTSC; XBE CRC32 {2C10C6B3}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search 00D91C24 A5C74348 ABAAAA3F C7434C -> 00D91C24 A5C74348 398EE33F C7434C

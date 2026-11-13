@@ -1,0 +1,32 @@
+name: {Widescreen} (PAL) [Nemesis2000]
+author: Nemesis2000, via Jay's Magic Patches
+region: PAL
+
+# Converted from "Fallout - Brotherhood of Steel {Widescreen} (PAL) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: PAL; XBE CRC32 {DD40A5A4}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen A
+search 2700C744 245C0000 F843C744 24600000 -> 2700C744 245C0000 BA43C744 24600000
+# Widescreen B
+search 00686096 2700F3A5 C7442468 0000F843 -> 00686096 2700F3A5 C7442468 0000BA43
+# Widescreen C
+search 00006800 00803E51 C7442470 0000F843 -> 00006800 00803E51 C7442470 0000BA43
+# Widescreen D
+search 680000A0 4351 -> 68000070 4351
+# Widescreen E
+search 680000A0 4351 -> 68000070 4351
+# Widescreen F
+search 680000A0 4351 -> 68000070 4351
+# Widescreen G
+search 680000A0 4352 -> 68000070 4352
+# Widescreen H
+search 680000A0 4352 -> 68000070 4352
+# Widescreen I
+search 680000A0 4350 -> 68000070 4350
+# Widescreen J
+search 713DAA3F -> 398EE33F
+# Widescreen K
+search 713DAA3F -> 398EE33F

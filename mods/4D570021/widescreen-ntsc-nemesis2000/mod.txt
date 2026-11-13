@@ -1,0 +1,21 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+description: Widescreen
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Unreal Championship 2 - The Liandri Conflict {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC; XBE CRC32 {6340618B}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen A
+offset 0x123BFD: D80DE4DC 3F00908D 442420D9 5C2430B9 00000000 894C2420 894C2424 D95C2444 C7442428 0000803F 894C242C
+# Widescreen B
+offset 0x123D9E: D80DE4DC 3F0090B8 00000000 89442420 D95C2430 89442424 C7442428 0000803F D95C2444 8944242C
+# Menu & HUD Fix A
+offset 0x89520: 803E
+# Menu & HUD Fix B
+offset 0x89428: 40
+# FMV's Fix
+offset 0x1E0C6: A042C744 24140000 00BFC744 24180000 0000C744 241C0000 803FC744 24200000 0000C744 24240000 0000C744 24280000 A042C744 242C00C0 EF43C744 24300000 0000C744 24340000 803FC744 24380000 0000C744 243C0000 F043C744 24400000 0C44C744 244400C0 EF43C744 24480000 0000C744 244C0000 803FC744 24500000 2044C744 24540000 F043C744 24580000 0C

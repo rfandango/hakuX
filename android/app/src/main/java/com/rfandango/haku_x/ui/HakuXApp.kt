@@ -46,6 +46,11 @@ private object Routes {
   const val LIBRARY = "library"
   const val SETTINGS = "settings"
   const val CONTROLS = "controls"
+
+  /** One game's own layout editor: its override key. */
+  const val CONTROLS_GAME = "controls_game?key={key}"
+
+  fun controlsGame(key: String) = "controls_game?key=${Uri.encode(key)}"
   const val CONTROLLERS = "controllers"
   const val HDD = "hdd"
   const val GPU_DRIVER = "gpu_driver"
@@ -59,10 +64,11 @@ private object Routes {
   const val GAME = "game?key={key}&title={title}"
 
   fun game(key: String, title: String) = "game?key=${Uri.encode(key)}&title=${Uri.encode(title)}"
-  /** One disc's mods and cheats: its game key and title. */
-  const val MODS = "mods?key={key}&title={title}"
+  /** One disc's mods and cheats: its game key, title and regions (XboxDisc.regions). */
+  const val MODS = "mods?key={key}&title={title}&regions={regions}"
 
-  fun mods(key: String, title: String) = "mods?key=${Uri.encode(key)}&title=${Uri.encode(title)}"
+  fun mods(key: String, title: String, regions: Int) =
+    "mods?key=${Uri.encode(key)}&title=${Uri.encode(title)}&regions=$regions"
 }
 
 /**
@@ -145,7 +151,7 @@ fun HakuXApp(
         },
         onMods = { game, disc ->
           val key = GameOverrides.gameKey(disc.titleId, disc.version, game.relativePath)
-          nav.navigate(Routes.mods(key, game.title))
+          nav.navigate(Routes.mods(key, game.title, disc.regions))
         },
       )
     }
@@ -154,11 +160,13 @@ fun HakuXApp(
       arguments = listOf(
         navArgument("key") { type = NavType.StringType; defaultValue = "" },
         navArgument("title") { type = NavType.StringType; defaultValue = "" },
+        navArgument("regions") { type = NavType.IntType; defaultValue = 0 },
       ),
     ) { entry ->
       ModsScreen(
         gameKey = entry.arguments?.getString("key").orEmpty(),
         title = entry.arguments?.getString("title").orEmpty(),
+        regions = entry.arguments?.getInt("regions") ?: 0,
         onBack = { nav.popBackStack() },
       )
     }
@@ -199,16 +207,27 @@ fun HakuXApp(
       ControlsEditorScreen(onClose = { nav.popBackStack() })
     }
     composable(
+      Routes.CONTROLS_GAME,
+      arguments = listOf(navArgument("key") { type = NavType.StringType; defaultValue = "" }),
+    ) { entry ->
+      ControlsEditorScreen(
+        gameKey = entry.arguments?.getString("key").orEmpty().ifEmpty { null },
+        onClose = { nav.popBackStack() },
+      )
+    }
+    composable(
       Routes.GAME,
       arguments = listOf(
         navArgument("key") { type = NavType.StringType; defaultValue = "" },
         navArgument("title") { type = NavType.StringType; defaultValue = "" },
       ),
     ) { entry ->
+      val key = entry.arguments?.getString("key").orEmpty()
       GameSettingsScreen(
-        gameKey = entry.arguments?.getString("key").orEmpty(),
+        gameKey = key,
         title = entry.arguments?.getString("title").orEmpty(),
         onBack = { nav.popBackStack() },
+        onEditControls = { nav.navigate(Routes.controlsGame(key)) },
       )
     }
   }

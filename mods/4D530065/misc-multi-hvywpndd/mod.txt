@@ -1,0 +1,13 @@
+name: {Misc} (Multi) [HvyWpnDd]
+description: "Fix Anamorphic Widescreen" Patch arranged by Jay.
+author: HvyWpnDd, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Dungeons & Dragons - Heroes {Misc} (Multi) [HvyWpnDd].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by HvyWpnDd.
+# Region in the file: All regions.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Fix Anamorphic Widescreen. More info: https://github.com/HvyWpnDd/xbox/blob/master/dungeons_and_dragons_heroes/widescreen.md
+search 8E79453E 0000803F -> 8E79453E ABAAAA3F

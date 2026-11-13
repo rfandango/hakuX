@@ -1,0 +1,53 @@
+name: {Misc} (PAL) [Zorlon]
+description: This fix is for FATX filename limitations so the game can be run as an extracted folder format, (instead of xiso).
+author: Zorlon, via Jay's Magic Patches
+region: PAL
+
+# Converted from "Frankie Dettori Racing {Misc} (PAL) [Zorlon].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Zorlon.
+# Region in the file: PAL; XBE CRC32 {EA0C65EA}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# HDD FATX FixHDD FATX Fix
+offset 0x3E7859: 00000000 000000
+# HDD FATX Fix
+offset 0x3E78A9: 00000000 000000
+# HDD FATX Fix
+offset 0x3E78F9: 00000000 000000
+# HDD FATX Fix
+offset 0x3E7949: 00000000 000000
+# HDD FATX Fix
+offset 0x3E7999: 00000000 000000
+# HDD FATX Fix
+offset 0x3E79E9: 00000000 000000
+# HDD FATX Fix
+offset 0x3E7A39: 00000000 000000
+# HDD FATX Fix
+offset 0x3E7A89: 00000000 000000
+# HDD FATX Fix
+offset 0x3E7AD9: 00000000 000000
+# HDD FATX Fix
+offset 0x3E7B29: 00000000 000000
+# HDD FATX Fix
+offset 0x3E7B79: 00000000 000000
+# HDD FATX Fix
+offset 0x3E7BC9: 00000000 000000
+# HDD FATX Fix
+offset 0x3E7C19: 00000000 000000
+# HDD FATX Fix
+offset 0x3E7C69: 00000000 000000
+# HDD FATX Fix
+offset 0x3E7CB9: 00000000 000000
+# HDD FATX Fix
+offset 0x3E7D09: 00000000 000000
+# HDD FATX Fix
+offset 0x3E7D59: 00000000 000000
+# HDD FATX Fix
+offset 0x3E7DA9: 00000000 000000
+# HDD FATX Fix
+offset 0x3E7DF9: 00000000 000000
+# HDD FATX Fix
+offset 0x3E7E49: 00000000 000000
+# HDD FATX Fix
+offset 0x3E7E99: 00000000 000000

@@ -1,0 +1,13 @@
+name: {480i Fix} (All Regions) [Zorlon]
+description: 480i Fix
+author: Zorlon, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Metal Slug 3 {480i Fix} (All Regions) [Zorlon].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Zorlon.
+# Region in the file: All Regions; XBE CRC32 {AE118E61}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 480i Fix
+search C7442434 200000 -> C7442434 000000

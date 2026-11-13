@@ -1,0 +1,13 @@
+name: {720p - Upscale} (GLOBAL) [Felipe_Developer]
+description: Upscaled 1280x720, apply to HL2_XBOX.xbe, horizontal tiled memory back buffer issue
+author: Felipe_Developer, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Half-Life 2 {720p - Upscale} (GLOBAL) [Felipe_Developer].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Felipe_Developer.
+# Region in the file: GLOBAL; XBE CRC32 {5DC8E588}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen - APPLY TO HL2_XBOX.XBE
+search 04C00401 48008002 E0010107 07880401 49008002 E00101 -> 04C00401 48008002 E0010207 0A880401 49008002 E00101

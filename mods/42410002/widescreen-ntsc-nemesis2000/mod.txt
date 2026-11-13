@@ -1,0 +1,17 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+description: Widescreen (UI stretching)
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Digimon World 4 {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC; XBE CRC32 {B1399EC5}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen (Height increase of something to 720)
+search D80D94B9 3000D91C 24D94424 0CD80D94 -> D80D8642 1800D91C 24D94424 0CD80D94
+# 480 -> 360 (Possibly a modifier for the HUD to fit)
+search C701E001 0000C208 00CCCCCC CCCCCCCC -> C7016801 0000C208 00CCCCCC CCCCCCCC
+# 640 -> 720
+search C7078002 0000C747 04E00100 008BC3C1 -> C707D002 0000C747 04E00100 008BC3C1

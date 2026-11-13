@@ -1,0 +1,13 @@
+name: {480i Fix} (NTSC) [Sifaw99]
+description: 480p Forced
+author: Sifaw99, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "SRS - Street Racing Syndicate {480i Fix} (NTSC) [Sifaw99].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Sifaw99.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 480i (Interlaced) -> 480p (Progressive)
+search 05200100 0089 -> 05000100 0089

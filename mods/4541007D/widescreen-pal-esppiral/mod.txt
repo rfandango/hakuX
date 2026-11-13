@@ -1,0 +1,15 @@
+name: {Widescreen} (PAL) [Esppiral]
+description: Widescreen
+author: Esppiral, via Jay's Magic Patches
+region: PAL
+
+# Converted from "The Godfather {Widescreen} (PAL) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: PAL; XBE CRC32 {334BB4FB}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen A
+search D80D34EB 510051D9 F2DDD8D9 1C24E8B1 80FFFF83 C4085F5E 8BE55DC2 1000CCCC -> D80DA8E6 0E0051D9 F2DDD8D9 1C24E8B1 80FFFF83 C4085F5E 8BE55DC2 1000CCCC
+# Widescreen B
+search 0000803F 8FC26F42 B06ABB30 B06ABB30 3006B735 0BBCB23A 06A1DB35 80778541 -> 0000803F 8FC26F42 B06ABB30 B06ABB30 3006B735 0BBCB23A 06A1DB35 80778541

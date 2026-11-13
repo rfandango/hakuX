@@ -1,0 +1,13 @@
+name: {Widescreen} (NTSC+JPN) [Nemesis2000]
+description: Widescreen
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC, NTSC-J
+
+# Converted from "Hunter - The Reckoning - Redeemer {Widescreen} (NTSC+JPN) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC+JPN; XBE CRC32 {25DF88E3}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+offset 0x1412C0: D9C0D849 38D80DEE 131500D9 C0D9E0D9 593CD959 44D9C0D9 E0D95940 D95948C3

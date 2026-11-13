@@ -1,0 +1,13 @@
+name: {Misc} (NTSC-JPN) [Jao12345]
+description: 60 FPS
+author: Jao12345, via Jay's Magic Patches
+region: NTSC, NTSC-J
+
+# Converted from "Nickelodeon - Tak 2 - The Staff Of Dreams {Misc} (NTSC-JPN) [Jao12345].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jao12345.
+# Region in the file: NTSC, JAPAN; XBE CRC32 {076350BC}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 60 FPS
+offset 0x252934: 01

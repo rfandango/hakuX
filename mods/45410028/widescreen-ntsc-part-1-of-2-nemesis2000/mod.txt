@@ -1,0 +1,15 @@
+name: {Widescreen} (NTSC) [Part 1 of 2] [Nemesis2000]
+description: There are two patches for this game. They are applied to either the file "inis.viv" or "default.xbe"
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Need for Speed - Hot Pursuit 2 {Widescreen} (NTSC) [Part 1 of 2] [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Apply to 'default.xbe'
+search 30ABAAAA 3F -> 30398EE3 3F
+# Apply to 'default.xbe'
+search 1B008946 54B80000 48428946 -> 1B008946 54B80000 7F428946

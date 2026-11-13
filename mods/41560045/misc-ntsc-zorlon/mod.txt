@@ -1,0 +1,13 @@
+name: {Misc} (NTSC) [Zorlon]
+description: HDD FATX fix.<br>Patch isn't applied to any xbe file.<br>Download patch here: https://jayxbox.com/All-Patches/titles/True%20Crime%20-%20New%20York%20City/True%20Crime%20-%20New%20York%20City%20[NTSC-U]%20[HDD%20File%20Names%20Fix].zip
+author: Zorlon, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "True Crime - New York City {Misc} (NTSC) [Zorlon].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Zorlon.
+# Region in the file: NTSC, JAPAN; XBE CRC32 {BBEC2DEE}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Patch isn't applied to any xbe file.Download patch here: https://jayxbox.com/All-Patches/titles/True%20Crime%20-%20New%20York%20City/True%20Crime%20-%20New%20York%20City%20[NTSC-U]%20[HDD%20File%20Names%20Fix].zip
+search DEADBEEF -> DEADBEEF

@@ -9,12 +9,19 @@ import android.graphics.PointF
 import android.graphics.RectF
 import android.graphics.RenderNode
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import androidx.annotation.RequiresApi
+import com.rfandango.haku_x.data.TouchLookConfig
+import com.rfandango.haku_x.input.ButtonCounter
+import com.rfandango.haku_x.input.DoubleTapDetector
+import com.rfandango.haku_x.input.TouchLookEngine
+import com.rfandango.haku_x.input.Turbo
 import com.rfandango.haku_x.overlay.ControlId
 import com.rfandango.haku_x.overlay.ControlKind
 import com.rfandango.haku_x.overlay.ControlPainter
@@ -108,14 +115,64 @@ class OnScreenController @JvmOverloads constructor(
       }
     }
 
+  /**
+   * Swipe to look (TouchLookEngine): a finger dragged over the screen, away from
+   * the controls, turns the camera as the right stick would. It takes the place
+   * of the on-screen right stick and, where it works, of the swipe up that opens
+   * the menu (the jewel and back still do). Playing only: not while the controls
+   * are hidden (a gamepad is attached) or edited.
+   */
+  var touchLook = TouchLookConfig()
+    set(value) {
+      if (field != value) {
+        // only the look's switch changed (the T button, or the menu): nothing held is let go
+        val onlySwitch = field.copy(enabled = value.enabled) == value
+        field = value
+        if (onlySwitch) {
+          lookEnabledNow = value.enabled
+          if (!lookOn) stopLook()
+          invalidate()
+        } else {
+          resetAllInputs() // lets go of everything held, by the mapping it was pressed with
+          lookEnabledNow = value.enabled
+          rebuildSources()
+          tapDetector.gapMs = value.tapMs.toLong()
+        }
+      }
+    }
+
+  /** The T button switched the look (true: on): the game keeps that as its setting, as the menu does. */
+  var onLookSwitched: ((Boolean) -> Unit)? = null
+
+  /** Which game's own layout is loaded and kept (null: the app's, as the settings' editor does). */
+  var layoutKey: String? = null
+
+  /** Swipe to look is switched on: the config's, until the T button changes it while playing. */
+  private var lookEnabledNow = false
+
+  /** Swipe to look is in use now. */
+  private val lookOn get() = lookEnabledNow && !minimal && !editing
+
+  /** The left stick appears where a finger comes down on the left half, and goes when it lifts. */
+  private val dynStickOn
+    get() = touchLook.dynamicStick && touchLook.area == TouchLookConfig.AREA_RIGHT && !minimal && !editing &&
+      layout?.get(ControlId.LEFT_STICK)?.visible == true
+
+  /** Whether a finger put down at x turns the camera. */
+  private fun inLookArea(x: Float) = touchLook.area == TouchLookConfig.AREA_ALL || x >= width / 2f
+
   /** Not drawn and not touchable while playing. */
-  private fun off(s: ControlSpec) = !s.visible || (minimal && (s.id != ControlId.MENU || jewelHidden))
+  private fun off(s: ControlSpec) = !s.visible || (minimal && (s.id != ControlId.MENU || jewelHidden)) ||
+    (lookOn && s.id == ControlId.RIGHT_STICK) ||
+    (dynStickOn && !dynActive && s.id == ControlId.LEFT_STICK)
 
   private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
   private val swipeUp = SwipeUpGestureRecognizer(
     minDistancePx = { max(height * 0.14f, touchSlop * 8f) },
     touchSlopPx = { touchSlop },
-    canStartAt = { x, y -> y >= height * 0.35f && hit(x, y) == null },
+    canStartAt = { x, y ->
+      y >= height * 0.35f && hit(x, y) == null && !(lookOn && inLookArea(x)) && !(dynStickOn && x < width / 2f)
+    },
     onTriggered = {
       releaseAll()
       onMenuButtonTapped?.invoke()
@@ -159,7 +216,7 @@ class OnScreenController @JvmOverloads constructor(
     if (w == 0 || h == 0) return
     val current = layout
     if (current == null || oldw == 0 || oldh == 0) {
-      layout = OverlayStore.load(context, w.toFloat(), h.toFloat())
+      layout = OverlayStore.load(context, w.toFloat(), h.toFloat(), layoutKey)
     } else {
       // Keep (unsaved) edits through a size change: everything scales with the view.
       val sx = w.toFloat() / oldw
@@ -182,10 +239,12 @@ class OnScreenController @JvmOverloads constructor(
       drawEditBackdrop(canvas)
     }
     val cached = !editing && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && canvas.isHardwareAccelerated
-    for (s in l.controls.values) {
-      if (!editing && off(s)) {
+    for (listed in l.controls.values) {
+      if (!editing && off(listed)) {
         continue
       }
+      // the dynamic left stick is drawn where the finger came down
+      val s = if (!editing && listed.id == ControlId.LEFT_STICK && dynActive) dynamicSpec(listed) else listed
       // Each control at its own opacity; editing, a hidden one stays faint
       // where it is, so it can be selected and shown again.
       val opacity = if (s.visible) s.opacity else 0.25f
@@ -226,7 +285,7 @@ class OnScreenController @JvmOverloads constructor(
    */
   private data class Look(
     val cx: Float, val cy: Float, val r: Float,
-    val pressed: Boolean, val kx: Float, val ky: Float, val dpad: Int,
+    val pressed: Boolean, val kx: Float, val ky: Float, val dpad: Int, val lit: Boolean,
   )
 
   private val nodes = HashMap<ControlId, RenderNode>()
@@ -235,11 +294,11 @@ class OnScreenController @JvmOverloads constructor(
   private fun look(s: ControlSpec): Look = when (s.id.kind) {
     ControlKind.STICK -> {
       val i = stickIndex(s.id)
-      Look(s.cx, s.cy, s.radius, stickPointer[i] != -1, stickPos[i].x, stickPos[i].y, 0)
+      Look(s.cx, s.cy, s.radius, stickPointer[i] != -1, stickPos[i].x, stickPos[i].y, 0, false)
     }
-    ControlKind.DPAD -> Look(s.cx, s.cy, s.radius, dpadBits != 0, 0f, 0f, dpadBits)
-    ControlKind.MENU -> Look(s.cx, s.cy, s.radius, menuPressed, 0f, 0f, 0)
-    else -> Look(s.cx, s.cy, s.radius, s.id in held, 0f, 0f, 0)
+    ControlKind.DPAD -> Look(s.cx, s.cy, s.radius, dpadBits != 0, 0f, 0f, dpadBits, false)
+    ControlKind.MENU -> Look(s.cx, s.cy, s.radius, menuPressed, 0f, 0f, 0, false)
+    else -> Look(s.cx, s.cy, s.radius, s.id in held, 0f, 0f, 0, s.id == ControlId.TOUCH_LOOK && lookOn)
   }
 
   @RequiresApi(Build.VERSION_CODES.Q)
@@ -271,6 +330,10 @@ class OnScreenController @JvmOverloads constructor(
       h = 31 * h + stickPos[i].x.toRawBits()
       h = 31 * h + stickPos[i].y.toRawBits()
     }
+    h = 31 * h + if (lookOn) 1 else 0
+    h = 31 * h + if (dynActive) 1 else 0
+    h = 31 * h + dynCx.toRawBits()
+    h = 31 * h + dynCy.toRawBits()
     return h
   }
 
@@ -282,7 +345,7 @@ class OnScreenController @JvmOverloads constructor(
       }
       ControlKind.DPAD -> painter.draw(canvas, s, dpadBits != 0, dpad = dpadBits)
       ControlKind.MENU -> painter.draw(canvas, s, menuPressed)
-      else -> painter.draw(canvas, s, s.id in held)
+      else -> painter.draw(canvas, s, s.id in held, lit = s.id == ControlId.TOUCH_LOOK && lookOn)
     }
   }
 
@@ -398,14 +461,30 @@ class OnScreenController @JvmOverloads constructor(
     val index = event.actionIndex
     val pointer = event.getPointerId(index)
     when (event.actionMasked) {
-      MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> down(event.getX(index), event.getY(index), pointer)
-      MotionEvent.ACTION_MOVE -> for (i in 0 until event.pointerCount) {
-        move(event.getX(i), event.getY(i), event.getPointerId(i))
+      MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+        val x = event.getX(index)
+        val y = event.getY(index)
+        // each move as the panel reports it, not batched to the display's frames: the look needs their times
+        if (lookOn) requestUnbufferedDispatch(event)
+        touchDown(event, index, pointer, x, y)
       }
-      MotionEvent.ACTION_POINTER_UP -> up(pointer)
-      MotionEvent.ACTION_UP -> {
+      MotionEvent.ACTION_MOVE -> {
+        if (lookPointer != -1) requestUnbufferedDispatch(event)
+        for (i in 0 until event.pointerCount) {
+          val id = event.getPointerId(i)
+          tapDetector.move(id, event.getX(i), event.getY(i))
+          if (id == lookPointer) lookMove(event, i) else move(event.getX(i), event.getY(i), id)
+        }
+      }
+      MotionEvent.ACTION_POINTER_UP -> {
+        tapDetector.up(pointer, event.eventTime)
         up(pointer)
-        releaseAll() // the last finger: nothing can still be held
+      }
+      MotionEvent.ACTION_UP -> {
+        tapDetector.up(pointer, event.eventTime)
+        up(pointer)
+        // the last finger: nothing can still be held, but the look's last moves are still to be sent
+        releaseAll(keepLook = true)
       }
       MotionEvent.ACTION_CANCEL -> releaseAll()
     }
@@ -418,6 +497,7 @@ class OnScreenController @JvmOverloads constructor(
     var bestScore = Float.MAX_VALUE
     for (s in l.controls.values) {
       if (off(s)) continue
+      if (s.id == ControlId.LEFT_STICK && dynStickOn) continue // it is only where a finger put it
       val reach = s.radius * ControlPainter.reach(s.id.kind)
       val score = hypot(x - s.cx, y - s.cy) / reach
       if (score <= 1f && score < bestScore) {
@@ -446,6 +526,7 @@ class OnScreenController @JvmOverloads constructor(
         dpadPointer = pointer
         moveDpad(x, y)
       }
+      ControlKind.CUSTOM -> if (id == ControlId.TOUCH_LOOK) toggleLook() else if (id !in held) press(id, pointer)
       else -> if (id !in held) press(id, pointer)
     }
   }
@@ -476,13 +557,16 @@ class OnScreenController @JvmOverloads constructor(
     release(id)
     val next = hit(x, y) ?: return
     if (next.kind != ControlKind.STICK && next.kind != ControlKind.DPAD && next.kind != ControlKind.MENU &&
-      next !in held
+      next != ControlId.TOUCH_LOOK && next !in held
     ) {
       press(next, pointer)
     }
   }
 
   private fun up(pointer: Int) {
+    if (pointer == lookPointer) {
+      lookPointer = -1 // its last moves still play out (lookStep)
+    }
     if (pointer == menuPointer) {
       if (menuPressed) {
         onMenuButtonTapped?.invoke()
@@ -499,11 +583,22 @@ class OnScreenController @JvmOverloads constructor(
       dpadPointer = -1
       setDpad(0)
     }
+    for (side in 0..1) {
+      if (tapPointer[side] == pointer) {
+        tapPointer[side] = -1
+        stopSource(TouchLookConfig.TAP_LEFT + side)
+      }
+    }
     held.entries.filter { it.value == pointer }.map { it.key }.forEach(::release)
   }
 
-  private fun releaseAll() {
+  private fun releaseAll(keepLook: Boolean = false) {
     swipeUp.reset()
+    // a normal last-finger lift keeps what a double tap needs to know about the tap that just ended
+    if (!keepLook) {
+      stopLook()
+      tapDetector.cancel()
+    }
     menuPressed = false
     menuPointer = -1
     for (i in 0..1) {
@@ -511,7 +606,13 @@ class OnScreenController @JvmOverloads constructor(
     }
     dpadPointer = -1
     setDpad(0)
+    tapPointer[0] = -1
+    tapPointer[1] = -1
+    for (i in 0 until TouchLookConfig.SOURCES) stopSource(i)
     held.keys.toList().forEach(::release)
+    buttons.releaseAll() // nothing may stay down
+    lookHandler.removeCallbacks(turboTick)
+    turboRunning = false
   }
 
   fun resetAllInputs() {
@@ -540,19 +641,29 @@ class OnScreenController @JvmOverloads constructor(
 
   private fun press(id: ControlId, pointer: Int) {
     held[id] = pointer
-    buttonOf(id)?.let { listener?.onButtonPressed(it) }
+    if (id.kind == ControlKind.CUSTOM) {
+      startSource(sourceOf(id))
+    } else {
+      buttonOf(id)?.let { acquire(it) }
+    }
   }
 
   private fun release(id: ControlId) {
     if (held.remove(id) != null) {
-      buttonOf(id)?.let { listener?.onButtonReleased(it) }
+      if (id.kind == ControlKind.CUSTOM) {
+        stopSource(sourceOf(id))
+      } else {
+        buttonOf(id)?.let { releaseButton(it) }
+      }
     }
   }
 
   private fun moveStick(i: Int, x: Float, y: Float) {
     val s = layout?.get(if (i == 0) ControlId.LEFT_STICK else ControlId.RIGHT_STICK) ?: return
-    var dx = (x - s.cx) / s.radius
-    var dy = (y - s.cy) / s.radius
+    val cx = if (i == 0 && dynActive) dynCx else s.cx
+    val cy = if (i == 0 && dynActive) dynCy else s.cy
+    var dx = (x - cx) / s.radius
+    var dy = (y - cy) / s.radius
     val m = hypot(dx, dy)
     if (m > 1f) {
       dx /= m
@@ -562,14 +673,115 @@ class OnScreenController @JvmOverloads constructor(
       dx = 0f
       dy = 0f
     }
-    stickPos[i].set(dx, dy)
-    listener?.onStickMoved(if (i == 0) Stick.LEFT else Stick.RIGHT, dx, dy)
+    stickPos[i].set(dx, dy) // the knob follows the finger; only what the game gets is inverted
+    val ox = if (i == 1 && touchLook.invertX) -dx else dx
+    val oy = if (i == 1 && touchLook.invertY) -dy else dy
+    listener?.onStickMoved(if (i == 0) Stick.LEFT else Stick.RIGHT, ox, oy)
   }
 
   private fun releaseStick(i: Int) {
+    if (i == 0) dynActive = false
     stickPointer[i] = -1
     stickPos[i].set(0f, 0f)
     listener?.onStickMoved(if (i == 0) Stick.LEFT else Stick.RIGHT, 0f, 0f)
+  }
+
+  // ------------------------------------------------------- swipe to look
+
+  /*
+   * The look finger's moves go to the engine as they arrive (each with its own
+   * time); a tick every few ms, while there is motion to play out, reads the
+   * stick from it and sends it. All on this (the UI) thread, which every other
+   * input reaches the listener on. Nothing is drawn: the finger leaves no mark,
+   * so a swipe costs the overlay no redraws.
+   *
+   * The output runs down by time, not by an event: a finger lifted, held still
+   * or cancelled lets it fall to zero within a few frames, so it cannot stay
+   * on.
+   */
+  private val lookEngine = TouchLookEngine().also { it.playDp = (LOOK_PLAY_PX / density).toDouble() }
+  private var lookPointer = -1
+  private var lookX = 0f
+  private var lookY = 0f
+  private var lookSentX = 0f
+  private var lookSentY = 0f
+  private var lookRunning = false
+  private val lookHandler = Handler(Looper.getMainLooper())
+  private val lookTick = Runnable { lookStep() }
+
+  private fun startLook(event: MotionEvent, index: Int, pointer: Int) {
+    lookPointer = pointer
+    lookX = event.getX(index)
+    lookY = event.getY(index)
+    lookEngine.beginStroke(event.eventTime.toDouble())
+  }
+
+  /** The look finger's moves in this event: the batched ones first, each at its own time, then the latest. */
+  private fun lookMove(event: MotionEvent, index: Int) {
+    val arrival = SystemClock.uptimeMillis().toDouble()
+    var x = lookX
+    var y = lookY
+    for (h in 0 until event.historySize) {
+      val hx = event.getHistoricalX(index, h)
+      val hy = event.getHistoricalY(index, h)
+      lookEngine.addMove(
+        event.getHistoricalEventTime(h).toDouble(), arrival,
+        ((hx - x) / density).toDouble(), ((hy - y) / density).toDouble(),
+      )
+      x = hx
+      y = hy
+    }
+    val nx = event.getX(index)
+    val ny = event.getY(index)
+    lookEngine.addMove(
+      event.eventTime.toDouble(), arrival,
+      ((nx - x) / density).toDouble(), ((ny - y) / density).toDouble(),
+    )
+    lookX = nx
+    lookY = ny
+    if (!lookRunning) {
+      lookRunning = true
+      lookHandler.post(lookTick)
+    }
+  }
+
+  private fun lookStep() {
+    if (!lookOn) {
+      stopLook()
+      return
+    }
+    val c = touchLook
+    val more = lookEngine.sample(
+      SystemClock.uptimeMillis().toDouble(),
+      c.smoothing.toDouble(),
+      c.sensitivity / 100.0,
+      c.verticalSensitivity / 100.0,
+      c.deadZone / 100.0,
+      c.accel,
+    )
+    sendLook(lookEngine.outX, lookEngine.outY)
+    if (more) {
+      lookHandler.postDelayed(lookTick, LOOK_TICK_MS)
+    } else {
+      lookRunning = false
+    }
+  }
+
+  /** The look's stick to the listener when it changed (a swipe up is the stick up, as the on-screen stick's drag is). */
+  private fun sendLook(x: Float, y: Float) {
+    if (x == lookSentX && y == lookSentY) return
+    lookSentX = x
+    lookSentY = y
+    listener?.onStickMoved(Stick.RIGHT, if (touchLook.invertX) -x else x, if (touchLook.invertY) -y else y)
+  }
+
+  /** Ends the look at once: the finger forgotten, the stick centred. */
+  private fun stopLook() {
+    lookPointer = -1
+    lookEngine.clear()
+    lookHandler.removeCallbacks(lookTick)
+    lookRunning = false
+    sendLook(0f, 0f)
   }
 
   /* Eight ways: 45-degree sectors around the axes; the middle is neutral. */
@@ -600,10 +812,161 @@ class OnScreenController @JvmOverloads constructor(
     if (changed == 0) return
     for ((bit, button) in DPAD_BUTTONS) {
       if (changed and bit != 0) {
-        if (bits and bit != 0) listener?.onButtonPressed(button) else listener?.onButtonReleased(button)
+        if (bits and bit != 0) acquire(button) else releaseButton(button)
       }
     }
     dpadBits = bits
+  }
+
+  // ------------------------------- custom buttons, double taps, turbo, the dynamic stick
+
+  /*
+   * Every pad button goes down and up through this counter, so that a button on the screen, a custom button
+   * mapped to it, a double tap holding it and a turbo pulse that all want the same one do not let go of it
+   * for one another.
+   */
+  private val buttons = ButtonCounter(Button.entries.size) { i, down ->
+    if (down) listener?.onButtonPressed(Button.entries[i]) else listener?.onButtonReleased(Button.entries[i])
+  }
+
+  private fun acquire(b: Button) = buttons.acquire(b.ordinal)
+
+  private fun releaseButton(b: Button) = buttons.release(b.ordinal)
+
+  /*
+   * What the custom buttons 0, 1, 2 and the double taps (left, right) press: a "source" holds the pad buttons
+   * it is mapped to for as long as its finger is down. With turbo the hold pulses instead (down for the first
+   * half of a period, up for the second) while the finger stays. A finger on custom 0 or 1, and the second tap
+   * of a double tap, is also the look finger if the look has none: it holds the button and turns the camera,
+   * like a fire button in a shooter.
+   */
+  private val sourceButtons = Array(TouchLookConfig.SOURCES) { emptyArray<Button>() }
+  private val sourceHeld = BooleanArray(TouchLookConfig.SOURCES)
+  private val sourceAsserted = BooleanArray(TouchLookConfig.SOURCES)
+  private val sourceSince = LongArray(TouchLookConfig.SOURCES)
+  private val tapPointer = intArrayOf(-1, -1)
+  private val tapDetector = DoubleTapDetector(TAP_MAX_MS, TAP_SLOP_DP * density, TAP_NEAR_DP * density)
+  private var turboRunning = false
+  private val turboTick = Runnable { turboStep() }
+
+  private fun sourceOf(id: ControlId) = when (id) {
+    ControlId.CUSTOM_0 -> TouchLookConfig.BUTTON_0
+    ControlId.CUSTOM_1 -> TouchLookConfig.BUTTON_1
+    else -> TouchLookConfig.BUTTON_2
+  }
+
+  private fun rebuildSources() {
+    for (i in 0 until TouchLookConfig.SOURCES) {
+      sourceButtons[i] = touchLook.targets(i)
+        .mapNotNull { name -> Button.entries.firstOrNull { it.name == name } }
+        .toTypedArray()
+    }
+  }
+
+  private fun startSource(i: Int) {
+    if (sourceHeld[i]) return
+    sourceHeld[i] = true
+    sourceSince[i] = SystemClock.uptimeMillis()
+    applySource(i, sourceSince[i])
+    if (touchLook.hasTurbo(i) && !turboRunning) {
+      turboRunning = true
+      lookHandler.postDelayed(turboTick, TURBO_TICK_MS)
+    }
+  }
+
+  private fun stopSource(i: Int) {
+    if (!sourceHeld[i]) return
+    sourceHeld[i] = false
+    applySource(i, SystemClock.uptimeMillis())
+  }
+
+  /** Brings the source's buttons to what they should be now: held, and, with turbo, in the down half of a period. */
+  private fun applySource(i: Int, now: Long) {
+    val want = sourceHeld[i] && (!touchLook.hasTurbo(i) || Turbo.pressed(now - sourceSince[i], touchLook.turboMs))
+    if (want == sourceAsserted[i]) return
+    sourceAsserted[i] = want
+    for (b in sourceButtons[i]) {
+      if (want) acquire(b) else releaseButton(b)
+    }
+  }
+
+  private fun turboStep() {
+    val now = SystemClock.uptimeMillis()
+    var any = false
+    for (i in 0 until TouchLookConfig.SOURCES) {
+      if (sourceHeld[i] && touchLook.hasTurbo(i)) {
+        applySource(i, now)
+        any = true
+      }
+    }
+    if (any) {
+      lookHandler.postDelayed(turboTick, TURBO_TICK_MS)
+    } else {
+      turboRunning = false
+    }
+  }
+
+  /** The T button: swipe to look on or off, while playing. The game's setting follows, as the menu's does. */
+  private fun toggleLook() {
+    val next = touchLook.copy(enabled = !touchLook.enabled)
+    touchLook = next // only the switch changed: nothing held is let go
+    onLookSwitched?.invoke(next.enabled)
+  }
+
+  /**
+   * A touch came down. On a control, that control takes it (a held custom button 0 or 1 also takes the look).
+   * On empty space it is the second tap of a double tap (held: on the right half it also turns the camera,
+   * on the left half it is also the dynamic left stick), or turns the camera, or is the dynamic left stick's.
+   */
+  private fun touchDown(event: MotionEvent, index: Int, pointer: Int, x: Float, y: Float) {
+    val id = hit(x, y)
+    if (id != null) {
+      down(x, y, pointer)
+      if ((id == ControlId.CUSTOM_0 || id == ControlId.CUSTOM_1) && held[id] == pointer && lookOn && lookPointer == -1) {
+        startLook(event, index, pointer)
+      }
+      return
+    }
+    val side = if (x < width / 2f) 0 else 1
+    val source = TouchLookConfig.TAP_LEFT + side
+    val second = tapDetector.down(pointer, event.eventTime, x, y, side, sourceButtons[source].isNotEmpty())
+    if (second) {
+      tapPointer[side] = pointer
+      startSource(source)
+      if (side == 1) {
+        if (lookOn && lookPointer == -1) startLook(event, index, pointer)
+      } else if (dynStickOn && stickPointer[0] == -1) {
+        startDynamicStick(x, y, pointer)
+      }
+    } else if (lookOn && lookPointer == -1 && inLookArea(x)) {
+      startLook(event, index, pointer)
+    } else if (dynStickOn && side == 0 && stickPointer[0] == -1) {
+      startDynamicStick(x, y, pointer)
+    }
+  }
+
+  // the dynamic left stick: centred where the finger came down, drawn there while it is down
+  private var dynActive = false
+  private var dynCx = 0f
+  private var dynCy = 0f
+  private val dynSpec = ControlSpec(ControlId.LEFT_STICK, 0f, 0f, 1f)
+
+  private fun startDynamicStick(x: Float, y: Float, pointer: Int) {
+    dynActive = true
+    dynCx = x
+    dynCy = y
+    stickPointer[0] = pointer
+    moveStick(0, x, y)
+  }
+
+  /** The left stick's size and opacity, at the dynamic stick's place. */
+  private fun dynamicSpec(s: ControlSpec): ControlSpec {
+    dynSpec.cx = dynCx
+    dynSpec.cy = dynCy
+    dynSpec.radius = s.radius
+    dynSpec.visible = s.visible
+    dynSpec.opacity = s.opacity
+    return dynSpec
   }
 
   private fun stickIndex(id: ControlId) = if (id == ControlId.LEFT_STICK) 0 else 1
@@ -793,7 +1156,7 @@ class OnScreenController @JvmOverloads constructor(
   /** Keeps the layout for the next game and the next edit. */
   fun saveLayout() {
     val l = layout ?: return
-    OverlayStore.save(context, l, width.toFloat(), height.toFloat())
+    OverlayStore.save(context, l, width.toFloat(), height.toFloat(), layoutKey)
   }
 
   /** The default layout (kept once saved). */
@@ -808,7 +1171,7 @@ class OnScreenController @JvmOverloads constructor(
   /** Drops unsaved edits. */
   fun reloadLayout() {
     if (width == 0 || height == 0) return
-    layout = OverlayStore.load(context, width.toFloat(), height.toFloat())
+    layout = OverlayStore.load(context, width.toFloat(), height.toFloat(), layoutKey)
     select(null)
     onLayoutChanged?.invoke()
     invalidate()
@@ -816,6 +1179,22 @@ class OnScreenController @JvmOverloads constructor(
 
   private companion object {
     const val STICK_DEAD_ZONE = 0.15f
+
+    /** How often the look's stick is read and sent while there is motion (ms): well over a game's frame rate. */
+    const val LOOK_TICK_MS = 4L
+
+    /** How far a resting finger's reading may wander before it counts as a move (pixels): the flicker of a touch panel. */
+    const val LOOK_PLAY_PX = 2.5f
+
+    /** How often a turbo's buttons are brought to where the period puts them (ms). */
+    const val TURBO_TICK_MS = 5L
+
+    /** A tap: a touch that lifts within this (ms) and has moved less than this (dp)... */
+    const val TAP_MAX_MS = 220L
+    const val TAP_SLOP_DP = 14f
+
+    /** ...and a double tap's second touch lands within this (dp) of the first. */
+    const val TAP_NEAR_DP = 140f
     val ACCENT = 0xFF8BC34A.toInt()
     val DPAD_BUTTONS = listOf(
       ControlPainter.DPAD_UP to Button.DPAD_UP,

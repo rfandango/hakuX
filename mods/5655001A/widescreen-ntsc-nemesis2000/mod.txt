@@ -1,0 +1,26 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Baldur's Gate - Dark Alliance {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 1
+search 44246000 00F843C7 -> 44246000 00BA43C7
+# 2
+search 44246C00 00F843C7 -> 44246C00 00BA43C7
+# 3
+search 6C0000F8 43C74424 -> 6C0000BA 43C74424
+# 4
+search 680000A0 4350 -> 68000070 4350
+# 5
+search 680000A0 4350 -> 68000070 4350
+# 6
+search 680000A0 4351 -> 68000070 4351
+# Render Fix A
+search 713DAA3F -> 398EE33F
+# Render Fix B
+search 713DAA3F -> 398EE33F

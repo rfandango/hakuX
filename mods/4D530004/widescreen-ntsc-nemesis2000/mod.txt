@@ -1,0 +1,20 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Halo - Combat Evolved {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: NTSC; XBE CRC32 {55EA3A03}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+offset 0xFE32B: A0A01F
+# Widescreen
+offset 0xFE337: A0A01F
+# Widescreen
+offset 0x1E80E0: AAAA2A
+# Widescreen
+offset 0x4C651: 00E71E
+# Cutscene Letterbox Fix
+offset 0x10A463: 540D

@@ -1,0 +1,103 @@
+name: {Misc} (NTSC - Disc) [Aleron Ives]
+description: This patch is for the NTSC stock default.xbe that comes with the disc. Prepared for this repo by Mega.
+author: PSO Palace/Aleron Ives, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Phantasy Star Online - Episode I & II {Misc} (NTSC - Disc) [Aleron Ives].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by PSO Palace/Aleron Ives.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Keyboard_Patch_English 1 of 2 (If using this, uncheck Keyboard_Patch_Japanese)
+offset 0x5353BD: 3D1F5B5D 3B271F2C 2E2F5C02 03040506 0708090A 0B0C0D01 1F1460
+# Keyboard_Patch_English 2 of 2 (If using this, uncheck Keyboard_Patch_Japanese)
+offset 0x535433: 40232425 5E262A28 295F2B7C 7B7D3A22 1F3C3E3F 1F020304 05060708 090A0B0C 0D011F14 7E
+# Keyboard_Patch_Japanese 1 of 2 (If using this, uncheck Keyboard_Patch_English)
+offset 0x5353BD: 3D1F5B5D 3B271F
+# Keyboard_Patch_Japanese 2 of 2 (If using this, uncheck Keyboard_Patch_English)
+offset 0x535433: 40232425 5E262A28 295F2B7C 7B7D3A22 1F3C3E3F 1F
+# Shop_Patch - Extra download required to use: https://www.jayxbox.com/All-Patches/titles/Phantasy%20Star%20Online%20-%20Episode%20I%20&%20II/Extra/PSO_Shop_Patch.zip
+offset 0x53FFAC: 06000000 03000000 01000000
+# Temple_Patch - Extra download required to use: https://www.jayxbox.com/All-Patches/titles/Phantasy%20Star%20Online%20-%20Episode%20I%20&%20II/Extra/PSO_Xbox_Temple_Patch.zip
+search DEADBEEF -> DEADBEEF
+# Offline_Map_Patch - Extra download required to use: https://www.jayxbox.com/All-Patches/titles/Phantasy%20Star%20Online%20-%20Episode%20I%20&%20II/Extra/PSO_Offline_Map_Patch.zip
+search DEADBEEF -> DEADBEEF
+# Disc_Music_Patch
+offset 0x5499BC: ACDB4800 F0724600 08E34400 CCE34400 C0E34400 18B448
+# Quest_Music_Patch
+offset 0x5420B8: CCE34400 78E24400 C0E3
+# Event_Music_Patch 1 of 2
+offset 0x1BA180: B83C3B44 008D480C 833D4083 63000F0F 44C18B0D B8457200 EB039090 90
+# Event_Music_Patch 2 of 2
+offset 0x1BA204: BA
+# Ending_Music_Patch
+offset 0x1DD5D9: 40344400 7505B854 3B
+# Reticle_Patch
+offset 0x5351C6: 803F0000 00000000 00000000 803F0000 803F0000 00000000 00000000 803F0000 803F0000 803F0000 00000000 803F0000 00000000 00000000 803F0000 803FCDCC CC3ECDCC CC3DCDCC CC3D
+# Full_Word_Select_Patch
+offset 0x28BC1A: 33C0
+# Rain_Patch - 1 of 4
+offset 0x1D2CDA: 9090
+# Rain_Patch - 2 of 4
+offset 0x1D2D03: 833D4083 63001E74 20C7801C 0200000A 000000EB 14833D40 8363001A 7505E82A 000000A1 2C5C6300 C3
+# Rain_Patch - 3 of 4
+offset 0x2B79D4: E83FB3F1 FF
+# Rain_Patch - 4 of 4
+offset 0x41C65E: C0400000 20409A99 993F0000 40410000 48C3
+# Deadzone_Patch
+offset 0x2F8E88: E80F0000 005683EE 04E80600 00005EE9 98000000 668B4424 3C669930 F66601D0 66C1F808 66F7D8C1 E010668B 44243A66 9930F666 01D066C1 F80831C9 8D502882 FA500F47 C889C20F CA82C628 82FE500F 47C8894E 18C3
+# Item_Loss_Prevention_Patch 1 of 18
+offset 0xC1B85: 00
+# Item_Loss_Prevention_Patch 2 of 18
+offset 0xC1BFC: EB08
+# Item_Loss_Prevention_Patch 3 of 18
+offset 0x1FE805: EB
+# Item_Loss_Prevention_Patch 4 of 18
+offset 0x2019CA: EB74
+# Item_Loss_Prevention_Patch 5 of 18
+offset 0x2191B5: 9090
+# Item_Loss_Prevention_Patch 6 of 18
+offset 0x219237: EB08
+# Item_Loss_Prevention_Patch 7 of 18
+offset 0x21A222: 9090
+# Item_Loss_Prevention_Patch 8 of 18
+offset 0x21A29B: EB08
+# Item_Loss_Prevention_Patch 9 of 18
+offset 0x21BF35: 00
+# Item_Loss_Prevention_Patch 10 of 18
+offset 0x21BF6E: EB08
+# Item_Loss_Prevention_Patch 11 of 18
+offset 0x21C2E6: 00
+# Item_Loss_Prevention_Patch 12 of 18
+offset 0x2318E8: 00
+# Item_Loss_Prevention_Patch 13 of 18
+offset 0x23195C: EB08
+# Item_Loss_Prevention_Patch 14 of 18
+offset 0x292904: 00
+# Item_Loss_Prevention_Patch 15 of 18
+offset 0x29297C: EB08
+# Item_Loss_Prevention_Patch 16 of 18
+offset 0x2C677A: 00
+# Item_Loss_Prevention_Patch 17 of 18
+offset 0x2C67ED: EB08
+# Item_Loss_Prevention_Patch 18 of 18
+offset 0x2E0E1E: EB
+# BugFix_Patch 1 of 8
+offset 0x175F0E: 1688969A 0100008A 4017
+# BugFix_Patch 2 of 8
+offset 0x23467B: EB19
+# BugFix_Patch 3 of 8
+offset 0x53FAE8: 0F000000 711C0000 0F000182 32000A00 140002
+# BugFix_Patch 4 of 8
+offset 0x53FB40: 14000000 00000000 19000A19 16000A00 1C0002
+# BugFix_Patch 5 of 8
+offset 0x53FB6C: 19000000 00000000 0F000178 32001E00 190004
+# BugFix_Patch 6 of 8
+offset 0x53FB98: 1E000000 00000000 28000A32 18000A00 180006
+# BugFix_Patch 7 of 8
+offset 0x53FE00: 0F000000 711C0000 23000169 03001400 1C0004
+# BugFix_Patch 8 of 8
+offset 0x54568B: 90707070 60
+# Gibarta_Patch
+offset 0x53FBA0: 14

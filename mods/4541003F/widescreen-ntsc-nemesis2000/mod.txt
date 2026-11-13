@@ -1,0 +1,19 @@
+name: {Widescreen} (NTSC) [Nemesis2000]
+description: Widescreen
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Medal of Honor - Rising Sun {Widescreen} (NTSC) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: All Regions; XBE CRC32 {76103C91}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+offset 0x72BC4: D80D2469 1E00D959 40D94424 08D9F2DD D8D95944 C20800
+# FMV's Fix
+offset 0xEC22C: 68000080 3F6A0050 68000055 44
+# FMV's Fix
+offset 0xEC38C: 18528B54 2430D80D ECC50F
+# FMV's Fix
+offset 0xEC5EC: ABAA2ABE

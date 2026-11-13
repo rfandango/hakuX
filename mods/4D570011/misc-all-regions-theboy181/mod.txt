@@ -1,0 +1,13 @@
+name: {Misc} (All Regions) [theboy181]
+description: 60 FPS
+author: theboy181, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Dr. Muto {Misc} (All Regions) [theboy181].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by theboy181.
+# Region in the file: All Regions; XBE CRC32 {E3E37105}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 60 FPS
+search 0891F403 00008941 7CB80200 00008AD0 8981A800 00 -> 0891F403 00008941 7CB80100 00008AD0 8981A800 00

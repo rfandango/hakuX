@@ -1,0 +1,15 @@
+name: {Misc} (NTSC-JPN) [Jao12345]
+description: 60 FPS. Apply this patch to "U2_Retail.xbe", not "default.xbe".
+author: Jao12345, via Jay's Magic Patches
+region: NTSC, NTSC-J
+
+# Converted from "Unreal II - The Awakening {Misc} (NTSC-JPN) [Jao12345].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jao12345.
+# Region in the file: NTSC, JAPAN; XBE CRC32 {A7ABA5CE}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# [Apply only to U2_Retail.xbe]60 FPS
+search 0000897C 2434C744 24500200 0080E88E 40270085 C0 -> 0000897C 2434C744 24500100 0080E88E 40270085 C0
+# [Apply only to U2_Retail.xbe]60 FPS
+search 98460000 C786C446 00000200 0080C786 C0460000 00 -> 98460000 C786C446 00000100 0080C786 C0460000 00

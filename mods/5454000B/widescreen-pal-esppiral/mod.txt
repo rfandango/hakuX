@@ -1,0 +1,12 @@
+name: {Widescreen} (PAL) [Esppiral]
+author: Esppiral, via Jay's Magic Patches
+region: PAL
+
+# Converted from "MTV's Celebrity Deathmatch {Widescreen} (PAL) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: PAL.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search D9058414 32008B0D E0132D00 D825949B 27008B15 DC132D00 A1443B32 0083C410 515251D9 1C246800 0080BF50 E846F4FD FFA1D813 2D0083C4 1483F803 750AC705 D8132D00 02000000 -> D9053804 19008B0D E0132D00 D825949B 27008B15 DC132D00 A15C7713 0083C410 515251D9 1C246800 0080BF50 E846F4FD FFA1D813 2D0083C4 1483F803 750AC705 D8132D00 02000000

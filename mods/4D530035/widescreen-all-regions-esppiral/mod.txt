@@ -1,0 +1,13 @@
+name: {Widescreen} (All Regions) [Esppiral]
+description: This patch needs to be applied to <b>ALL</b> of the following xbes in the game's main directory.<br>They need to replace the original files, so back them up!<hr><br>default.xbe<br>TopSpin(Career).xbe<br>TopSpin(Game).xbe<br>TopSpin(Menu).xbe<br>TopSpin(Online).xbe<br>TopSpin(PlayerCreator).xbe<br>TopSpin(Shop).xbe<br>TopSpin(Stop).xbe<br>TopSpin(Training).xbe
+author: Esppiral, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "TopSpin {Widescreen} (All Regions) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: All Regions.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search ABAAAA3F -> 398EE33F

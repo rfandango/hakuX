@@ -4,6 +4,10 @@
  *
  *   uncap            every frame presented at once, without waiting for
  *                    vblank (the HLE GPU's HAKUX_HLE_UNCAP)
+ *   fps=N            lock the console's vblank at N Hz (15-240), whatever its
+ *                    video mode, and hold the flips to N a second (a title that
+ *                    swaps without waiting for a vblank too); frame-locked
+ *                    titles run at N/60 of their speed. It replaces uncap
  *   relaunch         a title's reboot into another of its XBEs
  *   loadstate=FILE   boot into a savestate (native/state)
  *   mods=FILE        the run's mods and cheats (native/core/mods.h)
@@ -32,6 +36,7 @@
 
 typedef struct NcOptions {
     bool uncap, async_pipe, prebuild;
+    unsigned fps;               /* the FPS lock, 0: none */
     int64_t video;              /* -1: the core's default */
     int av_pack;                /* NC_AV_PACK_* */
 } NcOptions;

@@ -1,0 +1,13 @@
+name: {480i Fix} (PAL) [Dreamcazman]
+description: 480i Fix
+author: Dreamcazman, via Jay's Magic Patches
+region: PAL
+
+# Converted from "Worms 3D {480i Fix} (PAL) [Dreamcazman].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Dreamcazman.
+# Region in the file: PAL; XBE CRC32 {03056EBE}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 480i (Interlaced) -> 480p (Progressive)
+search 4CBB3200 00008D -> 4CBB3C00 00008D

@@ -1,0 +1,15 @@
+name: {Widescreen} (Global) [Nemesis2000]
+description: Widescreen.<br><br>Apply the correct patch for the corresponding xbe.<br>One for (default.xbe), the other for (offline.xbe).<br>You need to replace both in the game dir.
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Tom Clancy's Splinter Cell - Pandora Tomorrow {Widescreen} (Global) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: Global.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Apply to "default.xbe"
+search 8B55D489 5004C745 D8000000 008B4DD8 894808B8 0000803F 8986B000 00008986 AC000000 -> 894804C7 45D80000 00008948 08B80000 803F8986 AC000000 B8000080 3F8986B0 00000090
+# Apply to "offline.xbe" [-]
+# [off by default in the source] search 8B4C2420 C7442424 00000000 8B442424 894A0489 4208B800 00803F89 86940000 00898690 000000 -> C7442424 00000000 89420489 4208B800 00403F89 86900000 00B80000 803F8986 94000000 909090

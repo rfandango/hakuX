@@ -1,0 +1,13 @@
+name: {Misc} (All Regions) [Jao12345]
+description: 60 FPS
+author: Jao12345, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Crimson Skies - High Road to Revenge {Misc} (All Regions) [Jao12345].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jao12345.
+# Region in the file: All Regions.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 60 FPS
+search 69636500 00000AD7 233D8988 083D2020 6D6F6465 2025643A -> 69636500 00000AD7 233D8888 883C2020 6D6F6465 2025643A

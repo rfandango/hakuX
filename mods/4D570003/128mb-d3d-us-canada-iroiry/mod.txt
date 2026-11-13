@@ -1,0 +1,41 @@
+name: {128mb D3D} (US_CANADA) [iroiry]
+description: 128mb D3D allocation patch. Credit to Andy Anderson for these values. These follow a known working pattern! Not guaranteed to work, give it a try!
+author: iroiry, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "NHL Hitz 2002 {128mb D3D} (US_CANADA) [iroiry].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by iroiry.
+# Region in the file: US/CANADA.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 128mb D3D Allocation Patch 1 @ 0x000043DB (Header)
+search 6800B0FF 036A0050 FF15406D 2B0085C0 -> 6800B0FF 076A0050 FF15406D 2B0085C0
+# 128mb D3D Allocation Patch 2 @ 0x000080F7 (Header)
+search 6800B0FF 036A0057 FF15406D 2B0085C0 -> 6800B0FF 076A0057 FF15406D 2B0085C0
+# 128mb D3D Allocation Patch 3 @ 0x0000827D (Header)
+search 6800B0FF 036A0057 FF15406D 2B0085C0 -> 6800B0FF 076A0057 FF15406D 2B0085C0
+# 128mb D3D Allocation Patch 4 @ 0x0000B901 (Header)
+search 6800B0FF 0381C7FF 3F00006A 0081E700 -> 6800B0FF 0781C7FF 3F00006A 0081E700
+# 128mb D3D Allocation Patch 5 @ 0x0000B9F3 (Header)
+search 6800B0FF 0381C7FF 3F00006A 0081E700 -> 6800B0FF 0781C7FF 3F00006A 0081E700
+# 128mb D3D Allocation Patch 6 @ 0x0000BAD7 (Header)
+search 6800B0FF 036A0052 FF15406D 2B008BF0 -> 6800B0FF 076A0052 FF15406D 2B008BF0
+# 128mb D3D Allocation Patch 7 @ 0x0000BC13 (Header)
+search 6800B0FF 0305FF2F 00002500 F0FFFF6A -> 6800B0FF 0705FF2F 00002500 F0FFFF6A
+# 128mb D3D Allocation Patch 1 @ 0x0000BB91 (Header)
+search 68FFAFFF 036A006A 60894C24 18FFD68B -> 68FFAFFF 076A006A 60894C24 18FFD68B
+# 128mb D3D Allocation Patch 2 @ 0x0000BC6E (Header)
+search 68FFAFFF 036A006A 3D6A038B CEE8D51F -> 68FFAFFF 076A006A 3D6A038B CEE8D51F
+# 128mb D3D Allocation Patch 3 @ 0x0000BC85 (Header)
+search 68FFAFFF 036A006A 026A058B CEE8BE1F -> 68FFAFFF 076A006A 026A058B CEE8BE1F
+# 128mb D3D Allocation Patch 4 @ 0x0000BC9F (Header)
+search 68FFAFFF 036A006A 036A048B CEE8A41F -> 68FFAFFF 076A006A 036A048B CEE8A41F
+# 128mb D3D Allocation Patch 5 @ 0x0000BCB6 (Header)
+search 68FFAFFF 036A006A 3D6A098B CEE88D1F -> 68FFAFFF 076A006A 3D6A098B CEE88D1F
+# 128mb D3D Allocation Patch 6 @ 0x0000BCD5 (Header)
+search 68FFAFFF 03899178 2B00006A 006A3D6A -> 68FFAFFF 07899178 2B00006A 006A3D6A
+# 128mb D3D Allocation Patch 7 @ 0x0000BCFA (Header)
+search 68FFAFFF 036A006A 3D89917C 2B00006A -> 68FFAFFF 076A006A 3D89917C 2B00006A
+# 128mb D3D Allocation Patch 8 @ 0x0000BD9F (Header)
+search 68FFAFFF 036A006A 026A068B CEE8A41E -> 68FFAFFF 076A006A 026A068B CEE8A41E

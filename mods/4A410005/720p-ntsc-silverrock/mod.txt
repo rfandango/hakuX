@@ -1,0 +1,43 @@
+name: {720p} (NTSC) [Silverrock]
+description: 720p
+author: Silverrock, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Goblin Commander - Unleash The Horde {720p} (NTSC) [Silverrock].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Silverrock.
+# Region in the file: NTSC; XBE CRC32 {8E04EB3D}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Limit RAM 64MB (OFF)
+offset 0x124: 01
+# Header Edit - Allowed Media & Region Flags
+# (not imported: media and region flags of a real console) offset 0x220: FF010040 07
+# 16:9
+offset 0x1922: EB
+# 16:9
+offset 0x9544F: 398EE3
+# 16:9
+offset 0xA100A: 398EE33F C7460439 8EE3
+# 16:9
+offset 0xD2EB6: 398EE3
+# 16:9
+offset 0x18F803: 398EE3
+# 16:9
+offset 0x218324: 398EE3
+# Video Mode Table
+offset 0x1E456C: 0005D002 020A0B88 04014900 0005D002 020A0B88 04014800 D002D002 020A0B88 04014900 D002D002 020A0B88 04014802 0005D002 020A0B88 04014902 0005D002 020A0B88 04014300 0005D002 020A0B88 04016000 0005D002
+# 640x480 -> 1280x720
+offset 0x2A3C7: D002
+# 640x480 -> 1280x720
+offset 0x2A461: 00050000 C7860817 0000D002
+# 640x480 -> 1280x720
+offset 0x165A90: 0005
+# 640x480 -> 1280x720
+offset 0x165AE6: D002
+# 640x480 -> 1280x720
+offset 0x184B03: D002
+# 640x480 -> 1280x720
+offset 0x184B96: 0005
+# 640x480 -> 1280x720
+offset 0x1E453C: 0005D002 010606C0 05016000 0005D002

@@ -2,6 +2,7 @@ package com.rfandango.haku_x.data
 
 import android.content.Context
 import android.content.res.AssetManager
+import android.net.Uri
 import android.util.Log
 import org.json.JSONObject
 import java.io.File
@@ -18,6 +19,10 @@ data class ModInfo(
   val author: String,
   val patches: List<Pair<String, String>>,
   val refresh: Int = 0,
+  /** The regions its "region:" line lists (ModRegions); 0: no such line, it fits every disc. */
+  val regions: Int = 0,
+  /** Added by the user in the app (filesDir/user_mods), not packed in the APK. */
+  val user: Boolean = false,
 )
 
 /** A cheat (mods/README.md): its name, note, once, and its code lines as written. */
@@ -31,10 +36,12 @@ class GameMods(val mods: List<ModInfo>, val cheats: List<CheatInfo>) {
 /**
  * The repository's mods/ folder, packed as the APK's assets/mods: a folder
  * per game key (GameOverrides.gameKey: title ID and certificate version,
- * 54430006.6), a cheats.txt and a folder per mod in it.
+ * 54430006.6, or a title ID alone), a cheats.txt and a folder per mod in it.
  */
 object ModCatalog {
   private const val ROOT = "mods"
+  /** A game key of a disc release: its title ID and its certificate version (54430006.6). */
+  private val RELEASE_KEY = Regex("[0-9A-F]{8}\\.\\d+")
   private const val TAG = "hakuX-mods"
   /** Game key (upper case) -> its folder's name as the repository has it. */
   @Volatile private var folders: Map<String, String>? = null
@@ -45,21 +52,81 @@ object ModCatalog {
     map
   }
 
-  private fun folder(context: Context, gameKey: String) = folders(context)[gameKey.uppercase(Locale.ROOT)]
+  /**
+   * The packed folders of a game key, the title's first and then the release's:
+   * 54430006 holds the title's mods that each say the regions they fit (their
+   * "region:" line), 54430006.6 what fits that release only.
+   */
+  private fun gameFolders(context: Context, gameKey: String): List<String> {
+    val key = gameKey.uppercase(Locale.ROOT)
+    val all = folders(context)
+    val title = if (RELEASE_KEY.matches(key)) all[key.substringBefore('.')] else null
+    return listOfNotNull(title, all[key])
+  }
 
-  /** Whether the disc with this game key has mods or cheats. */
-  fun has(context: Context, gameKey: String) = folder(context, gameKey) != null
+  /** The user's own mods and cheats for a game: filesDir/user_mods/<GAME KEY>/<mod>/mod.txt, cheats.txt. */
+  private fun userDir(context: Context, gameKey: String) =
+    File(context.filesDir, "user_mods/${gameKey.uppercase(Locale.ROOT)}")
 
-  /** The disc's mods (by folder name) and cheats (in file order). */
-  fun load(context: Context, gameKey: String): GameMods {
-    val dir = folder(context, gameKey) ?: return GameMods(emptyList(), emptyList())
+  /** Whether the disc with this game key has mods or cheats (packed, or the user's). */
+  fun has(context: Context, gameKey: String) =
+    gameFolders(context, gameKey).isNotEmpty() || userDir(context, gameKey).list().orEmpty().isNotEmpty()
+
+  /**
+   * The disc's mods (the packed ones by folder name, then the user's) and cheats (in file order).
+   * A mod that lists regions is the disc's only if the disc is made for one of them: discRegions
+   * are the disc's (XboxDisc.regions, 0 when not known: only the mods that list none).
+   */
+  fun load(context: Context, gameKey: String, discRegions: Int): GameMods {
     val am = context.assets
-    val base = "$ROOT/$dir"
-    val mods = am.list(base).orEmpty().sorted().mapNotNull { id ->
-      text(am, "$base/$id/mod.txt")?.let { parseMod(id, it) }
+    val dirs = gameFolders(context, gameKey)
+    val packed = dirs.flatMap { dir ->
+      am.list("$ROOT/$dir").orEmpty().sorted().mapNotNull { id ->
+        text(am, "$ROOT/$dir/$id/mod.txt")?.let { parseMod(id, it) }
+      }
+    }.associateBy { it.id }.values.sortedBy { it.id }.filter { ModRegions.fits(it.regions, discRegions) }
+    val packedCheats = dirs.flatMap { dir -> text(am, "$ROOT/$dir/cheats.txt")?.let { parseCheats(it) }.orEmpty() }
+    val user = userDir(context, gameKey)
+    val userMods = user.listFiles().orEmpty().filter { it.isDirectory }.sortedBy { it.name }.mapNotNull { d ->
+      runCatching { File(d, "mod.txt").takeIf { it.isFile }?.readText() }.getOrNull()
+        ?.let { parseMod("user-${d.name}", it).copy(user = true) }
+    }.filter { ModRegions.fits(it.regions, discRegions) }
+    val userCheats = runCatching { File(user, "cheats.txt").takeIf { it.isFile }?.readText() }.getOrNull()
+      ?.let { parseCheats(it) }.orEmpty()
+    return GameMods(packed + userMods, packedCheats + userCheats)
+  }
+
+  /**
+   * Saves a mod the user pasted: its patch lines ("0xADDRESS: <bytes>", "offset 0xPOSITION: <bytes>"
+   * or "search <bytes> -> <bytes>") on their own, which go under [default.xbe], or a whole mod.txt.
+   * Returns its id.
+   */
+  fun saveUserMod(context: Context, gameKey: String, name: String, pasted: String): String {
+    val title = name.trim().ifEmpty { "Custom mod" }
+    val lines = pasted.lines()
+    val hasSection = lines.any { val t = it.trim(); t.startsWith("[") && t.endsWith("]") }
+    val hasName = lines.any { it.trim().lowercase(Locale.ROOT).startsWith("name:") }
+    val body = buildString {
+      if (!hasName) append("name: ").append(title).append('\n')
+      if (!hasSection) append("[default.xbe]\n")
+      append(pasted.trim()).append('\n')
     }
-    val cheats = text(am, "$base/cheats.txt")?.let { parseCheats(it) }.orEmpty()
-    return GameMods(mods, cheats)
+    val root = userDir(context, gameKey)
+    val slug = title.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]+"), "-").trim('-').ifEmpty { "mod" }
+    var folder = slug
+    var n = 2
+    while (File(root, folder).exists()) folder = "$slug-${n++}"
+    val dir = File(root, folder)
+    dir.mkdirs()
+    File(dir, "mod.txt").writeText(body)
+    return "user-$folder"
+  }
+
+  /** Removes a mod the user added (its id as load gives it). */
+  fun deleteUserMod(context: Context, gameKey: String, id: String) {
+    if (!id.startsWith("user-")) return
+    val dir = File(userDir(context, gameKey), id.removePrefix("user-"))
+    if (dir.parentFile?.name.equals(gameKey, ignoreCase = true)) dir.deleteRecursively()
   }
 
   private fun text(am: AssetManager, path: String): String? =
@@ -98,6 +165,7 @@ object ModCatalog {
       author = fields["author"].orEmpty(),
       patches = patches,
       refresh = fields["refresh"]?.toIntOrNull() ?: 0,
+      regions = fields["region"]?.let { ModRegions.parse(it) } ?: 0,
     )
   }
 
@@ -138,8 +206,8 @@ object ModCatalog {
    * paths and host files.
    */
   fun extract(context: Context, gameKey: String, mod: String): List<Pair<String, File>> {
-    val dir = folder(context, gameKey) ?: return emptyList()
     val am = context.assets
+    val dir = gameFolders(context, gameKey).lastOrNull { am.list("$ROOT/$it").orEmpty().contains(mod) } ?: return emptyList()
     val src = "$ROOT/$dir/$mod/files"
     val dst = File(context.filesDir, "mods/${gameKey.uppercase(Locale.ROOT)}/$mod")
     val files = File(dst, "files")
@@ -224,22 +292,72 @@ class ModChoices(context: Context, private val game: String) {
 object ModRun {
   private const val TAG = "hakuX-mods"
 
-  /** The manifest written (null: the game has none), and the run's cheats. */
-  fun write(context: Context, gameKey: String): Pair<File, List<CheatInfo>>? {
-    val game = ModCatalog.load(context, gameKey)
+  /**
+   * The address patches of the "offset" and "search" lines of a mod, by (XBE, line): each becomes
+   * "0xADDRESS: bytes" lines that the core takes, from default.xbe as the disc has it. A line that
+   * doesn't fit the disc (a position the file doesn't have, bytes that are not there: another build
+   * of the game) is an empty list. Other lines aren't in the map.
+   */
+  private fun resolveXbePatches(context: Context, disc: Uri?, mods: List<ModInfo>): Map<Pair<String, String>, List<String>> {
+    val out = HashMap<Pair<String, String>, List<String>>()
+    val todo = LinkedHashMap<Pair<String, String>, Triple<String, String, XbePatch>>()
+    for (mod in mods) {
+      for ((xbe, line) in mod.patches) {
+        val key = xbe to line
+        if (key in out || key in todo) continue
+        val patch = XbePatch.parse(line) ?: continue
+        if (xbe.equals("default.xbe", ignoreCase = true)) {
+          todo[key] = Triple(mod.id, line, patch)
+        } else {
+          Log.w(TAG, "${mod.id}: [$xbe] offset and search lines work in [default.xbe] only")
+          out[key] = emptyList()
+        }
+      }
+    }
+    if (todo.isEmpty()) return out
+    val image = disc?.let { XboxDisc.open(context, it) { d -> d.xbeImage() } }
+    if (image == null) Log.w(TAG, "default.xbe can't be read from the disc: its offset and search lines are skipped")
+    for ((key, v) in todo) {
+      val (id, line, patch) = v
+      val lines = image?.let { patch.resolve(it) }.orEmpty()
+      if (image != null && lines.isEmpty()) {
+        val why = if (patch is XbePatch.Search) "no match on this disc" else "not in this disc's XBE file"
+        Log.w(TAG, "$id: \"${line.take(60)}\": $why")
+      }
+      out[key] = lines
+    }
+    return out
+  }
+
+  /**
+   * The manifest written (null: the game has none), and the run's cheats. disc is the game's
+   * image: its regions say which mods are the game's, and its default.xbe is where the "offset"
+   * and "search" lines land. A mod with one that doesn't fit the disc is left out whole (a patch
+   * made for another build of the game, half done, could break it).
+   */
+  fun write(context: Context, gameKey: String, disc: Uri? = null): Pair<File, List<CheatInfo>>? {
+    val regions = disc?.let { XboxDisc.open(context, it) { d -> d.regions } } ?: 0
+    val game = ModCatalog.load(context, gameKey, regions)
     if (game.isEmpty) return null
     val choices = ModChoices(context, gameKey)
     val lines = mutableListOf<String>()
     val on = game.mods.filter { choices.mod(it.id) }
-    for (mod in on) {
-      for ((disc, file) in ModCatalog.extract(context, gameKey, mod.id)) {
-        lines += "file\t${disc.replace('/', '\\')}\t${file.absolutePath}"
+    for (mod in on.filter { !it.user }) {
+      for ((onDisc, file) in ModCatalog.extract(context, gameKey, mod.id)) {
+        lines += "file\t${onDisc.replace('/', '\\')}\t${file.absolutePath}"
       }
     }
+    val resolved = resolveXbePatches(context, disc, game.mods)
     for (mod in game.mods) {
+      if (mod.patches.any { (xbe, line) -> resolved[xbe to line]?.isEmpty() == true }) {
+        Log.w(TAG, "${mod.id}: doesn't fit this disc, left out")
+        continue
+      }
       // a mod that is off too: a savestate saved with it on gets the disc's bytes back
       val kind = if (mod in on) "patch" else "patchoff"
-      for ((xbe, line) in mod.patches) lines += "$kind\t$xbe\t${mod.id}\t$line"
+      for ((xbe, line) in mod.patches) {
+        for (p in resolved[xbe to line] ?: listOf(line)) lines += "$kind\t$xbe\t${mod.id}\t$p"
+      }
     }
     on.maxOfOrNull { it.refresh }?.takeIf { it > 0 }?.let { lines += "refresh\t$it" }
     for (c in game.cheats) {

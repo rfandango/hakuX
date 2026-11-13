@@ -115,6 +115,34 @@ class XboxDisc private constructor(private val ch: FileChannel, private val part
     return null
   }
 
+  /**
+   * default.xbe as the disc has it, for the mods' "offset" and "search" lines (XbePatch): the headers'
+   * part of the file (as the core reads it, to the first section's data or sizeof_headers) and each
+   * section's bytes with the address it loads at. Null when the XBE can't be read, or is over MAX_IMAGE.
+   */
+  fun xbeImage(): XbeImage? {
+    val x = xbe ?: return null
+    val h = x.headers
+    val count = h.getInt(0x11C)
+    if (count !in 1..1024) return null
+    val table = headerOffset(x, h.getInt(0x120), count * 0x38) ?: return null
+    val sections = ArrayList<XbeSection>()
+    var headerEnd = 0x1000L
+    var total = 0L
+    for (i in 0 until count) {
+      val s = table + i * 0x38
+      val va = h.getInt(s + 0x04).toLong() and MASK
+      val raw = h.getInt(s + 0x0C).toLong() and MASK
+      val size = h.getInt(s + 0x10).toLong() and MASK
+      headerEnd = minOf(headerEnd, raw)
+      if (size == 0L) continue
+      total += size
+      if (total > MAX_IMAGE) return null
+      sections.add(XbeSection(va, raw, readAt(ch, x.start + raw, size.toInt())?.array() ?: return null))
+    }
+    return XbeImage(x.base, maxOf(headerEnd, h.getInt(0x108).toLong() and MASK), sections)
+  }
+
   /** A header address (a virtual address in the XBE) as an offset into the headers. */
   private fun headerOffset(x: Xbe, va: Int, len: Int): Int? {
     val off = (va.toLong() and MASK) - x.base
@@ -139,6 +167,7 @@ class XboxDisc private constructor(private val ch: FileChannel, private val part
     private const val XBE_MAGIC = 0x48454258 // "XBEH"
     private const val MASK = 0xFFFFFFFFL
     private const val MAX_READ = 4L shl 20
+    private const val MAX_IMAGE = 48L shl 20
     private val PARTITIONS = longArrayOf(0L, 0x18300000L, 0xFD90000L, 0x2080000L)
 
     /** Opens the image at uri and runs use on it; null when it isn't an Xbox disc or can't be read. */

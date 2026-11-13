@@ -1,0 +1,17 @@
+name: {Misc} (All Regions) [retroszur]
+description: Can be applied to any version of the game.<b>This patch remedies what I assume to be the problematic Ammo count positioning in the HUD.
+author: retroszur, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Grand Theft Auto - Vice City {Misc} (All Regions) [retroszur].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by retroszur.
+# Region in the file: All Regions; XBE CRC32 {4D66BBDE}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# HUD Fix
+search 713DAA3F 0000803F EC51983F -> 5555D53F 0000803F EC51983F
+# HUD Fix
+search 00008C42 00007042 0000 -> 0000A642 00007042 0000
+# HUD Fix
+search CDCCCC3A 9A993940 0A -> 49507C3A 9A993940 0A

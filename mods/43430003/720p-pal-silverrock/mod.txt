@@ -1,0 +1,19 @@
+name: {720p} (PAL) [Silverrock]
+description: Pal specifically, .xiso CRC 858d44ad. Overclock or cpu upgrade recommended.
+author: Silverrock, via Jay's Magic Patches
+region: PAL
+
+# Converted from "Dino Crisis 3 {720p} (PAL) [Silverrock].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Silverrock.
+# Region in the file: PAL; XBE CRC32 {47F05612}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Limit RAM 64MB (OFF)
+search 01001800 00007003 01000400 000077F2 E4A854D8 1F -> 01001800 00007003 01000000 000077F2 E4A854D8 1F
+# 16:9
+search 00745EE8 CAFDFFFF 85C07D05 575757EB 21F60524 01 -> 00745EE8 CAFDFFFF 85C0EB05 575757EB 21F60524 01
+# Video Mode Table
+search 00030404 04C00401 48008002 E0010107 07880401 49008002 E00101 -> 00030404 04C00401 48000005 D002020A 0B880401 49008002 E00101
+# 640x480 -> 1280x720
+search CCCCCCCC C7053CF3 48008002 0000C705 40F34800 E0010000 33C0C3CC CCCCCCCC -> CCCCCCCC C7053CF3 48000005 0000C705 40F34800 D0020000 33C0C3CC CCCCCCCC

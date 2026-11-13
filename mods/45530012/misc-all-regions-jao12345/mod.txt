@@ -1,0 +1,13 @@
+name: {Misc} (All Regions) [Jao12345]
+description: 60 FPS
+author: Jao12345, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Hitman - Contracts {Misc} (All Regions) [Jao12345].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jao12345.
+# Region in the file: All Regions; XBE CRC32 {43357D2D}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 60 FPS
+search 19CCEB16 C7864413 00000200 0000EB0A C7864413 00 -> 19CCEB16 C7864413 00000100 0000EB0A C7864413 00

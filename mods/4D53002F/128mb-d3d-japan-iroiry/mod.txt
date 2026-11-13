@@ -1,0 +1,41 @@
+name: {128mb D3D} (JAPAN) [iroiry]
+description: 128mb D3D allocation patch. Credit to Andy Anderson for these values. These follow a known working pattern! Not guaranteed to work, give it a try!
+author: iroiry, via Jay's Magic Patches
+region: NTSC-J
+
+# Converted from "Tenku {128mb D3D} (JAPAN) [iroiry].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by iroiry.
+# Region in the file: JAPAN.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Remove Ram Limit Flag @ 0x124
+search 05000000 340EFDA8 78801700 00000100 -> 01000000 340EFDA8 78801700 00000100
+# 128mb D3D Allocation Patch 1 @ 0x000F883D (.text)
+search 6800B0FF 036A0057 FF154C6E 170085C0 -> 6800B0FF 076A0057 FF154C6E 170085C0
+# 128mb D3D Allocation Patch 2 @ 0x000F89A1 (.text)
+search 6800B0FF 036A0083 C04050FF 154C6E17 -> 6800B0FF 076A0083 C04050FF 154C6E17
+# 128mb D3D Allocation Patch 3 @ 0x000F9741 (.text)
+search 6800B0FF 0381C7FF 3F00006A 0081E700 -> 6800B0FF 0781C7FF 3F00006A 0081E700
+# 128mb D3D Allocation Patch 4 @ 0x000F9833 (.text)
+search 6800B0FF 0381C7FF 3F00006A 0081E700 -> 6800B0FF 0781C7FF 3F00006A 0081E700
+# 128mb D3D Allocation Patch 5 @ 0x000F9917 (.text)
+search 6800B0FF 036A0052 FF154C6E 17008BF0 -> 6800B0FF 076A0052 FF154C6E 17008BF0
+# 128mb D3D Allocation Patch 6 @ 0x000F9A53 (.text)
+search 6800B0FF 0305FF2F 00002500 F0FFFF6A -> 6800B0FF 0705FF2F 00002500 F0FFFF6A
+# 128mb D3D Allocation Patch 1 @ 0x000F99D1 (.text)
+search 68FFAFFF 036A006A 60894C24 18FFD68B -> 68FFAFFF 076A006A 60894C24 18FFD68B
+# 128mb D3D Allocation Patch 2 @ 0x000F9AAE (.text)
+search 68FFAFFF 036A006A 3D6A038B CEE8951D -> 68FFAFFF 076A006A 3D6A038B CEE8951D
+# 128mb D3D Allocation Patch 3 @ 0x000F9AC5 (.text)
+search 68FFAFFF 036A006A 026A058B CEE87E1D -> 68FFAFFF 076A006A 026A058B CEE87E1D
+# 128mb D3D Allocation Patch 4 @ 0x000F9ADF (.text)
+search 68FFAFFF 036A006A 036A048B CEE8641D -> 68FFAFFF 076A006A 036A048B CEE8641D
+# 128mb D3D Allocation Patch 5 @ 0x000F9AF6 (.text)
+search 68FFAFFF 036A006A 3D6A098B CEE84D1D -> 68FFAFFF 076A006A 3D6A098B CEE84D1D
+# 128mb D3D Allocation Patch 6 @ 0x000F9B15 (.text)
+search 68FFAFFF 03899178 2B00006A 006A3D6A -> 68FFAFFF 07899178 2B00006A 006A3D6A
+# 128mb D3D Allocation Patch 7 @ 0x000F9B3A (.text)
+search 68FFAFFF 036A006A 3D89917C 2B00006A -> 68FFAFFF 076A006A 3D89917C 2B00006A
+# 128mb D3D Allocation Patch 8 @ 0x000F9BDF (.text)
+search 68FFAFFF 036A006A 026A068B CEE8641C -> 68FFAFFF 076A006A 026A068B CEE8641C

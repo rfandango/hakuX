@@ -1,0 +1,13 @@
+name: {480i Fix} (JPN) [Akoako]
+description: 480p Auto
+author: Akoako, via Jay's Magic Patches
+region: NTSC-J
+
+# Converted from "Breakdown {480i Fix} (JPN) [Akoako].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Akoako.
+# Region in the file: JPN.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 480i (Interlaced) -> 480p (Progressive)
+search 83C92089 0D -> 83C90089 0D

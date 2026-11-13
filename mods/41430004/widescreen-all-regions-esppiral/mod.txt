@@ -1,0 +1,13 @@
+name: {Widescreen} (All Regions) [Esppiral]
+description: Widescreen. Code also found in Alpha version!
+author: Esppiral, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Turok Evolution {Widescreen} (All Regions) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: All Regions; XBE CRC32 {2681481F}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search 0000803F 742C4874 16487537 8B842490 -> 0000403F 742C4874 16487537 8B842490

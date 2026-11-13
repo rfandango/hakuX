@@ -1,0 +1,13 @@
+name: {Widescreen} (All Regions) [Esppiral]
+description: Widescreen.<br>HUD is stretched wide as a side effect.<br>Apply interlaced patch for best results.
+author: Esppiral, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Kung Fu Chaos {Widescreen} (All Regions) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: All Regions; XBE CRC32 {1F962D6A}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search 00ABAAAA 3FC7 -> 00398EE3 3FC7

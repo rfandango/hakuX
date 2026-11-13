@@ -1,0 +1,13 @@
+name: {480i Fix} (NTSC) [ProgScan]
+description: 480i Fix
+author: ProgScan, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Manhunt {480i Fix} (NTSC) [ProgScan].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by ProgScan.
+# Region in the file: NTSC; XBE CRC32 {5E8920C3}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 480i (Interlaced) -> 480p (Progressive)
+search 8B152C8E 4100 -> 33D29090 9090

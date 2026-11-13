@@ -1,0 +1,13 @@
+name: {480i Fix} (NTSC) [Shanafan]
+description: 480p Forced
+author: Shanafan, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Colin McRae Rally 3 {480i Fix} (NTSC) [Shanafan].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Shanafan.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 480i (Interlaced) -> 480p (Progressive)
+search 83C840A3 C05B5100 83C414C3 83C820A3 C05B5100 -> 83C820A3 C05B5100 83C414C3 83C800A3 C05B5100

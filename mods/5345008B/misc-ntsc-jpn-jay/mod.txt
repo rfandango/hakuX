@@ -1,0 +1,13 @@
+name: {MISC} (NTSC+JPN) [Jay]
+description: W.I.P
+author: Jay, via Jay's Magic Patches
+region: NTSC, NTSC-J
+
+# Converted from "Spartan - Total Warrior {MISC} (NTSC+JPN) [Jay].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jay.
+# Region in the file: NTSC, JAPAN.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Remove Bloom
+offset 0x29F429: 3030662C 302E3030 662C302E 3030662C 302E3030 66090A64 65662063 312C2030 2E303066 2C302E30 30662C30 2E303066 2C302E30 3066090A 64656620 63322C20 302E3066 2C302E30 662C302E 30662C30 2E30

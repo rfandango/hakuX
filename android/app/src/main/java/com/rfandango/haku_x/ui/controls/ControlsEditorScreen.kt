@@ -22,10 +22,12 @@ import com.rfandango.haku_x.overlay.OverlayEditorBar
 /**
  * The on-screen controller's layout editor outside a game: the same
  * controller and editor bar as in-game, full screen in landscape like the
- * game, over a dark backdrop.
+ * game, over a dark backdrop. With a game's key it edits that game's own
+ * layout (kept for it alone); without one, the app's, which every game uses
+ * until it has one of its own.
  */
 @Composable
-fun ControlsEditorScreen(onClose: () -> Unit) {
+fun ControlsEditorScreen(gameKey: String? = null, onClose: () -> Unit) {
   val activity = LocalActivity.current
   DisposableEffect(activity) {
     val window = activity?.window
@@ -53,7 +55,10 @@ fun ControlsEditorScreen(onClose: () -> Unit) {
           GradientDrawable.Orientation.TL_BR,
           intArrayOf(0xFF2B3A2E.toInt(), 0xFF141A16.toInt(), 0xFF0A0C0B.toInt()),
         )
-        val overlay = OnScreenController(ctx).apply { editing = true }
+        val overlay = OnScreenController(ctx).apply {
+          editing = true
+          layoutKey = gameKey // before it is sized: that is when the layout is loaded
+        }
         controller[0] = overlay
         addView(overlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         addView(

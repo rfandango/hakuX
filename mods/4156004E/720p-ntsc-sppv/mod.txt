@@ -1,0 +1,103 @@
+name: {720p} (NTSC) [SPPV]
+description: <br>1. Make 1st XBE by enabling all options.<br>2. Make 2nd XBE by disabling Toggle group.<br>3. Launch and enter gameplay using 1st XBE. See glicthes.<br>4. Reset and launch using 2nd XBE.<br><br>I have added many float edits on the off-chance some, (or all of them), fix the various HUD/UI issues.
+author: SPPV, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "DOOM 3 - Resurrection of Evil {720p} (NTSC) [SPPV].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by SPPV.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Toggle Group - Enable for 1st XBE, Disable for 2nd
+offset 0xFC3D: 00050000 C781E403 0000D002
+# Toggle Group - Enable for 1st XBE, Disable for 2nd
+offset 0x11D985: 00050000 8B4D70C7 4110D002
+# Header Edit - Limit RAM 64MB (OFF)
+offset 0x124: 01
+# Header Edit - Allowed Media & Region Flags
+# (not imported: media and region flags of a real console) offset 0x220: FF0100C0
+# Video Modes
+offset 0x49E807: 020A0B88 741481FD 020A0B88 740C81FD 020A0B
+# Video Modes
+offset 0x4A9B48: 020A0B88 04014900 8002E001 020A0B88 04014800 D002E001 020A0B88 04014900 D002E001 020A0B88 04014802 8002E001 020A0B88 04014902 8002E001 020A0B
+# Video Modes
+offset 0x4A9D64: 020A0B88 04024900 8002E001 020A0B88 04024800 D002E001 020A0B88 04024900 D002E001 020A0B88 04024802 8002E001 020A0B88 04024902 8002E001 020A0B
+# Back Buffer
+offset 0x154A8C: D0020000 680005
+# Back Buffer
+offset 0x2C0DE7: D0020000 680005
+# Dirty Disc Error Screen
+offset 0x3D25: 00050000 C74500D0 02
+# MemoryAllocation
+offset 0x28779F: 00050000 C74610D0 02
+# CreateRenderTargetSurface
+offset 0x2E3B6C: 00050000 C74710D0 02
+# UpdateViewport
+offset 0x2E3C61: 00050000 C74710D0 02
+# Some Data Blob
+offset 0x539DB8: 00050000 D002
+# Optional Float Edits
+offset 0x4B76A: 34446800 00A0
+# Optional Float Edits
+offset 0x575AA: 34446800 00A0
+# Optional Float Edits
+offset 0x577EF: 34446800 00A0
+# Optional Float Edits
+offset 0x578AC: A0
+# Optional Float Edits
+offset 0x578ED: A0
+# Optional Float Edits
+offset 0x5792C: 3444
+# Optional Float Edits
+offset 0x5796D: 3444
+# Optional Float Edits
+offset 0x5C7C9: 34446800 00A0
+# Optional Float Edits
+offset 0x126423: 34446800 00A0
+# Optional Float Edits
+offset 0x126507: 34446800 00A0
+# Optional Float Edits
+offset 0x12655E: 34446800 00A0
+# Optional Float Edits
+offset 0x1265F8: 34446800 00A0
+# Optional Float Edits
+offset 0x126AF9: 34446800 00A0
+# Optional Float Edits
+offset 0x1271DF: 34446800 00A0
+# Optional Float Edits
+offset 0x127203: 34446800 00A0
+# Optional Float Edits
+offset 0x12728E: 34446800 00A0
+# Optional Float Edits
+offset 0x1272B2: 34446800 00A0
+# Optional Float Edits
+offset 0x12749F: 34446800 00A0
+# Optional Float Edits
+offset 0x1274C2: 34446800 00A0
+# Optional Float Edits
+offset 0x12753F: 34446800 00A0
+# Optional Float Edits
+offset 0x127562: 34446800 00A0
+# Optional Float Edits
+offset 0x1282F4: 34446800 00A0
+# Optional Float Edits
+offset 0x12901C: 34446800 00A0
+# Optional Float Edits
+offset 0x12906F: 34446800 00A0
+# Optional Float Edits
+offset 0x1292B5: 34446800 00A0
+# Optional Float Edits
+offset 0x129534: 34446800 00A0
+# Optional Float Edits
+offset 0x12A339: 34446800 00A0
+# Optional Float Edits
+offset 0x288F7F: 34446800 00A0
+# Optional Float Edits
+offset 0x2EED60: 34446800 00A0
+# Optional Float Edits
+offset 0x2EFC49: 34446800 00A0
+# Optional Float Edits
+offset 0x309716: 3444
+# Optional Float Edits
+offset 0x309759: 3444

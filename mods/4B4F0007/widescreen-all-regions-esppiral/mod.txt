@@ -1,0 +1,15 @@
+name: {Widescreen} (All Regions) [Esppiral]
+description: Widescreen
+author: Esppiral, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Dynasty Warriors 5 {Widescreen} (All Regions) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: All Regions.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen A
+search 00002044 00BF7F47 00008043 00008C43 00009343 0000E843 0000E043 00000044 00005843 3B4671BF 0000A0BF 00202A44 -> 00805544 00BF7F47 00008043 00008C43 00009343 0000E843 0000E043 00000044 00005843 3B4671BF 0000A0BF 00202A44
+# Widescreen B
+search 35FA8E3C 713DAA3F E02E6542 00C0DA45 F0272642 0000A843 0000FD43 00007043 0000B043 FDAD003D 00803B45 0080BB44 -> F1A2BE3C 713DAA3F E02E6542 00C0DA45 F0272642 0000A843 0000FD43 00007043 0000B043 FDAD003D 00803B45 0080BB44

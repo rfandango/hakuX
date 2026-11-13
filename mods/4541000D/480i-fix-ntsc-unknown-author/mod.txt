@@ -1,0 +1,23 @@
+name: {480i Fix} (NTSC) [Author Unknown]
+description: Apply only "Default.xbe" options to "default.xbe", "Driving.xbe" options to "driving.xbe" etc (Uncheck options that aren't for the file you're patching, all 3 must be patched individually.)
+author: Unknown author, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "007 - Agent Under Fire {480i Fix} (NTSC) [Author Unknown].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Unknown author.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Default.xbe - 480i Fix
+offset 0x3C12C: 9090518B 4E2C528B 56046A00
+# Default.xbe - 480i Fix
+offset 0x429C8: 9090528B 502C6A00
+# Bond.xbe - 480i Fix
+offset 0x18463C: 9090518B 4E2C528B 56046A00
+# Bond.xbe - 480i Fix
+offset 0x189A08: 9090528B 502C6A00
+# Driving.xbe - 480i Fix
+offset 0x10643C: 9090518B 4E2C528B 56046A00
+# Driving.xbe - 480i Fix
+offset 0x10D398: 9090528B 502C6A00

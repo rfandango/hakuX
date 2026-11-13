@@ -1,0 +1,13 @@
+name: {Misc} (NTSC) [Jao12345]
+description: 60 FPS
+author: Jao12345, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Teenage Mutant Ninja Turtles 3 - Mutant Nightmare (TMNT) {Misc} (NTSC) [Jao12345].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jao12345.
+# Region in the file: NTSC; XBE CRC32 {5197BB1D}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 60 FPS
+search CCCCCCCC CCCCCCCC 566A028B F1E8B66A 130083C4 04 -> CCCCCCCC CCCCCCCC 566A018B F1E8B66A 130083C4 04

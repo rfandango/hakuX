@@ -1,0 +1,15 @@
+name: {Misc} (GLOBAL) [Nemesis2000]
+description: Cutscene Bars Fix
+author: Nemesis2000, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Lara Croft Tomb Raider - Legend {Misc} (GLOBAL) [Nemesis2000].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Nemesis2000.
+# Region in the file: GLOBAL; XBE CRC32 {76142D14}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Cutscenes Letterbox Fix
+search 0F118424 D4000000 F30F1005 18923000 6A006802 0400008D 44241CF3 0F114C24 -> 0F118424 D4000000 F30F1005 B4913000 6A006802 0400008D 44241CF3 0F114C24
+# Cutscenes Letterbox Fix
+search F30F1015 C4993000 516A02F3 0F114424 14F30F11 442418F3 0F114424 38F30F11 -> F30F1015 48A12E00 516A02F3 0F114424 14F30F11 442418F3 0F114424 38F30F11

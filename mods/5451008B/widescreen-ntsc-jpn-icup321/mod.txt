@@ -1,0 +1,13 @@
+name: {Widescreen} (NTSC-JPN) [icup321]
+description: Widescreen
+author: icup321, via Jay's Magic Patches
+region: NTSC, NTSC-J
+
+# Converted from "Nickelodeon - Tak 2 - The Staff Of Dreams {Widescreen} (NTSC-JPN) [icup321].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by icup321.
+# Region in the file: NTSC, JAPAN; XBE CRC32 {076350BC}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+offset 0x3D26F0: 398EE3

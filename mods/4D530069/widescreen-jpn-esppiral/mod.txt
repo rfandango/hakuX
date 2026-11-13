@@ -1,0 +1,15 @@
+name: {Widescreen} (JPN) [Esppiral]
+description: BETA widescreen edit available too, uncheck whichever you don't need.
+author: Esppiral, via Jay's Magic Patches
+region: NTSC-J
+
+# Converted from "Dinosaur Hunting - Ushinawareta Daichi {Widescreen} (JPN) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: JPN.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search ABAAAA3F 8B4D088B 51245268 B0814600 E8574102 008B4508 -> 398EE33F 8B4D088B 51245268 B0814600 E8574102 008B4508
+# OPTIONAL EDIT - FOR BETA VERSION ONLY
+search ABAAAA3F 8B4D088B 51245268 D0A94600 E8574102 008B4508 -> 398EE33F 8B4D088B 51245268 D0A94600 E8574102 008B4508

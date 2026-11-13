@@ -1,0 +1,17 @@
+name: {480i Fix} (NTSC) [Author Unknown]
+description: 480i Fix. Select the appropriate toggles for your xbe.
+author: Unknown author, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Final Fight - Streetwise {480i Fix} (NTSC) [Author Unknown].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Unknown author.
+# Region in the file: NTSC; XBE CRC32 {769B6775}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Apply to both xbe files - Header Edit - Allowed Media & Region Flags
+# (not imported: media and region flags of a real console) offset 0x220: FF0100C0 07
+# Apply only to default.xbe - 480i (Interlaced) -> 480p (Progressive)
+offset 0x166D71: 508B4730 508B472C 518B4F04 906A0090
+# Apply only to FinalF.xbe - 480i (Interlaced) -> 480p (Progressive)
+offset 0x96061: 508B4730 508B472C 518B4F04 906A0090

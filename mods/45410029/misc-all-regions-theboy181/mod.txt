@@ -1,0 +1,13 @@
+name: {Misc} (All Regions) [theboy181]
+description: 60 FPS
+author: theboy181, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "TY the Tasmanian Tiger {Misc} (All Regions) [theboy181].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by theboy181.
+# Region in the file: All Regions; XBE CRC32 {08622B71}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 60 FPS
+search 00000000 00800100 00000200 00000000 00000000 00 -> 00000000 00800100 00000100 00000000 00000000 00

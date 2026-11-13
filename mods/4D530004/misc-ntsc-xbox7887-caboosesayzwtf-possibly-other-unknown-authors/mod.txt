@@ -1,0 +1,27 @@
+name: {Misc} (NTSC) [Combo Authors]
+description: Singleplayer Mode in Multiplayer maps.
+author: Xbox7887, CabooseSayzWTF, possibly other unknown authors, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Halo - Combat Evolved {Misc} (NTSC) [Combo Authors].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Xbox7887, CabooseSayzWTF, possibly other unknown authors.
+# Region in the file: NTSC; XBE CRC32 {55EA3A03}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Limit RAM 64MB (Off)
+offset 0x124: 01
+# Singleplayer Mode in Multiplayer maps
+offset 0x8C4C7: 01
+# Singleplayer Mode in Multiplayer maps
+offset 0x8E27B: 01
+# Singleplayer Mode in Multiplayer maps
+offset 0xB74E4: 01
+# Singleplayer Mode in Multiplayer maps
+offset 0xB7557: 01
+# Singleplayer Mode in Multiplayer maps
+offset 0xB8ED6: 01
+# Singleplayer Mode in Multiplayer maps
+offset 0x175927: 57908B96 08230000 6A00
+# Singleplayer Mode in Multiplayer maps
+offset 0x19E17D: 33C040C2 0400

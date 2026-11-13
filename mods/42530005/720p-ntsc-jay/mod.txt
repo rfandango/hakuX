@@ -1,0 +1,23 @@
+name: {720p} (NTSC) [Jay]
+description: **WORK IN PROGRESS** Must be applied to "Morrowind.xbe" (not Default.xbe)
+author: Jay, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "The Elder Scrolls III - Morrowind - Game of the Year Edition {720p} (NTSC) [Jay].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Jay.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Limit RAM 64MB (OFF)
+search 01001F00 00007003 01000500 0000D7CB D8A81CB6 38 -> 01001F00 00007003 01000100 0000D7CB D8A81CB6 38
+# Header Edit - Allowed Media & Region Flags
+search 02000000 01000000 03000000 02000000 80 -> FF0100C0 01000000 03000000 02000000 80
+# Back Buffer
+search C7400880 020000C7 400CE001 0000 -> C7400800 050000C7 400CD002 0000
+# Journal Fix
+search 00002044 0000F043 -> 00006144 0000A043
+# Display Mode
+search 04014800 8002E001 01070788 -> 04014800 0005D002 020A0B88
+# Frustrum Widescreen Fix Vertical FOV (1.0f -> 0.75f) (optional)
+search D83DA06F 3900D905 A06F3900 -> D83DA06F 3900D905 30003600

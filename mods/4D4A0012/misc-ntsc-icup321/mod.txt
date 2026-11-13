@@ -1,0 +1,17 @@
+name: {Misc} (NTSC) [icup321]
+description: 60 FPS Patch, Scissor Fix, No AA
+author: icup321, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Psychonauts {Misc} (NTSC) [icup321].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by icup321.
+# Region in the file: NTSC; XBE CRC32 {391152D8}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# ?
+offset 0x1B0CAB: 01
+# ?
+offset 0x1B0CCA: 20
+# ?
+offset 0x268DC0: 90909090 9090

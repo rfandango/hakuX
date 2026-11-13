@@ -1,0 +1,18 @@
+name: {Widescreen} (NTSC) [Esppiral]
+author: Esppiral, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Red Faction 2 {Widescreen} (NTSC) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen A
+search D80DB0F3 A9008D44 242CDA35 40EFB700 D91C2451 5250E8F6 -> D80D08D3 03008D44 242CDA35 40EFB700 D91C2451 5250E8F6
+# Widescreen B
+search D80DB0F3 A900D8F1 D95C2400 DDD8E821 BD0000D9 0544EFB7 -> D80D08D3 0300D8F1 D95C2400 DDD8E821 BD0000D9 0544EFB7
+# Widescreen C
+search D80D9C01 20008945 F48D45FC 8945F0D9 5DF88B45 F08B55F4 -> D80D3CCA 1B008945 F48D45FC 8945F0D9 5DF88B45 F08B55F4
+# Widescreen D
+search D80DB0F3 A900DA35 40EFB700 D91C2452 5051E8FE E5FCFF8B -> D80D08D3 0300DA35 40EFB700 D91C2452 5051E8FE E5FCFF8B

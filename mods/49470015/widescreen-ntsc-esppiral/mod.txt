@@ -1,0 +1,14 @@
+name: {Widescreen} (NTSC) [Esppiral]
+author: Esppiral, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Apex {Widescreen} (NTSC) [Esppiral].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Esppiral.
+# Region in the file: NTSC+PAL.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Widescreen
+search D80DF892 1D00D9F2 DDD8D87C 2410D99E 90050000 8B15E41A 23008B42 2C894148 8B15E41A 23008B42 308B8E24 01000089 -> D80DE87A 1400D9F2 DDD8D87C 2410D99E 90050000 8B15E41A 23008B42 2C894148 8B15E41A 23008B42 308B8E24 01000089
+# Widescreen
+search 0000803F 00000000 66466F63 616C0000 00000000 00000000 00000000 00000000 00000000 00000000 02000000 00000000 -> C7719C3F 00000000 66466F63 616C0000 00000000 00000000 00000000 00000000 00000000 00000000 02000000 00000000

@@ -1,0 +1,15 @@
+name: {Misc} (NTSC) [Zorlon]
+description: "Reboot fix for some Modchip users" ~ Zorlon
+author: Zorlon, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "All-Star Baseball '04 featuring Derek Jeter {Misc} (NTSC) [Zorlon].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by Zorlon.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# Header Edit - Allowed Media & Region Flags
+# (not imported: media and region flags of a real console) offset 0x21C: FF
+# Fix
+offset 0x1E0C21: EB

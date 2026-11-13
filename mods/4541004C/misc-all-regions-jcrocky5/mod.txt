@@ -1,0 +1,17 @@
+name: {Misc} (All Regions) [JCRocky5]
+description: HDD patch + optional right stick left/right inversion
+author: JCRocky5, via Jay's Magic Patches
+region: NTSC, NTSC-J, PAL
+
+# Converted from "Harry Potter and the Prisoner of Azkaban {Misc} (All Regions) [JCRocky5].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by JCRocky5.
+# Region in the file: All Regions; XBE CRC32 {3FAF60C4}.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# patch out dirty disc call
+offset 0x196D89: 90909090 90
+# Invert RStickX
+offset 0x21A0E6: BCA122
+# Invert RStickX
+offset 0x21A1BC: 800000B8

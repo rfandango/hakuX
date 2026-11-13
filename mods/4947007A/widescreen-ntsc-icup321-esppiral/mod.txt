@@ -1,0 +1,13 @@
+name: {Widescreen} (NTSC) [Multi Authors]
+description: Widescreen
+author: icup321/Esppiral, via Jay's Magic Patches
+region: NTSC
+
+# Converted from "Dragon Ball Z Sagas {Widescreen} (NTSC) [Multi Authors].JMP" of Xbox Magic Patches by Jay (https://github.com/JayYardley/Magic-Patches-by-Jay),
+# a Jay's Magic Patcher (.JMP) patch made by icup321/Esppiral.
+# Region in the file: NTSC.
+# "offset" is a position in the XBE file and "search" the first place its bytes are (mods/README.md).
+
+[default.xbe]
+# 16:9
+offset 0x297504: 398EE33F
