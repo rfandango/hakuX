@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import androidx.core.content.edit
 import com.rfandango.haku_x.BuildConfig
+import com.rfandango.haku_x.NativeCoreActivity
 import java.util.Locale
 
 /** The settings a game can override; the rest are the app's for every game. */
@@ -104,6 +105,13 @@ class RunSettings(private val app: AppPrefs, private val game: GameOverrides?) {
   val pal60 get() = bool(GameSetting.PAL60, app.pal60)
   val avPack get() = text(GameSetting.AV_PACK, app.avPack)
 
-  fun videoFlags(): Int = AppPrefs.videoFlags(screenFormat, video480p, video720p, video1080i, pal60)
+  /**
+   * The console's video format: the setting, except that "stretch" puts the console in widescreen,
+   * so the games that support it render at 16:9 (the picture is then stretched over the screen).
+   */
+  private val consoleFormat
+    get() = if (aspectRatio == NativeCoreActivity.ASPECT_STRETCH) AppPrefs.FORMAT_WIDESCREEN else screenFormat
+
+  fun videoFlags(): Int = AppPrefs.videoFlags(consoleFormat, video480p, video720p, video1080i, pal60)
   fun xboxLanguage(): Int = AppPrefs.xboxLanguage(language)
 }

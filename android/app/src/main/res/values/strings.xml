@@ -194,7 +194,7 @@
   <string name="settings_aspect_auto">Auto (the game\'s own; 16:9 when the console is widescreen)</string>
   <string name="settings_aspect_4_3">4:3</string>
   <string name="settings_aspect_16_9">16:9 (widescreen games)</string>
-  <string name="settings_aspect_stretch">Stretch to the screen</string>
+  <string name="settings_aspect_stretch">Stretch to screen</string>
   <string name="settings_fxaa">FXAA anti-aliasing</string>
   <string name="settings_fxaa_desc">Smooths jagged edges of each frame. Most useful at low resolution scales: a scale above the screen\'s already smooths them.</string>
   <string name="settings_upscale">Upscaling filter</string>

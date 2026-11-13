@@ -248,7 +248,8 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
     }
     /* The HLE GPU's render scale, 1-4x the title's resolution. */
     args += "scale=${settings.renderScale}"
-    /* The picture's shape: auto (the game's), 4:3, 16:9 or stretch. */
+    /* The picture's shape: auto (the game's), 4:3, 16:9 or stretch. Stretch fills the whole screen; that the
+     * game renders at 16:9 first is the console's video format (videoFlags). */
     args += "aspect=${settings.aspectRatio}"
     /* Anti-aliasing: FXAA over each frame, and how a picture smaller than
      * the screen is scaled up (a larger one is averaged down). */
@@ -1395,6 +1396,8 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
     const val PREF_ASPECT = "aspect_ratio"
     const val ASPECT_AUTO = "auto"
 
+    /** Widescreen games render at 16:9, and the picture fills the screen beyond that. */
+    const val ASPECT_STRETCH = "stretch"
     const val PREF_FXAA = "fxaa"
     const val PREF_UPSCALE = "upscale_filter"
     const val UPSCALE_BILINEAR = "bilinear"

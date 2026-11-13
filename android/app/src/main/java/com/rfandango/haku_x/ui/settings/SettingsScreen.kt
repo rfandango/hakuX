@@ -515,7 +515,7 @@ internal val SCALES = (1..4).toList()
 @Composable
 internal fun scaleLabel(value: Int) = if (value == 1) stringResource(R.string.settings_scale_native) else "${value}x"
 
-internal val ASPECTS = listOf("auto", "4:3", "16:9", "stretch")
+internal val ASPECTS = listOf("auto", "4:3", "16:9", NativeCoreActivity.ASPECT_STRETCH)
 
 internal val UPSCALERS = listOf(NativeCoreActivity.UPSCALE_BILINEAR, NativeCoreActivity.UPSCALE_SGSR)
 internal val FORMATS = listOf(AppPrefs.FORMAT_NORMAL, AppPrefs.FORMAT_LETTERBOX, AppPrefs.FORMAT_WIDESCREEN)
@@ -598,7 +598,7 @@ internal fun upscaleLabel(value: String) = when (value) {
 internal fun aspectLabel(value: String) = when (value) {
   "4:3" -> R.string.settings_aspect_4_3
   "16:9" -> R.string.settings_aspect_16_9
-  "stretch" -> R.string.settings_aspect_stretch
+  NativeCoreActivity.ASPECT_STRETCH -> R.string.settings_aspect_stretch
   else -> R.string.settings_aspect_auto
 }
 
