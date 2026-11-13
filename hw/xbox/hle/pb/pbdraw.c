@@ -1290,8 +1290,11 @@ static float zfloat_clear(uint32_t v, bool z24)
     return isfinite(f) ? MIN(f * zfloat_scale(z24), 1.0f) : 1.0f;
 }
 
+static void note_cover(void);
+
 static void clear(uint32_t flags)
 {
+    note_cover();
     sync_rt();
     uint32_t hr = R(NV097_SET_CLEAR_RECT_HORIZONTAL), vr = R(NV097_SET_CLEAR_RECT_VERTICAL);
     /* the rect in logical pixels, the surface's scaled by its antialiasing */
@@ -1394,6 +1397,57 @@ static void front_stale(const PbObj *o)
 
 static void shown_part(const PbObj *o, uint32_t ax, uint32_t ay, uint32_t *w, uint32_t *h);
 
+/* Titles that flip with another screen-sized colour target bound than the one
+ * their frame is in: Area 51 draws its menus and HUD into its back buffer,
+ * then binds a second screen-sized target (the scene's, drawn earlier in the
+ * frame) without drawing into it, and calls its Present. The bound target is
+ * not the frame there, so for these titles the swap presents the last
+ * screen-sized colour target the frame drew or cleared into. */
+static const uint32_t k_last_drawn_titles[] = {
+    0x4D570005u,                        /* Area 51 (USA) */
+};
+
+static bool last_drawn_title(void)
+{
+    for (unsigned i = 0; i < ARRAY_SIZE(k_last_drawn_titles); i++) {
+        if (g_hle.title.xbe.title_id == k_last_drawn_titles[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static uint32_t g_cover;                /* that target, or 0; reset at each swap */
+
+/* A draw or a clear: the bound target, if it covers the display, is the last. */
+static void note_cover(void)
+{
+    if (!g_pd.rt || !g_pd.disp_w || !g_pd.disp_h || !last_drawn_title()) {
+        return;
+    }
+    const PbObj *o = obj_of(g_pd.rt);
+    if (o && o->d.pitch && o->d.w >= g_pd.disp_w && o->d.h >= g_pd.disp_h) {
+        g_cover = g_pd.rt;
+    }
+}
+
+/* The swap's target: the bound one, or for those titles the last one drawn. */
+static uint32_t swap_target(uint32_t bound)
+{
+    const uint32_t c = g_cover;
+    g_cover = 0;
+    if (!c || c == bound || !obj_of(c) || !last_drawn_title()) {
+        return bound;
+    }
+    static bool logged;
+    if (!logged) {
+        logged = true;
+        hle_log("hakuX-hle-pb", "title %08x: swaps present the last screen-sized target drawn (%u), not the "
+                "bound one (%u)", g_hle.title.xbe.title_id, c, bound);
+    }
+    return c;
+}
+
 /* FLIP_INCREMENT_WRITE: the frame in the colour target is done; it goes to
  * the display (D3D's vblank handler shows it there too). The display scans
  * out D3D's back buffer, whatever is bound: a target smaller than the
@@ -1421,6 +1475,12 @@ static void swap(void)
             ax = g_pd.frame_aa_x;
             ay = g_pd.frame_aa_y;
         }
+    }
+    const uint32_t target = swap_target(id);
+    if (target != id) {
+        id = target;
+        fo = obj_of(id);
+        ax = ay = 1;
     }
     coh_shown(fo);                          /* the front buffer's path keeps its memory */
     /* memory the CPU wrote is the image now: nothing older to fill */
@@ -3203,6 +3263,7 @@ static void emit(HleCmdDraw *d)
                                                                            : 1.0f / 16777216.0f;
     d->ff_ubo = HLE_DRAW_NO_UBO;
     drawlog(d, ff);
+    note_cover();
     HleCmdDraw *c = begin(HLE_OP_DRAW, sizeof(*c));
     *c = *d;
     hle_fe_commit();
