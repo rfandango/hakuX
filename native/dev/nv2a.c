@@ -131,6 +131,8 @@ static uint64_t now_ns(void)
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
+static void flip_limit(void);   /* the FPS lock's, below */
+
 static uint32_t *reg(uint32_t off)
 {
     return (uint32_t *)(g_regs + off);
@@ -528,6 +530,7 @@ static void nv2a_write(void *opaque, uint32_t off, uint64_t value, unsigned size
         /* the vblank ISR's flip: the read counter advances (modulo), and a
          * FLIP_STALL in the push buffer may go on */
         if (value & 2) {
+            flip_limit();
             uint32_t s = ld(NV_PGRAPH_SURFACE), n;
             do {
                 const uint32_t mod = (s >> 28) & 7, rd = (s >> 24) & 7;
@@ -792,14 +795,58 @@ void nc_dev_nv2a_init(void)
  * times this; a frame-locked title paced by vblanks then runs that much
  * faster unless the mod halves its steps. */
 static unsigned g_mode_hz = 60, g_vblank_mul = 1;
+/* The app's FPS lock (options.h fps=): the vblank at exactly this rate,
+ * whatever the video mode and the mods say; 0: none. */
+static unsigned g_lock_hz;
+
+/* The video mode's frame period: what a savestate keeps, whatever rate the
+ * run has (a lock or a mod's). */
+static uint64_t mode_frame_ns(void)
+{
+    return g_mode_hz == 50 ? 20000000ull : FRAME_NS;
+}
 
 void nc_dev_nv2a_refresh(unsigned hz)
 {
     g_mode_hz = hz == 50 ? 50 : 60;
-    const uint64_t f = (hz == 50 ? 20000000ull : FRAME_NS) / g_vblank_mul;
+    const uint64_t f = g_lock_hz ? 1000000000ull / g_lock_hz : mode_frame_ns() / g_vblank_mul;
     if (__atomic_exchange_n(&g_frame_ns, f, __ATOMIC_RELAXED) != f) {
-        nc_log("hakuX-native", "nv2a: vblank at %u Hz (the video mode%s)", g_mode_hz * g_vblank_mul,
-               g_vblank_mul > 1 ? ", a mod's rate" : "");
+        if (g_lock_hz) {
+            nc_log("hakuX-native", "nv2a: vblank at %u Hz (the FPS lock)", g_lock_hz);
+        } else {
+            nc_log("hakuX-native", "nv2a: vblank at %u Hz (the video mode%s)", g_mode_hz * g_vblank_mul,
+                   g_vblank_mul > 1 ? ", a mod's rate" : "");
+        }
+    }
+}
+
+void nc_dev_nv2a_lock_rate(unsigned hz)
+{
+    g_lock_hz = hz >= 15 && hz <= 240 ? hz : 0;
+    nc_dev_nv2a_refresh(g_mode_hz);
+}
+
+/* The FPS lock's second half: a title that flips when it pleases (immediate
+ * swaps, not on a vblank) isn't held by the vblank's rate, so a flip comes
+ * no sooner than one period after the one before it. The sleep is in the
+ * guest's write of the flip, like a frame limiter's in the swap call. */
+static void flip_limit(void)
+{
+    static uint64_t last;
+    const unsigned hz = g_lock_hz;
+    if (!hz) {
+        return;
+    }
+    const uint64_t period = 1000000000ull / hz;
+    const uint64_t t = now_ns();
+    const uint64_t due = last + period;
+    if (t < due) {
+        const struct timespec ts = {(time_t)(due / 1000000000ull), (long)(due % 1000000000ull)};
+        while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL) != 0) {
+        }
+        last = due;
+    } else {
+        last = t > due + period ? t : due;  /* well behind: start again from now */
     }
 }
 
@@ -958,7 +1005,7 @@ static bool pages_get(NcRd *r, uint8_t *base, uint32_t size, uint32_t n)
 
 bool nc_nv2a_state_save(NcBuf *b)
 {
-    const NcNv2aState st = {__atomic_load_n(&g_vblanks, __ATOMIC_RELAXED), g_frame_ns,
+    const NcNv2aState st = {__atomic_load_n(&g_vblanks, __ATOMIC_RELAXED), mode_frame_ns(),
                             pages_put(NULL, g_regs, NV2A_SIZE, true)};
     nc_rec_put(b, &nc_rec_NcNv2aState, &st);
     pages_put(b, g_regs, NV2A_SIZE, false);

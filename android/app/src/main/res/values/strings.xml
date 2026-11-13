@@ -177,6 +177,10 @@
   <string name="settings_export_logs_failed">Couldn\'t export the logs</string>
   <string name="settings_uncap">Uncapped frame rate</string>
   <string name="settings_uncap_desc">Present every frame at once instead of waiting for the display.</string>
+  <string name="settings_fps_lock">FPS lock</string>
+  <string name="settings_fps_lock_desc">Holds the game to this many frames a second: the console\'s refresh rate, and a limit on the frames it shows. A game that counts frames runs faster or slower with it. It replaces the uncapped frame rate.</string>
+  <string name="settings_fps_lock_off">Off</string>
+  <string name="settings_fps_lock_value">%1$d fps</string>
   <string name="settings_scale">Resolution scale</string>
   <string name="settings_scale_value">%1$dx the game\'s resolution</string>
   <string name="settings_scale_native">1x (native)</string>

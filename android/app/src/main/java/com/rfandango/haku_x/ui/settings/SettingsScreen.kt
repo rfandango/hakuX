@@ -87,6 +87,8 @@ fun SettingsScreen(
   var showFps by remember { mutableStateOf(prefs.showFps) }
   var showHitches by remember { mutableStateOf(prefs.showHitches) }
   var scale by remember { mutableIntStateOf(prefs.renderScale) }
+  var fpsLock by remember { mutableIntStateOf(prefs.fpsLock) }
+  var fpsLockDialog by remember { mutableStateOf(false) }
   var aspect by remember { mutableStateOf(prefs.aspectRatio) }
   var fxaa by remember { mutableStateOf(prefs.fxaa) }
   var upscale by remember { mutableStateOf(prefs.upscaleFilter) }
@@ -190,6 +192,16 @@ fun SettingsScreen(
           stringResource(R.string.settings_applies_next_start),
         checked = uncapped,
         onChange = { uncapped = it; prefs.uncapped = it },
+      )
+      ListItem(
+        headlineContent = { Text(stringResource(R.string.settings_fps_lock)) },
+        supportingContent = {
+          Text(
+            fpsLockLabel(fpsLock) + ". " + stringResource(R.string.settings_fps_lock_desc) + " " +
+              stringResource(R.string.settings_applies_next_start),
+          )
+        },
+        modifier = Modifier.clickable { fpsLockDialog = true },
       )
       ListItem(
         headlineContent = { Text(stringResource(R.string.settings_aspect)) },
@@ -424,6 +436,15 @@ fun SettingsScreen(
       current = avPack,
       onPick = { avPack = it; prefs.avPack = it; cableDialog = false },
       onDismiss = { cableDialog = false },
+    )
+  }
+  if (fpsLockDialog) {
+    ChoiceDialog(
+      title = stringResource(R.string.settings_fps_lock),
+      options = FPS_LOCKS.map { it to fpsLockLabel(it) },
+      current = fpsLock,
+      onPick = { fpsLock = it; prefs.fpsLock = it; fpsLockDialog = false },
+      onDismiss = { fpsLockDialog = false },
     )
   }
   if (aspectDialog) {

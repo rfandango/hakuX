@@ -10,6 +10,7 @@ import java.util.Locale
 enum class GameSetting(val key: String) {
   UNCAPPED("uncapped"),
   RENDER_SCALE("render_scale"),
+  FPS_LOCK("fps_lock"),
   ASYNC_SHADERS("async_shaders"),
   PREBUILD_SHADERS("prebuild_shaders"),
   CONSOLE_TIMING("console_timing"),
@@ -87,6 +88,7 @@ class RunSettings(private val app: AppPrefs, private val game: GameOverrides?) {
 
   val uncapped get() = bool(GameSetting.UNCAPPED, app.uncapped)
   val renderScale get() = game?.get(GameSetting.RENDER_SCALE)?.toIntOrNull() ?: app.renderScale
+  val fpsLock get() = game?.get(GameSetting.FPS_LOCK)?.toIntOrNull() ?: app.fpsLock
   val asyncShaders get() = bool(GameSetting.ASYNC_SHADERS, app.asyncShaders)
   val prebuildShaders get() = bool(GameSetting.PREBUILD_SHADERS, app.prebuildShaders)
   /** A debug build's setting (off for A/B); always on in the others. */

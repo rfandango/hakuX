@@ -47,6 +47,7 @@ private fun onOff(value: String) =
 private val SECTIONS: List<Pair<Int, List<Overridable>>> = listOf(
   R.string.settings_section_display to listOf(
     Overridable(GameSetting.UNCAPPED, R.string.settings_uncap, ON_OFF, { it.uncapped.toString() }, { onOff(it) }),
+    Overridable(GameSetting.FPS_LOCK, R.string.settings_fps_lock, FPS_LOCKS.map { "$it" }, { it.fpsLock.toString() }, { fpsLockLabel(it.toInt()) }),
     Overridable(GameSetting.ASPECT, R.string.settings_aspect, ASPECTS, { it.aspectRatio }, { stringResource(aspectLabel(it)) }),
   ),
   R.string.settings_section_graphics to listOf(

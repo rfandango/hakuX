@@ -5,6 +5,7 @@
 #include "native/core/options.h"
 #include "native/core/core.h"
 #include "native/core/mods.h"
+#include "native/dev/dev.h"
 #include "native/hle/hle_native.h"
 #include "native/kernel/kernel.h"
 #include "native/net/net.h"
@@ -31,6 +32,8 @@ bool nc_option(NcOptions *o, const char *arg)
         /* net=, dns=, lanport=, lanbcast=, lanpeers=, kai= (native/net/net.h) */
     } else if (!strcmp(arg, "uncap")) {
         o->uncap = true;
+    } else if ((v = value(arg, "fps="))) {
+        o->fps = (unsigned)atoi(v);
     } else if (!strcmp(arg, "relaunch")) {
         nc_core_set_relaunch(true);
     } else if (!strcmp(arg, "dash")) {
@@ -82,7 +85,8 @@ void nc_options_apply(const NcOptions *o)
     if (o->video >= 0) {
         nc_log("hakuX-app", "video flags %08llx, AV pack %d", (unsigned long long)o->video, o->av_pack);
     }
-    if (o->uncap) {
+    nc_dev_nv2a_lock_rate(o->fps);
+    if (o->uncap && !o->fps) {
         setenv("HAKUX_HLE_UNCAP", "1", 1);
     } else {
         unsetenv("HAKUX_HLE_UNCAP");

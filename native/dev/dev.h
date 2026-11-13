@@ -21,6 +21,8 @@ void nc_dev_nv2a_refresh(unsigned hz);
 void nc_dev_nv2a_display_mode(uint32_t pitch, uint32_t xfmt, unsigned hz, uint32_t fb);
 /* A mod's vblank: n times the video mode's rate (1-4; before the title boots). */
 void nc_dev_nv2a_vblank_multiply(unsigned n);
+/* The app's FPS lock: the vblank at hz (15-240) whatever the video mode; 0: off. */
+void nc_dev_nv2a_lock_rate(unsigned hz);
 /* A vsync of the panel the frames are shown on (host monotonic ns, the
  * Choreographer's frame time): the vblank locks to the panel's. */
 void nc_dev_nv2a_display_vsync(uint64_t ns);

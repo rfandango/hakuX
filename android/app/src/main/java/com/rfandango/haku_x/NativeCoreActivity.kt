@@ -236,8 +236,11 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
     }
     /* The app's settings, under this game's overrides. */
     val settings = RunSettings(AppPrefs(this), gameOverrides())
-    /* Every frame presented at once, no vblank wait: on by default. */
-    if (settings.uncapped) {
+    /* Every frame presented at once, no vblank wait: on by default. The FPS
+     * lock (the console's refresh rate in Hz) takes its place. */
+    if (settings.fpsLock > 0) {
+      args += "fps=${settings.fpsLock}"
+    } else if (settings.uncapped) {
       args += "uncap"
     }
     /* The HLE GPU's render scale, 1-4x the title's resolution. */
