@@ -5,7 +5,7 @@ import org.json.JSONObject
 import java.io.File
 
 /** How a control is drawn and how it takes touches. */
-enum class ControlKind { FACE, GEM, PILL, STICK, DPAD, TRIGGER, CLICK, MENU }
+enum class ControlKind { FACE, GEM, PILL, STICK, DPAD, TRIGGER, CLICK, MENU, CUSTOM }
 
 /** The on-screen controller's controls, laid out like the original Xbox controller (the "Duke"). */
 enum class ControlId(val kind: ControlKind, val label: String, val title: String) {
@@ -25,6 +25,14 @@ enum class ControlId(val kind: ControlKind, val label: String, val title: String
   RIGHT_STICK_CLICK(ControlKind.CLICK, "RS", "Right stick click"),
   DPAD(ControlKind.DPAD, "", "D-pad"),
   MENU(ControlKind.MENU, "", "Menu"),
+
+  /** Switches swipe to look on and off while playing. */
+  TOUCH_LOOK(ControlKind.CUSTOM, "T", "Touch look switch"),
+
+  /** Custom buttons: each presses the one or two pad buttons it is mapped to (0 and 1 can be swiped from while held). */
+  CUSTOM_0(ControlKind.CUSTOM, "0", "Custom button 0"),
+  CUSTOM_1(ControlKind.CUSTOM, "1", "Custom button 1"),
+  CUSTOM_2(ControlKind.CUSTOM, "2", "Custom button 2"),
 }
 
 /**
@@ -56,12 +64,28 @@ class OverlayLayout(val controls: MutableMap<ControlId, ControlSpec>) {
  */
 object OverlayStore {
   private const val FILE = "overlay_layout.json"
+
+  /**
+   * The layout file: the app's (game null), or a game's own, named after its key. A game without
+   * one of its own uses the app's.
+   */
+  private fun file(context: Context, game: String?): File =
+    if (game == null) {
+      File(context.filesDir, FILE)
+    } else {
+      File(context.filesDir, "overlay_layout_" + game.replace(Regex("[^A-Za-z0-9._-]"), "_").take(80) + ".json")
+    }
+
+  /** Whether a game has a layout of its own. */
+  fun hasOwn(context: Context, game: String): Boolean = file(context, game).isFile
   /** Half see-through: the game stays visible under the controls. */
   const val DEFAULT_OPACITY = 0.5f
 
-  fun load(context: Context, w: Float, h: Float): OverlayLayout {
+  /** A game's own layout if it has one, else the app's (the defaults if there is none). */
+  fun load(context: Context, w: Float, h: Float, game: String? = null): OverlayLayout {
     val layout = defaults(w, h)
-    val file = File(context.filesDir, FILE)
+    val own = if (game != null) file(context, game) else null
+    val file = if (own != null && own.isFile) own else file(context, null)
     if (!file.isFile) {
       return layout
     }
@@ -83,7 +107,8 @@ object OverlayStore {
     return layout
   }
 
-  fun save(context: Context, layout: OverlayLayout, w: Float, h: Float) {
+  /** Keeps the layout: as the app's (game null) or as the game's own. */
+  fun save(context: Context, layout: OverlayLayout, w: Float, h: Float, game: String? = null) {
     val controls = JSONObject()
     for ((id, spec) in layout.controls) {
       controls.put(id.name, JSONObject().apply {
@@ -98,15 +123,15 @@ object OverlayStore {
       put("version", 2)
       put("controls", controls)
     }
-    val file = File(context.filesDir, FILE)
-    val tmp = File(context.filesDir, "$FILE.tmp")
+    val file = file(context, game)
+    val tmp = File(file.parentFile, file.name + ".tmp")
     tmp.writeText(root.toString())
     tmp.renameTo(file)
   }
 
-  /** Back to the defaults (the file goes). */
-  fun reset(context: Context) {
-    File(context.filesDir, FILE).delete()
+  /** The file goes: a game goes back to the app's layout, the app's back to the defaults. */
+  fun reset(context: Context, game: String? = null) {
+    file(context, game).delete()
   }
 
   const val MIN_OPACITY = 0.1f
@@ -151,6 +176,13 @@ object OverlayStore {
 
     put(ControlId.LEFT_TRIGGER, h * 0.12f, h * 0.12f, h * 0.075f)
     put(ControlId.RIGHT_TRIGGER, w - h * 0.12f, h * 0.12f, h * 0.075f)
+
+    // the custom buttons: a row across the top centre, clear of the triggers
+    val custom = h * 0.045f
+    put(ControlId.TOUCH_LOOK, w / 2 - h * 0.30f, h * 0.11f, custom)
+    put(ControlId.CUSTOM_0, w / 2 - h * 0.10f, h * 0.11f, custom)
+    put(ControlId.CUSTOM_1, w / 2 + h * 0.10f, h * 0.11f, custom)
+    put(ControlId.CUSTOM_2, w / 2 + h * 0.30f, h * 0.11f, custom)
     return OverlayLayout(c)
   }
 }

@@ -43,10 +43,13 @@ import com.rfandango.haku_x.data.Network
 import com.rfandango.haku_x.data.PlayerSlot
 import com.rfandango.haku_x.data.RunSettings
 import com.rfandango.haku_x.data.SaveStateStore
+import com.rfandango.haku_x.data.TouchLookConfig
+import com.rfandango.haku_x.data.TouchLookStore
 import com.rfandango.haku_x.data.XboxDisc
 import com.rfandango.haku_x.data.hdd.Dashboard
 import com.rfandango.haku_x.input.PadRouter
 import com.rfandango.haku_x.overlay.OverlayEditorBar
+import com.rfandango.haku_x.overlay.OverlayStore
 import com.rfandango.haku_x.ui.theme.AppTheme
 import java.io.File
 import java.util.TimeZone
@@ -700,6 +703,13 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
     overlay.setControllerListener(OverlayBridge())
     overlay.onMenuButtonTapped = { showMenu() }
     overlay.drawGate = overlayPacer::mayDraw
+    val game = gameKey()
+    overlay.layoutKey = game // the layout this game has of its own, else the app's
+    overlay.onLookSwitched = { on ->
+      // the T button: the game's setting follows, as the menu's switch sets it
+      TouchLookStore.setGame(this, game, TouchLookStore.forGame(this, game).copy(enabled = on))
+    }
+    overlay.touchLook = TouchLookStore.forGame(this, game)
     mLayout?.addView(overlay)
     overlayPacer.attach(overlay)
     onScreenController = overlay
@@ -751,7 +761,15 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
         updateControllerVisibility()
       },
       getString(R.string.overlay_menu_controllers) to ::showPlayers,
+      getString(R.string.overlay_menu_look) to ::showTouchLook,
     )
+    if (OverlayStore.hasOwn(this, gameKey())) {
+      items += getString(R.string.overlay_menu_app_layout) to {
+        OverlayStore.reset(this, gameKey())
+        onScreenController?.reloadLayout()
+        Toast.makeText(this, R.string.overlay_app_layout_back, Toast.LENGTH_SHORT).show()
+      }
+    }
     if (states) {
       items += getString(R.string.overlay_menu_save_state) to { saveStates.showSlots(save = true) }
       items += getString(R.string.overlay_menu_load_state) to { saveStates.showSlots(save = false) }
@@ -838,9 +856,233 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
       .setNegativeButton(android.R.string.cancel, null))
   }
 
+  /**
+   * The menu's Touch camera: swipe to look and how it feels, for this game,
+   * changed at once and kept. The game stays stopped while it is open, so a
+   * change is tried by resuming.
+   */
+  private fun showTouchLook() {
+    val key = gameKey()
+    val c = TouchLookStore.forGame(this, key)
+    fun percent(v: Int) = "$v%"
+    fun vertical(v: Int) = if (v == TouchLookConfig.SAME) getString(R.string.look_vertical_same) else percent(v)
+    val items = mutableListOf<Pair<String, () -> Unit>>(
+      getString(R.string.settings_look_enable) + ": " + onOff(c.enabled) to {
+        setTouchLook(key, c.copy(enabled = !c.enabled))
+        showTouchLook()
+      },
+      getString(R.string.settings_look_sensitivity) + ": " + percent(c.sensitivity) to {
+        pickTouchLook(key, R.string.settings_look_sensitivity, TouchLookConfig.SENSITIVITIES, c.sensitivity, ::percent) {
+          c.copy(sensitivity = it)
+        }
+      },
+      getString(R.string.settings_look_vertical) + ": " + vertical(c.sensitivityY) to {
+        pickTouchLook(key, R.string.settings_look_vertical, TouchLookConfig.VERTICALS, c.sensitivityY, ::vertical) {
+          c.copy(sensitivityY = it)
+        }
+      },
+      getString(R.string.settings_look_deadzone) + ": " + percent(c.deadZone) to {
+        pickTouchLook(key, R.string.settings_look_deadzone, TouchLookConfig.DEAD_ZONES, c.deadZone, ::percent) {
+          c.copy(deadZone = it)
+        }
+      },
+      getString(R.string.settings_look_accel) + ": " + getString(TouchLookConfig.accelLabel(c.accel)) to {
+        pickTouchLook(
+          key, R.string.settings_look_accel, TouchLookConfig.ACCELS, c.accel,
+          { getString(TouchLookConfig.accelLabel(it)) },
+        ) { c.copy(accel = it) }
+      },
+      getString(R.string.settings_look_smoothing) + ": " + getString(TouchLookConfig.smoothingLabel(c.smoothing)) to {
+        pickTouchLook(
+          key, R.string.settings_look_smoothing, TouchLookConfig.SMOOTHINGS, c.smoothing,
+          { getString(TouchLookConfig.smoothingLabel(it)) },
+        ) { c.copy(smoothing = it) }
+      },
+      getString(R.string.settings_look_area) + ": " + getString(TouchLookConfig.areaLabel(c.area)) to {
+        pickTouchLook(
+          key, R.string.settings_look_area, TouchLookConfig.AREAS, c.area,
+          { getString(TouchLookConfig.areaLabel(it)) },
+        ) { c.copy(area = it, dynamicStick = c.dynamicStick && it != TouchLookConfig.AREA_ALL) }
+      },
+      getString(R.string.settings_look_invert_x) + ": " + onOff(c.invertX) to {
+        setTouchLook(key, c.copy(invertX = !c.invertX))
+        showTouchLook()
+      },
+      getString(R.string.settings_look_invert_y) + ": " + onOff(c.invertY) to {
+        setTouchLook(key, c.copy(invertY = !c.invertY))
+        showTouchLook()
+      },
+      getString(R.string.settings_look_dynamic) + ": " + onOff(c.dynamicStick) to {
+        if (!c.dynamicStick && c.area == TouchLookConfig.AREA_ALL) {
+          Toast.makeText(this, R.string.look_dynamic_needs_right, Toast.LENGTH_LONG).show()
+        } else {
+          setTouchLook(key, c.copy(dynamicStick = !c.dynamicStick))
+        }
+        showTouchLook()
+      },
+      getString(R.string.look_menu_buttons) + "\u2026" to ::showLookButtons,
+      getString(R.string.look_menu_taps) + "\u2026" to ::showLookTaps,
+      getString(R.string.look_menu_turbo) + "\u2026" to ::showLookTurbo,
+    )
+    if (TouchLookStore.hasOwn(this, key)) {
+      items += getString(R.string.look_menu_use_app) to {
+        setTouchLook(key, null)
+        showTouchLook()
+      }
+    }
+    showMenuDialog(
+      AlertDialog.Builder(this)
+        .setTitle(R.string.look_menu_title)
+        .setItems(items.map { it.first }.toTypedArray()) { _, which -> items[which].second() }
+        .setPositiveButton(android.R.string.ok, null)
+    )
+  }
+
+  private fun onOff(on: Boolean) = getString(if (on) R.string.game_settings_on else R.string.game_settings_off)
+
+  /** What a source is called: a custom button, or a double tap on a half of the screen. */
+  private fun sourceName(source: Int): String = when (source) {
+    TouchLookConfig.TAP_LEFT -> getString(R.string.look_tap_left)
+    TouchLookConfig.TAP_RIGHT -> getString(R.string.look_tap_right)
+    else -> getString(R.string.look_button_n, source)
+  }
+
+  /** The pad buttons a source presses, as text ("A + R", or None). */
+  private fun mappingText(c: TouchLookConfig, source: Int): String {
+    val targets = c.targets(source)
+    if (targets.isEmpty()) return getString(R.string.look_target_none)
+    return targets.joinToString(" + ") { getString(TouchLookConfig.targetLabel(it)) }
+  }
+
+  /** A submenu of the Touch camera: its rows, and Back to the Touch camera (which opens before this closes). */
+  private fun showLookList(title: Int, items: List<Pair<String, () -> Unit>>) {
+    showMenuDialog(
+      AlertDialog.Builder(this)
+        .setTitle(title)
+        .setItems(items.map { it.first }.toTypedArray()) { _, which -> items[which].second() }
+        .setPositiveButton(R.string.look_menu_back) { _, _ -> showTouchLook() }
+    )
+  }
+
+  /** The custom buttons 0, 1 and 2: what each presses. */
+  private fun showLookButtons() {
+    val key = gameKey()
+    val c = TouchLookStore.forGame(this, key)
+    val items = (TouchLookConfig.BUTTON_0..TouchLookConfig.BUTTON_2).map { i ->
+      sourceName(i) + ": " + mappingText(c, i) to {
+        pickTouchMapping(key, i) { showLookButtons() }
+      }
+    }
+    showLookList(R.string.look_menu_buttons, items)
+  }
+
+  /** The double taps (a tap and a quick second one that is held), and how quick that is. */
+  private fun showLookTaps() {
+    val key = gameKey()
+    val c = TouchLookStore.forGame(this, key)
+    val items = listOf<Pair<String, () -> Unit>>(
+      sourceName(TouchLookConfig.TAP_LEFT) + ": " + mappingText(c, TouchLookConfig.TAP_LEFT) to {
+        pickTouchMapping(key, TouchLookConfig.TAP_LEFT) { showLookTaps() }
+      },
+      sourceName(TouchLookConfig.TAP_RIGHT) + ": " + mappingText(c, TouchLookConfig.TAP_RIGHT) to {
+        pickTouchMapping(key, TouchLookConfig.TAP_RIGHT) { showLookTaps() }
+      },
+      getString(R.string.settings_look_tap_gap) + ": " + c.tapMs + " ms" to {
+        pickTouchLook(
+          key, R.string.settings_look_tap_gap, TouchLookConfig.TAP_GAPS, c.tapMs,
+          { "$it ms" },
+          then = { showLookTaps() },
+        ) { c.copy(tapMs = it) }
+      },
+    )
+    showLookList(R.string.look_menu_taps, items)
+  }
+
+  /** Which sources press over and over while held, and how fast. */
+  private fun showLookTurbo() {
+    val key = gameKey()
+    val c = TouchLookStore.forGame(this, key)
+    val items = mutableListOf<Pair<String, () -> Unit>>()
+    for (i in 0 until TouchLookConfig.SOURCES) {
+      items += sourceName(i) + ": " + onOff(c.hasTurbo(i)) to {
+        setTouchLook(key, c.withTurbo(i, !c.hasTurbo(i)))
+        showLookTurbo()
+      }
+    }
+    items += getString(R.string.settings_look_turbo_rate) + ": " + c.turboMs + " ms" to {
+      pickTouchLook(
+        key, R.string.settings_look_turbo_rate, TouchLookConfig.TURBO_PERIODS, c.turboMs,
+        { "$it ms" },
+        then = { showLookTurbo() },
+      ) { c.copy(turboMs = it) }
+    }
+    showLookList(R.string.look_menu_turbo, items)
+  }
+
+  /**
+   * What a source presses: the first button, then a second (or none), each picked from the pad's buttons.
+   * The next dialog opens before the one chosen from closes, so the game stays stopped.
+   */
+  private fun pickTouchMapping(key: String, source: Int, then: () -> Unit) {
+    val names = listOf("") + TouchLookConfig.TARGETS
+    fun label(name: String) =
+      if (name.isEmpty()) getString(R.string.look_target_none) else getString(TouchLookConfig.targetLabel(name))
+    fun ask(title: Int, picked: (String) -> Unit) {
+      showMenuDialog(
+        AlertDialog.Builder(this)
+          .setTitle(getString(title, sourceName(source)))
+          .setSingleChoiceItems(names.map(::label).toTypedArray(), -1) { dialog, which ->
+            picked(names[which])
+            dialog.dismiss()
+          }
+          .setNegativeButton(android.R.string.cancel) { _, _ -> then() }
+      )
+    }
+    ask(R.string.look_pick_first) { first ->
+      ask(R.string.look_pick_second) { second ->
+        val c = TouchLookStore.forGame(this, key)
+        setTouchLook(key, c.withTargets(source, listOf(first, second)))
+        then()
+      }
+    }
+  }
+
+  /**
+   * One Touch camera value chosen from a list: applied at once, then back (to the Touch camera, or to
+   * the submenu it was chosen in). That opens before this closes, so the game stays stopped (a
+   * single-choice dialog stays open till it is dismissed).
+   */
+  private fun pickTouchLook(
+    key: String,
+    title: Int,
+    values: List<Int>,
+    current: Int,
+    label: (Int) -> String,
+    then: () -> Unit = { showTouchLook() },
+    apply: (Int) -> TouchLookConfig,
+  ) {
+    showMenuDialog(
+      AlertDialog.Builder(this)
+        .setTitle(title)
+        .setSingleChoiceItems(values.map(label).toTypedArray(), values.indexOf(current)) { dialog, which ->
+          setTouchLook(key, apply(values[which]))
+          then()
+          dialog.dismiss()
+        }
+        .setNegativeButton(android.R.string.cancel) { _, _ -> then() }
+    )
+  }
+
+  /** This game's Touch camera settings, kept and in use at once; null: the app's again. */
+  private fun setTouchLook(key: String, config: TouchLookConfig?) {
+    TouchLookStore.setGame(this, key, config)
+    onScreenController?.touchLook = TouchLookStore.forGame(this, key)
+  }
+
   /** The layout editor over the running game (input to the game pauses meanwhile). */
   private fun editControls() {
     val overlay = onScreenController ?: return
+    Toast.makeText(this, R.string.overlay_edit_game_note, Toast.LENGTH_LONG).show()
     overlay.minimal = false
     overlay.editing = true
     val bar = OverlayEditorBar(this, overlay) { closeEditor() }
@@ -1152,6 +1394,7 @@ class NativeCoreActivity : SDLActivity(), InputManager.InputDeviceListener {
     const val DEFAULT_SCALE = 1
     const val PREF_ASPECT = "aspect_ratio"
     const val ASPECT_AUTO = "auto"
+
     const val PREF_FXAA = "fxaa"
     const val PREF_UPSCALE = "upscale_filter"
     const val UPSCALE_BILINEAR = "bilinear"

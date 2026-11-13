@@ -40,11 +40,27 @@ class ControlPainter {
   )
   private val clickJewel = Jewel(0xFF6E6E6E.toInt(), 0xFF2E2E2E.toInt(), 0xFF0C0C0C.toInt())
 
+  /** The custom buttons' own colours, none of them the face buttons'. */
+  private val customJewels = mapOf(
+    ControlId.TOUCH_LOOK to Jewel(0xFF9FD8F5.toInt(), 0xFF2E86C1.toInt(), 0xFF0F3D63.toInt()),
+    ControlId.CUSTOM_0 to Jewel(0xFFD7B5F0.toInt(), 0xFF8E44AD.toInt(), 0xFF3F1558.toInt()),
+    ControlId.CUSTOM_1 to Jewel(0xFFFFC27A.toInt(), 0xFFE67E22.toInt(), 0xFF6B3300.toInt()),
+    ControlId.CUSTOM_2 to Jewel(0xFF9FE8D8.toInt(), 0xFF16A085.toInt(), 0xFF05433A.toInt()),
+  )
+
   /**
    * One control. pressed: held; kx, ky: a stick's deflection (-1..1);
-   * dpad: the D-pad's held directions (DPAD_* bits).
+   * dpad: the D-pad's held directions (DPAD_* bits); lit: a switch that is on.
    */
-  fun draw(c: Canvas, s: ControlSpec, pressed: Boolean, kx: Float = 0f, ky: Float = 0f, dpad: Int = 0) {
+  fun draw(
+    c: Canvas,
+    s: ControlSpec,
+    pressed: Boolean,
+    kx: Float = 0f,
+    ky: Float = 0f,
+    dpad: Int = 0,
+    lit: Boolean = false,
+  ) {
     when (s.id.kind) {
       ControlKind.FACE -> face(c, s, pressed)
       ControlKind.GEM -> gem(c, s, pressed)
@@ -54,6 +70,7 @@ class ControlPainter {
       ControlKind.TRIGGER -> trigger(c, s, pressed)
       ControlKind.CLICK -> click(c, s, pressed)
       ControlKind.MENU -> menu(c, s, pressed)
+      ControlKind.CUSTOM -> custom(c, s, pressed, lit)
     }
   }
 
@@ -109,6 +126,26 @@ class ControlPainter {
     c.drawText(s.id.label, s.cx, base + s.radius * 0.05f, text)
     text.color = withAlpha(j.dark, 215)
     c.drawText(s.id.label, s.cx, base, text)
+  }
+
+  private fun custom(c: Canvas, s: ControlSpec, pressed: Boolean, lit: Boolean) {
+    val j = customJewels.getValue(s.id)
+    socket(c, s.cx, s.cy, s.radius * 1.13f)
+    jewel(c, s.cx, s.cy, s.radius, j, pressed)
+    text.textSize = s.radius * 0.95f
+    val base = s.cy + text.textSize * 0.35f
+    text.color = Color.argb(90, 255, 255, 255)
+    c.drawText(s.id.label, s.cx, base + s.radius * 0.05f, text)
+    text.color = withAlpha(j.dark, 215)
+    c.drawText(s.id.label, s.cx, base, text)
+    if (lit) {
+      // a switch that is on: a green ring around it
+      p.shader = null
+      p.style = Paint.Style.STROKE
+      p.strokeWidth = s.radius * 0.16f
+      p.color = Color.argb(235, 139, 195, 74)
+      c.drawCircle(s.cx, s.cy, s.radius * 1.2f, p)
+    }
   }
 
   private fun gem(c: Canvas, s: ControlSpec, pressed: Boolean) {
@@ -391,6 +428,7 @@ class ControlPainter {
       ControlKind.TRIGGER -> 1.3f
       ControlKind.CLICK -> 1.3f
       ControlKind.MENU -> 1.2f
+      ControlKind.CUSTOM -> 1.15f
     }
   }
 }

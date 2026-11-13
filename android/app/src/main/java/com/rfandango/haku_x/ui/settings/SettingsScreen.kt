@@ -179,6 +179,7 @@ fun SettingsScreen(
         supportingContent = { Text(stringResource(R.string.controllers_settings_desc)) },
         modifier = Modifier.clickable(onClick = onControllers),
       )
+      TouchLookSettings()
 
       Section(stringResource(R.string.settings_section_display))
       ListItem(

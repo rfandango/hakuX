@@ -46,6 +46,11 @@ private object Routes {
   const val LIBRARY = "library"
   const val SETTINGS = "settings"
   const val CONTROLS = "controls"
+
+  /** One game's own layout editor: its override key. */
+  const val CONTROLS_GAME = "controls_game?key={key}"
+
+  fun controlsGame(key: String) = "controls_game?key=${Uri.encode(key)}"
   const val CONTROLLERS = "controllers"
   const val HDD = "hdd"
   const val GPU_DRIVER = "gpu_driver"
@@ -199,16 +204,27 @@ fun HakuXApp(
       ControlsEditorScreen(onClose = { nav.popBackStack() })
     }
     composable(
+      Routes.CONTROLS_GAME,
+      arguments = listOf(navArgument("key") { type = NavType.StringType; defaultValue = "" }),
+    ) { entry ->
+      ControlsEditorScreen(
+        gameKey = entry.arguments?.getString("key").orEmpty().ifEmpty { null },
+        onClose = { nav.popBackStack() },
+      )
+    }
+    composable(
       Routes.GAME,
       arguments = listOf(
         navArgument("key") { type = NavType.StringType; defaultValue = "" },
         navArgument("title") { type = NavType.StringType; defaultValue = "" },
       ),
     ) { entry ->
+      val key = entry.arguments?.getString("key").orEmpty()
       GameSettingsScreen(
-        gameKey = entry.arguments?.getString("key").orEmpty(),
+        gameKey = key,
         title = entry.arguments?.getString("title").orEmpty(),
         onBack = { nav.popBackStack() },
+        onEditControls = { nav.navigate(Routes.controlsGame(key)) },
       )
     }
   }
