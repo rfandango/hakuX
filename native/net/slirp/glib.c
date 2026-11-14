@@ -6,6 +6,7 @@
 #include "native/core/nc.h"
 
 #include <stdarg.h>
+#include <string.h>
 
 void g_slirp_log(int level, const gchar *fmt, ...)
 {
@@ -20,7 +21,13 @@ void g_slirp_log(int level, const gchar *fmt, ...)
 
 gsize g_strlcpy(gchar *dest, const gchar *src, gsize dest_size)
 {
-    return strlcpy(dest, src, dest_size);
+    const size_t n = strlen(src);
+    if (dest_size) {
+        const size_t c = n < dest_size ? n : dest_size - 1;
+        memcpy(dest, src, c);
+        dest[c] = 0;
+    }
+    return n;
 }
 
 gchar *g_strstr_len(const gchar *haystack, gssize haystack_len, const gchar *needle)
