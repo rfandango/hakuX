@@ -8,7 +8,10 @@
 #define NATIVE_APP_APP_H
 
 #include "native/core/nc.h"
+#include "native/dev/usb.h"
 #include "hw/xbox/hle/vk/swapchain.h"
+
+typedef struct SDL_Gamepad SDL_Gamepad;
 
 /* present.c — on the window's thread. */
 bool nc_present_init(void);
@@ -50,5 +53,9 @@ int nc_vk_driver_kgsl_priority(void);
 
 /* vsync.c — the panel's vsyncs to the emulated display's vblank clock. */
 void nc_vsync_start(void);
+
+/* gamepad.c — an SDL gamepad's state added to s (the stick pushed furthest
+ * wins). */
+void nc_read_gamepad(SDL_Gamepad *p, NcPadState *s);
 
 #endif
