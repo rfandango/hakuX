@@ -1,7 +1,7 @@
 /*
- * hakuX native core, app front end (libhakuxcore.so): SDL3 window and input,
- * the core on its own thread, and the HLE GPU's frames presented (through
- * its Vulkan swapchain).
+ * hakuX native core, app front end (libhakuxcore.so on Android, the hakux
+ * executable on Linux): SDL3 window and input, the core on its own thread,
+ * and the HLE GPU's frames presented (through its Vulkan swapchain).
  * Independent of xemu: it talks to native/core and the HLE GPU's display only.
  */
 #ifndef NATIVE_APP_APP_H

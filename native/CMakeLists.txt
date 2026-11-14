@@ -2,7 +2,8 @@
 #
 # hakux_native is the core library; xboxrun runs a title from the command
 # line on the device (adb shell) for the frontier loop. Cross-compiled with
-# the NDK into build/native/core; the steps are in android/README.md.
+# the NDK into build/native/core; the steps are in android/README.md. On an
+# aarch64 Linux it builds hakux, the desktop front end (tools/native/appimage.sh).
 cmake_minimum_required(VERSION 3.20)
 project(hakux_native C CXX)
 

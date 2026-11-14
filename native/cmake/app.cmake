@@ -34,6 +34,20 @@ set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
 add_subdirectory("${NC_SDL3}" sdl3 EXCLUDE_FROM_ALL)
 
+# Linux: the hakux executable (app/desktop_main.c), next to libSDL3.so.0
+# (tools/native/appimage.sh packs both).
+if(NOT ANDROID)
+  add_executable(hakux
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/desktop_main.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/gamepad.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/present.c"
+  )
+  target_link_libraries(hakux PRIVATE hakux_native hakux_hle SDL3::SDL3-shared)
+  target_compile_options(hakux PRIVATE -Wall -Wno-unused-parameter)
+  set_target_properties(hakux PROPERTIES BUILD_RPATH "$ORIGIN/../lib")   # the AppImage's usr/lib
+  return()
+endif()
+
 add_library(hakuxcore SHARED
   "${CMAKE_CURRENT_SOURCE_DIR}/app/app_main.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/gamepad.c"
