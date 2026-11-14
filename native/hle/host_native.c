@@ -177,7 +177,11 @@ void *hle_host_vk_loader(void)
         return (void *)g_custom_gipa;
     }
     if (!gipa) {
+#ifdef __ANDROID__
         void *lib = dlopen("libvulkan.so", RTLD_NOW | RTLD_LOCAL);
+#else
+        void *lib = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_LOCAL);
+#endif
         gipa = lib ? (PFN_vkGetInstanceProcAddr)dlsym(lib, "vkGetInstanceProcAddr") : NULL;
         if (!gipa) {
             nc_log("hakuX-native-hle", "no Vulkan loader: %s", dlerror());

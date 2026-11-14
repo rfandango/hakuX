@@ -32,9 +32,13 @@
 #define NC_SECTION(name)
 
 /* checks: sizes and members (NC_STATE_PROBE: statelock.py --sizes reads the
- * sizes from the assembly instead) */
+ * sizes from the assembly instead). The sizes are bionic's: glibc's mutexes
+ * and threads are other sizes, in members the state skips, so off Android
+ * only the members are checked. */
 #ifdef NC_STATE_PROBE
 #define NC_REC(T, size) const unsigned long nc_probe_size_##T = sizeof(T);
+#elif !defined(__ANDROID__)
+#define NC_REC(T, size)
 #else
 #define NC_REC(T, size)                                                                            \
     _Static_assert(sizeof(T) == (size), #T " changed size: list its new member in its .def (NC_F or " \

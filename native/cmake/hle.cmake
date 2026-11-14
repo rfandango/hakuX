@@ -8,7 +8,10 @@ set(NC_DEPS "D:/tools/native-deps" CACHE PATH "native core third-party sources")
 
 add_library(nc_volk STATIC "${NC_DEPS}/volk/volk.c")
 target_include_directories(nc_volk PUBLIC "${NC_DEPS}/volk")
-target_compile_definitions(nc_volk PUBLIC VK_NO_PROTOTYPES VK_USE_PLATFORM_ANDROID_KHR)
+target_compile_definitions(nc_volk PUBLIC VK_NO_PROTOTYPES)
+if(ANDROID)
+  target_compile_definitions(nc_volk PUBLIC VK_USE_PLATFORM_ANDROID_KHR)
+endif()
 
 add_library(nc_spirv_reflect STATIC "${NC_DEPS}/spirv_reflect/spirv_reflect.c")
 target_include_directories(nc_spirv_reflect PUBLIC "${NC_DEPS}/spirv_reflect")
@@ -27,6 +30,7 @@ set(NC_HLE "${NC_REPO}/hw/xbox/hle")
 # The GLib subset the HLE and the APU use.
 add_library(nc_glib STATIC "${CMAKE_CURRENT_SOURCE_DIR}/compat/glib/glib.c")
 target_include_directories(nc_glib PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/compat/glib")
+target_link_libraries(nc_glib PUBLIC nc_host)
 set(NC_VSH "${NC_DEPS}/root/subprojects/nv2a_vsh_cpu/src")
 
 # Every HLE GPU source.
@@ -87,7 +91,7 @@ target_include_directories(hakux_hle PRIVATE "${HAKUX_FEX_DIR}/External/xxhash")
 target_compile_definitions(hakux_hle PUBLIC CONFIG_VULKAN=1 HAKUX_HLE_GPU=1 HAKUX_NATIVE_CORE=1)
 target_compile_options(hakux_hle PRIVATE -Wno-unused-parameter -Wno-unused-function -Wno-sign-compare)
 target_link_libraries(hakux_hle PUBLIC nc_glib nc_volk nc_spirv_reflect glslang SPIRV
-                      glslang-default-resource-limits android log)
+                      glslang-default-resource-limits nc_host)
 
 # The MCPX APU: xemu's device (hw/xbox/mcpx/apu) ported onto the core's own
 # services (native/dev/apu/apu_base.h).
@@ -107,4 +111,4 @@ add_library(hakux_apu STATIC
 target_include_directories(hakux_apu PRIVATE "${NC_REPO}")
 target_compile_options(hakux_apu PRIVATE -Wno-unused-parameter -Wno-unused-function -Wno-sign-compare
                        -Wno-unused-variable)
-target_link_libraries(hakux_apu PUBLIC hakux_hle aaudio log)
+target_link_libraries(hakux_apu PUBLIC hakux_hle nc_host)

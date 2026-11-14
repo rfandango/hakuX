@@ -26,10 +26,8 @@
 #include <cstring>
 #include <string>
 #include <sys/mman.h>
-#ifdef __ANDROID__
 #include <sys/system_properties.h>
 #include "hw/xbox/hle/prop.h"
-#endif
 #include <ucontext.h>
 
 static_assert(NC_SYSOP_CPUID == static_cast<int>(FEXCore::Core::SystemOpKind::Cpuid));
