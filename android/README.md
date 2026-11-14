@@ -37,6 +37,9 @@ libraries in, then build the APK.
 | `root/subprojects/nv2a_vsh_cpu` | 561fe80 |
 | `libslirp` | 4.7.0 (26be815b), unmodified: the network's NAT (`native/net/nat.c`) |
 
+`tools/native/deps.sh` fetches them all, adrenotools patched; a revision changed
+here changes there too.
+
 ## Steps
 
 From the repository root:

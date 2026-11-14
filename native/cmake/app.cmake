@@ -5,9 +5,9 @@
 # adrenotools (NC_DEPS/adrenotools, bylaws/libadrenotools): a custom Vulkan
 # driver (Turnip) for the HLE GPU, chosen in the app's settings, and
 # xboxrun's "vkdriver=". Its hook libraries (libmain_hook.so and co.) ship
-# next to libhakuxcore.so.
+# next to libhakuxcore.so. Android's only.
 set(NC_ADRENOTOOLS "${NC_DEPS}/adrenotools")
-if(EXISTS "${NC_ADRENOTOOLS}/CMakeLists.txt")
+if(ANDROID AND EXISTS "${NC_ADRENOTOOLS}/CMakeLists.txt")
   add_subdirectory("${NC_ADRENOTOOLS}" adrenotools EXCLUDE_FROM_ALL)
 endif()
 if(TARGET adrenotools)
