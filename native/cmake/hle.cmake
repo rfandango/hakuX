@@ -112,3 +112,6 @@ target_include_directories(hakux_apu PRIVATE "${NC_REPO}")
 target_compile_options(hakux_apu PRIVATE -Wno-unused-parameter -Wno-unused-function -Wno-sign-compare
                        -Wno-unused-variable)
 target_link_libraries(hakux_apu PUBLIC hakux_hle nc_host)
+if(NOT ANDROID)
+  target_link_libraries(hakux_apu PRIVATE SDL3::SDL3-shared)   # out.c's output
+endif()
