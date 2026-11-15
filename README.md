@@ -21,6 +21,8 @@ get hakuX here for free.
 
 - An arm64 Android device with Vulkan. Custom Turnip drivers can be loaded
   for Adreno GPUs.
+- Or an aarch64 Linux with Vulkan (the system's loader and driver, e.g.
+  Mesa's) and glibc 2.36 or later, for the AppImage.
 - Your own game images (ISO or XISO), dumped from discs you own.
 
 No BIOS, MCPX ROM or hard disk image is needed. hakuX doesn't include any
@@ -28,7 +30,35 @@ copyrighted Xbox software.
 
 ## Building
 
-See [android/README.md](android/README.md).
+- Android: see [android/README.md](android/README.md).
+- Linux (aarch64): `tools/native/appimage.sh` builds
+  `build/hakuX-<version>-aarch64.AppImage`; its header has the Docker
+  commands to run it from another host.
+
+## Linux
+
+```
+./hakuX-<version>-aarch64.AppImage game.iso [fullscreen] [hdd=<folder>] [options]
+```
+
+The hard disk and shader caches live in `~/.local/share/hakuX`. Gamepads
+are players 1-4 in the order they connect; the keyboard is player 1 too:
+
+| Keys | Xbox |
+|---|---|
+| WASD | left stick |
+| Arrows | d-pad |
+| K / L / J / I | A / B / X / Y |
+| U / O | white / black |
+| Q / E | left / right trigger |
+| Enter / Backspace | Start / Back |
+
+F11 toggles full screen. Debug properties (`debug.hakux.*`) read at startup
+come from environment variables of the same name (`env debug.hakux.caps=... ./hakuX...`);
+the ones Android polls during play are not read.
+
+Known limitation: there is no vsync source on Linux (Android uses
+Choreographer), so the emulated vblank runs free of the display's refresh.
 
 ## License
 
