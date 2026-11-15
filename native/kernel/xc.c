@@ -192,9 +192,17 @@ static uint64_t XcPKEncPublic(NcKernel *k, NcFrame *f, const uint32_t *a)
 
 /* XcVerifyPKCS1Signature(pbSig, pbPubKey, pbDigest): the signature decrypts to a
  * PKCS #1 type 1 block holding the SHA-1 digest. The block's byte order isn't
- * pinned down yet, so both orders are accepted and the match is logged. */
+ * pinned down yet, so both orders are accepted and the match is logged.
+ * XePublicKeyData is all zeros here, no key: what it verifies passes (the
+ * disc's security sector, io.c). */
+#define XE_PUBLIC_KEY_DATA 355
+
 static uint64_t XcVerifyPKCS1Signature(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
+    if (a[1] == nc_kernel_resolve(k, XE_PUBLIC_KEY_DATA) && !nc_vm_rd32(k->vm, a[1])) {
+        nc_log("hakuX-native", "xc: PKCS1 verify with XePublicKeyData: ok (no key here)");
+        return 1;
+    }
     uint8_t block_le[1024];
     if (!pk_public(k, a[1], host(k, a[0]), block_le)) {
         nc_log("hakuX-native", "xc: PKCS1 verify: bad public key");

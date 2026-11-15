@@ -14,6 +14,7 @@
 #include "native/kernel/kernel.h"
 #include "native/core/irq.h"
 #include "native/core/xdvdfs.h"
+#include "native/kernel/xc_crypto.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -2382,9 +2383,31 @@ static uint32_t disk_ioctl(const NcFile *nf, uint32_t code, uint8_t *out, uint32
  * Cdb +0x1C). XAPI checks the disc with MODE SENSE(10) of the Xbox security
  * page (0x3E, the DVDX2 authentication page) and reboots to the dashboard
  * unless the drive reports the Xbox partition authenticated (Panzer Dragoon
- * Orta, XDK 4928): CDFValid, PartitionArea 1, Authentication. Other commands
- * read zeros. */
+ * Orta, XDK 4928): CDFValid, PartitionArea 1, Authentication. A title whose
+ * certificate asks (flags at 0x1D8, bit 0) reads the security sector too
+ * (READ DVD STRUCTURE, layer 0xFE) and checks it (Project Gotham Racing 2
+ * v5). Other commands read zeros. */
 #define IOCTL_SCSI_PASS_THROUGH_DIRECT 0x4D014u
+
+/* The security sector as XAPI checks it: the XBE certificate's timestamp at
+ * 0x4AB, the SHA-1 of the length 0x4CB and that many bytes from 4 at 0x4CF,
+ * a signature of it at 0x4E3 that XePublicKeyData verifies (xc.c). */
+#define SS_SIGNED   0x4CBu
+#define SS_SIG      0x4E3u
+
+static void security_sector(NcKernel *k, uint8_t *d, uint32_t n)
+{
+    const uint32_t cert = nc_vm_rd32(k->vm, k->xbe_base + 0x118);
+    const uint32_t len = SS_SIGNED;
+    d[0] = (uint8_t)((n - 2) >> 8); /* structure data length: past itself */
+    d[1] = (uint8_t)(n - 2);
+    nc_wr32(d + 0x4AB, nc_vm_rd32(k->vm, cert + 4));
+    NcSha1 s;
+    nc_sha1_init(&s);
+    nc_sha1_update(&s, &len, 4);
+    nc_sha1_update(&s, d + 4, SS_SIGNED);
+    nc_sha1_final(&s, d + 4 + SS_SIGNED);
+}
 
 static void scsi_pass_through(NcKernel *k, uint32_t sptd, uint32_t len)
 {
@@ -2406,6 +2429,8 @@ static void scsi_pass_through(NcKernel *k, uint32_t sptd, uint32_t len)
         d[10] = 1;                             /* CDFValid */
         d[11] = 1;                             /* PartitionArea: the Xbox partition */
         d[12] = 1;                             /* Authentication */
+    } else if (cdb[0] == 0xAD && cdb[6] == 0xFE && n >= SS_SIG) {
+        security_sector(k, d, n);
     } else {
         nc_log("hakuX-native-io", "scsi %02x (%u bytes): zeros", cdb[0], n);
     }
