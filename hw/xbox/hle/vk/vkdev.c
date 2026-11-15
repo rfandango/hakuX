@@ -11,6 +11,7 @@
 #include "hw/xbox/hle/vk/batch.h"
 #include "hw/xbox/hle/vk/compat.h"
 #include "hw/xbox/hle/vk/quirks.h"
+#include "hw/xbox/hle/vk/swapchain.h"
 
 #ifdef __ANDROID__
 #include <sys/system_properties.h>
@@ -18,6 +19,18 @@
 #endif
 
 HleVk g_hvk;
+#ifndef __ANDROID__
+static const char *g_win_exts[HLE_WINDOW_EXTS_MAX];
+static uint32_t g_nwin_exts;
+
+void hle_window_instance_extensions(const char *const *exts, uint32_t n)
+{
+    g_nwin_exts = n < HLE_WINDOW_EXTS_MAX ? n : HLE_WINDOW_EXTS_MAX;
+    for (uint32_t i = 0; i < g_nwin_exts; i++) {
+        g_win_exts[i] = exts[i];
+    }
+}
+#endif
 static HleMutex g_queue_lock;
 static bool g_ready;
 static bool g_lost;                     /* hle_vk_lose */
@@ -236,12 +249,25 @@ int hle_vk_init(void)
     vkEnumerateInstanceExtensionProperties(NULL, &nie, NULL);
     g_autofree VkExtensionProperties *iext = g_new(VkExtensionProperties, nie ? nie : 1);
     vkEnumerateInstanceExtensionProperties(NULL, &nie, iext);
-    const char *iexts[2];
+#ifdef __ANDROID__
+    static const char *const android_exts[] = { VK_KHR_SURFACE_EXTENSION_NAME,
+                                                VK_KHR_ANDROID_SURFACE_EXTENSION_NAME };
+    const char *const *win_exts = android_exts;
+    const uint32_t nwin = G_N_ELEMENTS(android_exts);
+#else
+    /* the front end's (hle_window_instance_extensions) */
+    const char *const *win_exts = g_win_exts;
+    const uint32_t nwin = g_nwin_exts;
+#endif
+    const char *iexts[HLE_WINDOW_EXTS_MAX];
     uint32_t nix = 0;
-    if (has_ext(iext, nie, VK_KHR_SURFACE_EXTENSION_NAME) &&
-        has_ext(iext, nie, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME)) {
-        iexts[nix++] = VK_KHR_SURFACE_EXTENSION_NAME;
-        iexts[nix++] = VK_KHR_ANDROID_SURFACE_EXTENSION_NAME;
+    for (uint32_t i = 0; i < nwin && nix < HLE_WINDOW_EXTS_MAX; i++) {
+        if (!has_ext(iext, nie, win_exts[i])) {
+            hle_log("hakuX-hle-back", "vk: no %s: no window surface", win_exts[i]);
+            nix = 0;
+            break;
+        }
+        iexts[nix++] = win_exts[i];
     }
     VkInstanceCreateInfo ici = {
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,

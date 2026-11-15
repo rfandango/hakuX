@@ -8,15 +8,14 @@
 #define NATIVE_APP_APP_H
 
 #include "native/core/nc.h"
-
-struct ANativeWindow;
+#include "hw/xbox/hle/vk/swapchain.h"
 
 /* present.c — on the window's thread. */
 bool nc_present_init(void);
 /* Once per display refresh: the newest frame (or the last one) letterboxed
  * into win, waiting for the panel; false when nothing could be presented
  * (the HLE GPU not up yet, no window). */
-bool nc_present_frame(struct ANativeWindow *win);
+bool nc_present_frame(HleWindow *win);
 /* The picture's shape on screen: the frame's own (auto: 4:3 for 640x480),
  * 4:3, 16:9 (a widescreen title's anamorphic 640x480), or the whole window. */
 enum { NC_ASPECT_AUTO, NC_ASPECT_4_3, NC_ASPECT_16_9, NC_ASPECT_STRETCH };

@@ -164,7 +164,7 @@ static void wait_next_vsync(void)
     clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
 }
 
-bool nc_present_frame(struct ANativeWindow *win)
+bool nc_present_frame(HleWindow *win)
 {
     count_frames();
     debug_poll();
