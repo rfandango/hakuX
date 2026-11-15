@@ -1,22 +1,24 @@
 /*
- * hakuX native core, app front end (libhakuxcore.so): SDL3 window and input,
- * the core on its own thread, and the HLE GPU's frames presented (through
- * its Vulkan swapchain).
+ * hakuX native core, app front end (libhakuxcore.so on Android, the hakux
+ * executable on Linux): SDL3 window and input, the core on its own thread,
+ * and the HLE GPU's frames presented (through its Vulkan swapchain).
  * Independent of xemu: it talks to native/core and the HLE GPU's display only.
  */
 #ifndef NATIVE_APP_APP_H
 #define NATIVE_APP_APP_H
 
 #include "native/core/nc.h"
+#include "native/dev/usb.h"
+#include "hw/xbox/hle/vk/swapchain.h"
 
-struct ANativeWindow;
+typedef struct SDL_Gamepad SDL_Gamepad;
 
 /* present.c — on the window's thread. */
 bool nc_present_init(void);
 /* Once per display refresh: the newest frame (or the last one) letterboxed
  * into win, waiting for the panel; false when nothing could be presented
  * (the HLE GPU not up yet, no window). */
-bool nc_present_frame(struct ANativeWindow *win);
+bool nc_present_frame(HleWindow *win);
 /* The picture's shape on screen: the frame's own (auto: 4:3 for 640x480),
  * 4:3, 16:9 (a widescreen title's anamorphic 640x480), or the whole window. */
 enum { NC_ASPECT_AUTO, NC_ASPECT_4_3, NC_ASPECT_16_9, NC_ASPECT_STRETCH };
@@ -51,5 +53,9 @@ int nc_vk_driver_kgsl_priority(void);
 
 /* vsync.c — the panel's vsyncs to the emulated display's vblank clock. */
 void nc_vsync_start(void);
+
+/* gamepad.c — an SDL gamepad's state added to s (the stick pushed furthest
+ * wins). */
+void nc_read_gamepad(SDL_Gamepad *p, NcPadState *s);
 
 #endif

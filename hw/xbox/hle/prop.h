@@ -8,7 +8,6 @@
 #ifndef HW_XBOX_HLE_PROP_H
 #define HW_XBOX_HLE_PROP_H
 
-#ifdef __ANDROID__
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,6 +44,5 @@ static inline bool hle_prop_new(HleProp *p, const char *name, char v[PROP_VALUE_
     strcpy(p->last, v);
     return !first && v[0];
 }
-#endif
 
 #endif

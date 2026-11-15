@@ -7,6 +7,7 @@
 #include <dlfcn.h>
 
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>

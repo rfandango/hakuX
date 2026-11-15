@@ -2,7 +2,8 @@
 #
 # hakux_native is the core library; xboxrun runs a title from the command
 # line on the device (adb shell) for the frontier loop. Cross-compiled with
-# the NDK into build/native/core; the steps are in android/README.md.
+# the NDK into build/native/core; the steps are in android/README.md. On an
+# aarch64 Linux it builds hakux, the desktop front end (tools/native/appimage.sh).
 cmake_minimum_required(VERSION 3.20)
 project(hakux_native C CXX)
 
@@ -24,6 +25,18 @@ if(HAKUX_LTO AND CMAKE_BUILD_TYPE STREQUAL "Release")
 endif()
 
 get_filename_component(NC_REPO "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+
+# nc_host: what the host system adds to every core target. Android: its log,
+# window and audio libraries. Linux (aarch64): glibc's GNU extensions, which
+# bionic has by default, and compat/linux standing in for bionic's headers.
+add_library(nc_host INTERFACE)
+if(ANDROID)
+  target_link_libraries(nc_host INTERFACE android aaudio log)
+else()
+  target_compile_definitions(nc_host INTERFACE _GNU_SOURCE)
+  target_include_directories(nc_host INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/compat/linux")
+endif()
+
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/fex.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/hle.cmake")
 
@@ -50,7 +63,7 @@ add_library(nc_slirp STATIC
   "${NC_SLIRP}/util.c" "${NC_SLIRP}/version.c" "${NC_SLIRP}/vmstate.c")
 target_include_directories(nc_slirp BEFORE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/net/slirp" "${NC_REPO}")
 target_include_directories(nc_slirp PUBLIC "${CMAKE_BINARY_DIR}/slirp")
-target_link_libraries(nc_slirp PRIVATE nc_glib)
+target_link_libraries(nc_slirp PRIVATE nc_glib nc_host)
 target_compile_options(nc_slirp PRIVATE -w)
 
 add_library(hakux_native STATIC
@@ -109,14 +122,14 @@ target_include_directories(hakux_native PUBLIC "${NC_REPO}")
 target_include_directories(hakux_native PRIVATE "${HAKUX_FEX_DIR}/External/xxhash")
 # The HLE layer's pure modules build without QEMU in this mode.
 target_compile_definitions(hakux_native PRIVATE HLE_HOST_TEST)
-target_link_libraries(hakux_native PUBLIC nc_fex hakux_hle hakux_apu nc_slirp log z)
+target_link_libraries(hakux_native PUBLIC nc_fex hakux_hle hakux_apu nc_slirp nc_host z)
 target_compile_options(hakux_native PRIVATE -Wall -Wno-unused-parameter)
 
 # xboxrun's custom Vulkan driver ("vkdriver="): the app's code for it
 # (native/app/vkdriver.c, vklayer.c), through adrenotools when NC_DEPS has it
 # (cmake/app.cmake).
 add_executable(xboxrun run/xboxrun.c run/capture.c app/vkdriver.c app/vklayer.c)
-target_link_libraries(xboxrun PRIVATE hakux_native hakux_hle z log)
+target_link_libraries(xboxrun PRIVATE hakux_native hakux_hle nc_host z)
 target_link_libraries(hakux_hle PUBLIC hakux_native)
 target_link_libraries(nc_slirp PRIVATE hakux_native)   # nc_log
 

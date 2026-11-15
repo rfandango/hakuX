@@ -10,6 +10,7 @@
 
 #include "native/compat/glib/glib.h"
 
+#include <signal.h>     /* misc.c's fork_exec: bionic's headers bring it in */
 #include <stdio.h>
 #include <strings.h>
 

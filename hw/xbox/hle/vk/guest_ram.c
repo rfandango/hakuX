@@ -3,7 +3,9 @@
  */
 #include "hw/xbox/hle/base.h"
 
+#ifdef __ANDROID__
 #include <android/hardware_buffer.h>
+#endif
 #include "hw/xbox/hle/hle.h"
 #include "hw/xbox/hle/mem/guestmem.h"
 #include "hw/xbox/hle/uma/uma.h"
@@ -16,6 +18,7 @@ bool g_hland_coherent;
 
 #define T (g_hvk.t)
 
+#ifdef __ANDROID__
 static bool import(AHardwareBuffer *ahb, bool bda)
 {
     VkAndroidHardwareBufferPropertiesANDROID props = {
@@ -88,6 +91,16 @@ int hle_vk_guest_ram_init(void)
     }
     return 0;
 }
+#else
+/* Off Android the guest RAM is plain memory: the copy fallback */
+int hle_vk_guest_ram_init(void)
+{
+    g_hram.size = hle_ram_size();
+    g_hram.zero_copy = false;
+    hle_log("hakuX-hle-back", "guest RAM not imported (no AHB off Android): copy fallback");
+    return 0;
+}
+#endif
 
 int hle_vk_arena_init(uint32_t size)
 {

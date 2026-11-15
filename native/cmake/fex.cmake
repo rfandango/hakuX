@@ -55,10 +55,17 @@ if(NOT TARGET nc_fex)
     "${CMAKE_BINARY_DIR}/fex-build/Source"
   )
   # FEX sets these per directory (add_compile_definitions), so sources built
-  # outside its tree need them repeated; the NDK's clang has preserve_all.
-  target_compile_definitions(nc_fex PUBLIC
-    ARCHITECTURE_arm64=1 _LARGEFILE64_SOURCE
-    "FEX_PRESERVE_ALL_ATTR=__attribute__((preserve_all))" FEX_HAS_PRESERVE_ALL_ATTR=1
-  )
-  target_link_libraries(nc_fex PUBLIC FEXCore FEXCore_Base JemallocLibs FEXHeaderUtils range-v3::range-v3 log)
+  # outside its tree need them repeated. preserve_all as FEX found it
+  # (HAS_CLANG_PRESERVE_ALL): HostFeatures.cpp tells the JIT, which then
+  # keeps guest registers in x9-x15 across calls to FEXCore's helpers; the
+  # NDK's clang has it, Debian 12's clang 16 doesn't on aarch64, and a JIT
+  # told otherwise lost them to every x87 fsin (Halo 2's stick code).
+  target_compile_definitions(nc_fex PUBLIC ARCHITECTURE_arm64=1 _LARGEFILE64_SOURCE)
+  if(HAS_CLANG_PRESERVE_ALL)
+    target_compile_definitions(nc_fex PUBLIC
+      "FEX_PRESERVE_ALL_ATTR=__attribute__((preserve_all))" FEX_HAS_PRESERVE_ALL_ATTR=1)
+  else()
+    target_compile_definitions(nc_fex PUBLIC "FEX_PRESERVE_ALL_ATTR=" FEX_HAS_PRESERVE_ALL_ATTR=0)
+  endif()
+  target_link_libraries(nc_fex PUBLIC FEXCore FEXCore_Base JemallocLibs FEXHeaderUtils range-v3::range-v3 nc_host)
 endif()

@@ -1,5 +1,6 @@
 /*
- * hakuX native core — the APU's output: 48 kHz 16-bit stereo on AAudio.
+ * hakuX native core — the APU's output: 48 kHz 16-bit stereo on AAudio
+ * (Android) or SDL3's audio (Linux).
  *
  * The frame thread pushes each EP frame (256 samples, 1024 bytes) into a
  * ring; AAudio's data callback drains it. One producer and one consumer, so
@@ -8,11 +9,15 @@
  * error callback: a headset or Bluetooth device coming or going, a route
  * change) or none opened: a thread drains the ring at the device's rate
  * instead (the sound goes nowhere, the APU keeps its timing) and opens a
- * stream again (reopen_thread).
+ * stream again (reopen_thread). SDL3 follows the default device itself.
  */
 #include "native/dev/apu/apu_int.h"
 
+#ifdef __ANDROID__
 #include <aaudio/AAudio.h>
+#else
+#include <SDL3/SDL.h>
+#endif
 
 #define OUT_RATE 48000
 #define OUT_FRAME_BYTES 4   /* a stereo sample: two 16-bit channels */
@@ -25,7 +30,11 @@ static struct {
     int samples;             /* the callback's size, in frames */
     pthread_cond_t *wake;
     pthread_mutex_t mu;      /* stream, app_paused: the activity's thread, reopen_thread */
+#ifdef __ANDROID__
     AAudioStream *stream;    /* NULL: none (reopen_thread drains the ring) */
+#else
+    SDL_AudioStream *stream; /* NULL: none (drain_thread drains the ring) */
+#endif
     bool started, app_paused;
     bool reopening;          /* reopen_thread runs */
     uint32_t callbacks, short_callbacks;
@@ -85,6 +94,7 @@ static void fill(uint8_t *stream, int bytes)
     pthread_cond_broadcast(g_out.wake);
 }
 
+#ifdef __ANDROID__
 static aaudio_data_callback_result_t on_data(AAudioStream *s, void *user, void *data, int32_t frames)
 {
     fill(data, frames * OUT_FRAME_BYTES);
@@ -247,3 +257,85 @@ void nc_audio_set_paused(bool on)
     }
     pthread_mutex_unlock(&g_out.mu);
 }
+
+#else
+
+/* SDL's thread: what the device wants next, in chunks of buf */
+static void on_data(void *user, SDL_AudioStream *s, int additional, int total)
+{
+    static uint8_t buf[16384];
+    while (additional > 0) {
+        const int len = MIN(additional, (int)sizeof(buf));
+        fill(buf, len);
+        SDL_PutAudioStreamData(s, buf, len);
+        additional -= len;
+    }
+}
+
+/* No output device: the ring drained at the device's rate, the sound going
+ * nowhere and the APU keeping its timing. */
+static void *drain_thread(void *arg)
+{
+    static uint8_t buf[16384];
+    const int len = MIN(g_out.samples * OUT_FRAME_BYTES, (int)sizeof(buf));
+    const long period_ns = (long)((int64_t)(len / OUT_FRAME_BYTES) * 1000000000LL / OUT_RATE);
+    struct timespec next;
+    clock_gettime(CLOCK_MONOTONIC, &next);
+    for (;;) {
+        next.tv_nsec += period_ns;
+        while (next.tv_nsec >= 1000000000L) {
+            next.tv_nsec -= 1000000000L;
+            next.tv_sec++;
+        }
+        clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, NULL);
+        fill(buf, len);
+    }
+    return NULL;
+}
+
+int apu_out_open(int capacity_bytes, int samples, pthread_cond_t *wake)
+{
+    g_out.buf = calloc(1, (size_t)capacity_bytes);
+    g_out.cap = (uint32_t)capacity_bytes;
+    g_out.samples = samples;
+    g_out.wake = wake;
+
+    char frames[16];
+    snprintf(frames, sizeof(frames), "%d", samples);
+    SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, frames);
+    const SDL_AudioSpec spec = { .format = SDL_AUDIO_S16LE, .channels = 2, .freq = OUT_RATE };
+    SDL_AudioStream *s = SDL_InitSubSystem(SDL_INIT_AUDIO)
+        ? SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, on_data, NULL) : NULL;
+    if (!s) {
+        nc_log("hakuX-apu", "no output stream (SDL: %s); draining without sound", SDL_GetError());
+        pthread_t t;
+        apu_thread_start(&t, "apu.drain", drain_thread, NULL, false);
+        return samples * OUT_FRAME_BYTES;
+    }
+    pthread_mutex_lock(&g_out.mu);
+    g_out.started = true;
+    g_out.stream = s;
+    if (!g_out.app_paused) {
+        SDL_ResumeAudioStreamDevice(s);
+    }
+    pthread_mutex_unlock(&g_out.mu);
+    return samples * OUT_FRAME_BYTES;
+}
+
+/* The emulation paused by the front end: the device stops pulling silence
+ * meanwhile. */
+void nc_audio_set_paused(bool on)
+{
+    pthread_mutex_lock(&g_out.mu);
+    g_out.app_paused = on;
+    if (g_out.stream && g_out.started) {
+        if (on) {
+            SDL_PauseAudioStreamDevice(g_out.stream);
+        } else {
+            SDL_ResumeAudioStreamDevice(g_out.stream);
+        }
+    }
+    pthread_mutex_unlock(&g_out.mu);
+}
+
+#endif

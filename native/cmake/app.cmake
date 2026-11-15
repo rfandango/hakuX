@@ -5,9 +5,9 @@
 # adrenotools (NC_DEPS/adrenotools, bylaws/libadrenotools): a custom Vulkan
 # driver (Turnip) for the HLE GPU, chosen in the app's settings, and
 # xboxrun's "vkdriver=". Its hook libraries (libmain_hook.so and co.) ship
-# next to libhakuxcore.so.
+# next to libhakuxcore.so. Android's only.
 set(NC_ADRENOTOOLS "${NC_DEPS}/adrenotools")
-if(EXISTS "${NC_ADRENOTOOLS}/CMakeLists.txt")
+if(ANDROID AND EXISTS "${NC_ADRENOTOOLS}/CMakeLists.txt")
   add_subdirectory("${NC_ADRENOTOOLS}" adrenotools EXCLUDE_FROM_ALL)
 endif()
 if(TARGET adrenotools)
@@ -19,6 +19,9 @@ endif()
 # is in android/app/src/main/java/org/libsdl/app.
 set(NC_SDL3 "${NC_DEPS}/SDL3")
 if(NOT EXISTS "${NC_SDL3}/CMakeLists.txt")
+  if(NOT ANDROID)
+    message(FATAL_ERROR "No SDL3 at ${NC_SDL3}: Linux needs it (the APU's output): tools/native/deps.sh")
+  endif()
   message(STATUS "hakuxcore: no SDL3 at ${NC_SDL3}; the app library is not built")
   return()
 endif()
@@ -31,8 +34,23 @@ set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
 add_subdirectory("${NC_SDL3}" sdl3 EXCLUDE_FROM_ALL)
 
+# Linux: the hakux executable (app/desktop_main.c), next to libSDL3.so.0
+# (tools/native/appimage.sh packs both).
+if(NOT ANDROID)
+  add_executable(hakux
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/desktop_main.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/gamepad.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/present.c"
+  )
+  target_link_libraries(hakux PRIVATE hakux_native hakux_hle SDL3::SDL3-shared)
+  target_compile_options(hakux PRIVATE -Wall -Wno-unused-parameter)
+  set_target_properties(hakux PROPERTIES BUILD_RPATH "$ORIGIN/../lib")   # the AppImage's usr/lib
+  return()
+endif()
+
 add_library(hakuxcore SHARED
   "${CMAKE_CURRENT_SOURCE_DIR}/app/app_main.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/gamepad.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/present.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/vsync.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/vklayer.c"
