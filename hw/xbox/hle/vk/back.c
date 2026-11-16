@@ -67,10 +67,15 @@ static struct {
 #define VIS_INDICES    HLE_VIS_INDICES
 #define VIS_MAX_PARTS  16
 #define VIS_PENDING    1024
+/* Without host query reset: slots reset in the command buffer, this many at a
+ * time, topped up when fewer than VIS_RESET_LOW are left (vis_reset_ahead) */
+#define VIS_RESET_BLOCK 256
+#define VIS_RESET_LOW   64
 
 static struct {
     VkQueryPool pool;
     uint32_t next;                              /* ring position */
+    uint32_t ready;                             /* no host reset: slots before it are reset */
     bool active;                                /* a test is open */
     int32_t in_pass;                            /* its query in the open pass, -1 none */
     uint32_t parts[VIS_MAX_PARTS], nparts;
@@ -94,28 +99,66 @@ static bool vis_init(void)
     if (g_vis.pool) {
         return true;
     }
-    if (!g_hvk.caps.host_query_reset) {
-        return false;
-    }
     VkQueryPoolCreateInfo qi = { .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
                                  .queryType = VK_QUERY_TYPE_OCCLUSION, .queryCount = VIS_SLOTS };
     if (T.vkCreateQueryPool(g_hvk.dev, &qi, NULL, &g_vis.pool) != VK_SUCCESS) {
         g_vis.pool = VK_NULL_HANDLE;
         return false;
     }
-    T.vkResetQueryPool(g_hvk.dev, g_vis.pool, 0, VIS_SLOTS);
+    if (g_hvk.caps.host_query_reset) {
+        T.vkResetQueryPool(g_hvk.dev, g_vis.pool, 0, VIS_SLOTS);
+    } else {
+        g_vis.ready = g_vis.next;               /* none yet: vis_reset_ahead */
+    }
     return true;
+}
+
+/* Reset slots left for the next queries: all of them with host query reset
+ * (each is reset as it is taken), else those reset in a command buffer. */
+static uint32_t vis_slots_ready(void)
+{
+    return g_hvk.caps.host_query_reset ? VIS_SLOTS : g_vis.ready - g_vis.next;
+}
+
+/* A device without host query reset (Vulkan 1.1 without
+ * VK_EXT_host_query_reset): the next slots of the ring are reset in the
+ * command buffer, VIS_RESET_BLOCK at a time, while no pass is open
+ * (vkCmdResetQueryPool is not allowed inside one). Called as a pass opens;
+ * a test that still finds none ready ends the pass for it (vis_need_reset).
+ * The reset slots were last used VIS_SLOTS - VIS_RESET_BLOCK queries ago,
+ * long read: the ring is far ahead of use, as with host reset. */
+static void vis_reset_ahead(VkCommandBuffer cb)
+{
+    if (g_hvk.caps.host_query_reset || g_vis_dbg.off || g_back.pass_open || !vis_init() ||
+        vis_slots_ready() >= VIS_RESET_LOW) {
+        return;
+    }
+    uint32_t first = g_vis.ready % VIS_SLOTS;
+    uint32_t n = MIN(VIS_RESET_BLOCK, VIS_SLOTS - first);      /* up to the ring's end */
+    T.vkCmdResetQueryPool(cb, g_vis.pool, first, n);
+    g_vis.ready += n;
+}
+
+/* Before a draw opens or joins a pass: true when the open test would start a
+ * query in it and no reset slot is left (no host query reset, and the
+ * block ran out inside one pass): the pass must end first. */
+static bool vis_need_reset(void)
+{
+    return g_vis.active && g_vis.in_pass < 0 && g_vis.nparts < VIS_MAX_PARTS &&
+           !g_vis_dbg.off && !g_hvk.caps.host_query_reset && !vis_slots_ready() && vis_init();
 }
 
 /* A draw inside the open pass while a test is open: its query starts. */
 static void vis_draw(VkCommandBuffer cb)
 {
     if (!g_vis.active || g_vis.in_pass >= 0 || g_vis.nparts >= VIS_MAX_PARTS ||
-        g_vis_dbg.off || !vis_init()) {
+        g_vis_dbg.off || !vis_init() || !vis_slots_ready()) {
         return;
     }
     uint32_t slot = g_vis.next++ % VIS_SLOTS;
-    T.vkResetQueryPool(g_hvk.dev, g_vis.pool, slot, 1);    /* the ring is far ahead of use */
+    if (g_hvk.caps.host_query_reset) {
+        T.vkResetQueryPool(g_hvk.dev, g_vis.pool, slot, 1);    /* the ring is far ahead of use */
+    }
     T.vkCmdBeginQuery(cb, g_vis.pool, slot,
                       g_hvk.caps.occl_precise ? VK_QUERY_CONTROL_PRECISE_BIT : 0);
     g_vis.in_pass = (int32_t)slot;
@@ -318,9 +361,10 @@ static void gput_end(VkCommandBuffer cb, unsigned slot)
 }
 
 /* Why a pass ended (close_pass_why; the pass profile logs them). */
-enum { PE_OTHER, PE_SUBMIT, PE_SETRT, PE_TEX, PE_PREP, PE_LREAD, PE_SWAP, PE_COPY, PE_N };
+enum { PE_OTHER, PE_SUBMIT, PE_SETRT, PE_TEX, PE_PREP, PE_LREAD, PE_SWAP, PE_COPY, PE_VIS, PE_N };
 static const char *const k_pe_names[PE_N] = { "other", "submit", "target", "upload",
-                                              "sampled target", "local read", "swap", "copy" };
+                                              "sampled target", "local read", "swap", "copy",
+                                              "query reset" };
 static uint64_t g_pe[PE_N];
 
 /* GPU time per render pass while the profile is on (debug): bottom-of-pipe
@@ -641,6 +685,7 @@ static bool open_pass(bool lrz_off)
         .renderArea = { { 0, 0 }, { w, h } }, .layerCount = 1,
         .colorAttachmentCount = rt ? 1 : 0, .pColorAttachments = rt ? &ca : NULL,
         .pDepthAttachment = ds ? &da : NULL, .pStencilAttachment = stencil ? &sa : NULL };
+    vis_reset_ahead(cb);                /* no host query reset: slots for its tests */
     pt_pass_begin(cb, w, h, rt ? (int)rt->fmt : -1, ds != NULL, pf);
     T.vkCmdBeginRendering(cb, &ri);
     if (in_pass_clear) {
@@ -2508,6 +2553,10 @@ static void dispatch(const HleCmdHdr *h)
         if (snap) {
             close_pass_why(PE_COPY);
             hle_draw_snap(cb_get(), hle_surf_get(g_back.rt));
+        }
+        if (vis_need_reset()) {
+            close_pass_why(PE_VIS);             /* query slots are reset outside passes */
+            vis_reset_ahead(cb_get());
         }
         if (g_hle_gpucut == 3) {
             if (!g_back.pass_open) {
