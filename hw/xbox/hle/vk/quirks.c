@@ -73,6 +73,13 @@ static bool malisx2(const HleDriver *d)
     return mali(d) && strstr(d->drv.driverInfo, "malisx2") != NULL;
 }
 
+/* Misaligned vertex attributes read wrong (vb_align): Arm's G57 driver, and
+ * malisx2 on any GPU (it has no VK_EXT_legacy_vertex_attributes) */
+static bool g57_or_malisx2(const HleDriver *d)
+{
+    return mali_g57(d) || malisx2(d);
+}
+
 /* Arm's own Mali driver. */
 static bool arm_blob(const HleDriver *d)
 {
@@ -184,8 +191,14 @@ static const HleQuirk k_quirks[] = {
      * 2026-10-26): Mortal Kombat Shaolin Monks' meshes exploded; its vertices
      * are 18 bytes, two floats at offset 10, and the diag build counted 7.8
      * million misaligned attribute fetches in 230 s, nothing else wrong.
-     * The driver has no VK_EXT_legacy_vertex_attributes. */
-    { HLE_QUIRK_VB_ALIGN, "vb_align", mali_g57 },
+     * The driver has no VK_EXT_legacy_vertex_attributes.
+     * malisx2 on a Mali-G52 MP2 (Anbernic RG Vita, 0.5.0, 2026-11-16):
+     * Fable's Oakvale was strewn with yellow and black triangles; its
+     * terrain's vertices are 14 and 15 bytes (a float and a packed normal at
+     * 2-byte boundaries from the second vertex) and a 66-byte mesh has floats
+     * at offsets 14, 18, 34 and 50. With the quirk the scene is whole. Nor
+     * has malisx2 the extension, on any GPU. */
+    { HLE_QUIRK_VB_ALIGN, "vb_align", g57_or_malisx2 },
     /* Mali-G57 MC4, Arm's r40p0 (Anbernic RG556, Unisoc T820, GammaOS;
      * 2026-10-31): Morrowind lost the device 0.2 s into its loading screen,
      * every time, the kernel log "JS: Job Hard-Stopped (took more than 10

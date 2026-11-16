@@ -80,7 +80,7 @@ enum {
     /* A vertex attribute whose address its component size doesn't divide
      * (Vulkan's rule: a float at a 2-byte boundary, as an Xbox vertex of 18
      * bytes puts every other one) is read wrong, and the meshes explode
-     * (Mali-G57): such a binding's vertices are copied to the arena with each
+     * (Mali-G57 under Arm's driver; malisx2): such a binding's vertices are copied to the arena with each
      * attribute moved to an offset its components divide (pb/pbdraw.c). */
     HLE_QUIRK_VB_ALIGN = 1u << 12,
     /* A pixel shader that writes gl_FragDepth from vW (W-buffering) hangs
