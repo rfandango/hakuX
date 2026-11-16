@@ -1,0 +1,16 @@
+name: 60 fps
+description: The game at 60 frames a second instead of 30. Each frame shows at the next vblank and the game steps a vblank's time a frame; a frame the device doesn't finish in time shows late, and the game slows down with it.
+author: KvFxKaido
+
+[default.xbe]
+# The game's sync mode (0x4B4E8C, set by 0x2D27C0: 1 presents every vblank,
+# 2 every other one). The start-up (0x1B5894) and the end of each loading
+# screen (0x2918F) set 2. The game already handles 1: animation playback
+# takes two sub-frames per 30 Hz frame when the mode is 1 (0x119DC9, 0x2C1A12).
+0x0002918D: 6A 02 -> 6A 01
+0x001B5883: 8B 35 A8 76 50 00 53 83 CE 08 57 89 35 A8 76 50 00 -> 83 0D A8 76 50 00 08 53 6A 01 90 90 90 90 90 90 90
+# The race's time step: its set-up (0x20A30) takes a fixed step of
+# 1 / (refresh rate * 0.5) and a frame interval of 2. The factor becomes 1.0
+# (0x447C1C) and the interval 1 (eax), as the 60 fps states have them.
+0x00020A5D: F3 0F 10 05 18 7C 44 00 -> F3 0F 10 05 1C 7C 44 00
+0x00020A8A: 89 4E 58 -> 89 46 58
