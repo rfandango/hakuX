@@ -1046,6 +1046,12 @@ void nc_kernel_set_hd_key(NcKernel *k)
         const uint8_t *e = eeprom(k);
         memcpy(nc_vm_host(k->vm, va), g_sec_plain ? e + 0x36 : g_sec + 0x1C, 16);
     }
+    /* XAPI reads the AV pack detected at boot from this export. Keep it
+     * consistent with the SMC: zero means SCART, not the default HDTV pack. */
+    const uint32_t vm = data_va(k, "HalBootSMCVideoMode");
+    if (vm) {
+        nc_vm_wr32(k->vm, vm, av_pack_smc());
+    }
 }
 
 void nc_ex_register(NcKernel *k)
