@@ -740,7 +740,11 @@ def cmd_extract(path, dest, args):
             print("%s: no XDVDFS volume at any known partition offset" % path, file=sys.stderr)
             return 2
         entries, _past = catalog(disc, args.cap)
-        os.makedirs(dest, exist_ok=True)
+        try:
+            os.makedirs(dest, exist_ok=True)
+        except OSError as exc:
+            print("%s: %s: cannot create %s" % (path, exc, dest), file=sys.stderr)
+            return 2
         count = 0
         written = 0
         for p in sorted(entries, key=_sort_key):
@@ -749,21 +753,32 @@ def cmd_extract(path, dest, args):
             if not rel:
                 continue
             target = os.path.join(dest, rel)
-            if e.is_dir:
-                os.makedirs(target, exist_ok=True)
-                continue
-            parent = os.path.dirname(target)
-            if parent:
-                os.makedirs(parent, exist_ok=True)
-            with open(target, "wb") as out:
-                off = 0
-                while off < e.size:
-                    chunk = read_file(disc, e, off, min(8 << 20, e.size - off))
-                    out.write(chunk)
-                    off += len(chunk)
-            wrote = os.path.getsize(target)
-            if wrote != e.size:
-                print("%s: wrote %d of %d bytes" % (rel, wrote, e.size), file=sys.stderr)
+            try:
+                if e.is_dir:
+                    os.makedirs(target, exist_ok=True)
+                    continue
+                parent = os.path.dirname(target)
+                if parent:
+                    os.makedirs(parent, exist_ok=True)
+                with open(target, "wb") as out:
+                    off = 0
+                    while off < e.size:
+                        chunk = read_file(disc, e, off, min(8 << 20, e.size - off))
+                        out.write(chunk)
+                        off += len(chunk)
+                wrote = os.path.getsize(target)
+                if wrote != e.size:
+                    raise IOError("wrote %d of %d bytes" % (wrote, e.size))
+            except (IOError, OSError) as exc:
+                # Leave nothing that looks like a finished file, and say where it
+                # stopped: an extract that fails half way is not a quiet success.
+                try:
+                    if not e.is_dir:
+                        os.unlink(target)
+                except OSError:
+                    pass
+                print("%s: %s; stopped at %s after %d file(s), and its partial copy was removed"
+                      % (path, exc, rel, count), file=sys.stderr)
                 return 2
             count += 1
             written += wrote
@@ -1038,8 +1053,8 @@ def cmd_create(src, out_path, args):
 
 
 def cmd_rewrite(path, args):
-    """Repair the tables and, for an image whose partition starts at +0x0, drop
-    the sectors after the last one used (what a rewrite does to a trimmed image)."""
+    """Repair the tables, drop the sectors after the last one used when the
+    partition starts at +0x0, then read the result back and report it."""
     disc = Disc(path)
     try:
         if not disc.locate(args.part_offset):
@@ -1063,6 +1078,19 @@ def cmd_rewrite(path, args):
         print("rewrote      %s: %d table(s) rebalanced, %.2f GiB%s"
               % (path, repaired, os.path.getsize(path) / 2**30,
                  " (dropped %.2f GiB after the last used sector)" % (shrunk / 2**30) if shrunk else ""))
+        # Read the result back: a rewrite reports what the image is now, not what
+        # it was meant to become.
+        after, past = survey_image(path, args.cap)
+        if after is None:
+            print("%s: the rewritten image has no readable volume at +0x0" % path, file=sys.stderr)
+            return 2
+        deepest = max([d[5] for d in after] or [0])
+        if past or deepest > TARGET_DEPTH:
+            print("%s: the rewritten image still has %d table(s) past the end and a deepest "
+                  "table of %d level(s)" % (path, len(past), deepest), file=sys.stderr)
+            return 2
+        print("verified     %d table(s), deepest %d level(s), every entry reachable"
+              % (len(after), deepest))
         if disc.part_off != 0:
             print("note         the partition starts at +0x%X, so the image keeps its front "
                   "padding; --trim OUT.iso writes one with the partition at +0x0" % disc.part_off)
