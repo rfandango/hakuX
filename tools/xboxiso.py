@@ -194,7 +194,11 @@ def inorder(entries):
 
 def walk_lookup(table, name, cap):
     """A reader that walks the whole table and stops at a depth (hakuX)."""
-    target = name.upper().encode("latin-1")
+    # Upper-case the latin-1 bytes, never the decoded str: str.upper() maps
+    # "ü" to "Ü" (0xDC) while bytes.upper() only folds ASCII, so a name with a
+    # latin-1 character above ASCII could never match itself. That made --verify
+    # call such an entry unreachable and stopped a repair that was sound.
+    target = name.encode("latin-1").upper()
     stack = [(0, 0)]
     seen = set()
     while stack:
@@ -248,7 +252,7 @@ def unreachable_within(table, cap):
 def descend_lookup(table, name, case_insensitive=True):
     """A reader that searches by descending the tree and comparing names the
     way the Xbox kernel and xemu do, which needs the tree sorted."""
-    target = name.upper().encode("latin-1") if case_insensitive else name.encode("latin-1")
+    target = name.encode("latin-1").upper() if case_insensitive else name.encode("latin-1")
     off = 0
     for _ in range(len(table)):
         if off + 14 > len(table):
@@ -775,6 +779,16 @@ def self_test(args):
     check(repair_table(balanced, args.cap)[0] == balanced, "a balanced table needs no repair")
 
     # Padding marker, a table too short to hold an entry, and a cycle.
+    # A latin-1 name has to match itself. Folding is ASCII-only on both sides,
+    # so the "ü" byte is compared as written and only ASCII case varies.
+    latin = build_table(["f00.bin", "Gigi R\xfcf.res"], chain=True)
+    check(walk_lookup(latin, "Gigi R\xfcf.res", 64) is not None,
+          "a latin-1 name is found by a walk")
+    check(descend_lookup(latin, "Gigi R\xfcf.res") is not None,
+          "a latin-1 name is found by a descending search")
+    check(walk_lookup(latin, "GIGI R\xfcf.RES", 64) is not None,
+          "an ASCII upper-case query still finds it")
+
     check(walk_lookup(build_table(names[:3], pad=True), "f01.bin", 64) is not None, "padding is skipped")
     check(parse_table(b"\0" * 8)[1] == [], "a short table yields no entries")
     cyc = bytearray(build_table(names[:5]))
