@@ -43,10 +43,12 @@ profile-out-*/
 /CLAUDE.md
 
 # Local dev tools (not versioned), but for the core's (its app libraries,
-# the savestate lock, device runs) and the mods' generators (mods/README.md)
+# the savestate lock, device runs), the mods' generators (mods/README.md) and
+# xboxiso, the all-in-one disc image tool (tools/xboxiso.py)
 /tools/*
 !/tools/native/
 !/tools/mods/
+!/tools/xboxiso.py
 
 # Shared build/device lock between sessions (not versioned)
 /.device.lock
