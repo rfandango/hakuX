@@ -31,7 +31,11 @@ the whole tree (hakuX) needs the walk to stay shallow, which it becomes.
     ./xiso-fix.py --self-test
 
 Exit status: 0 nothing to do or repaired, 1 usage or I/O error, 2 an image has
-a directory the repair cannot make safe (and was left untouched).
+a directory the repair cannot make safe (and was left untouched), 3 --verify
+found a problem. An in-place repair backs the image up first (<image>.bak,
+rotated to <image>.bak.1 and so on, never overwriting an older one), verifies
+every table before writing any, and --trim writes beside the destination and
+renames only a verified image into place.
 """
 
 import argparse
@@ -318,21 +322,50 @@ def used_end(disc, dirs):
     return end
 
 
+def table_patches(dirs, args):
+    """The repaired bytes of every table that needs one, all verified in memory
+    before a single byte is written: a table that cannot be repaired safely
+    stops the repair with nothing on disk changed. Returns (patches, error)."""
+    patches = []
+    for sector, size, table, entries, order, deep, dpath in dirs:
+        if deep <= TARGET_DEPTH:
+            continue
+        patch, reason, _deep, _count = repair_table(table, args.cap)
+        if patch is None:
+            return None, "%s: %s" % (dpath, reason)
+        if patch != table:
+            patches.append((sector, patch))
+    return patches, None
+
+
+def write_patches(path, part_off, patches):
+    """Writes verified table patches into an image already on disk."""
+    with open(path, "r+b") as out:
+        for sector, patch in patches:
+            out.seek(part_off + sector * SECTOR)
+            out.write(patch)
+    return len(patches)
+
+
 def repair_in_place(disc, dirs, args):
-    """Rebalance every table deeper than the target, verifying each one.
-    Returns (repaired, error)."""
-    bad = [d for d in dirs if d[5] > TARGET_DEPTH]
-    repaired = 0
-    with open(disc.path, "r+b") as out:
-        for sector, size, table, entries, order, deep, dpath in bad:
-            patch, reason, _deep, _count = repair_table(table, args.cap)
-            if patch is None:
-                return repaired, "%s: %s" % (dpath, reason)
-            if patch != table:
-                out.seek(disc.part_off + sector * SECTOR)
-                out.write(patch)
-                repaired += 1
-    return repaired, None
+    """Verify every repair, then write them all: a failed verification leaves
+    the image untouched. Returns (repaired, error)."""
+    patches, error = table_patches(dirs, args)
+    if error:
+        return 0, error
+    return write_patches(disc.path, disc.part_off, patches), None
+
+
+def backup_path(path):
+    """A backup name that never overwrites an older one (image.iso.bak,
+    image.iso.bak.1, ...), so a second run cannot destroy the last good copy."""
+    base = path + ".bak"
+    if not os.path.exists(base):
+        return base
+    n = 1
+    while os.path.exists("%s.%d" % (base, n)):
+        n += 1
+    return "%s.%d" % (base, n)
 
 
 def trim_image(path, out_path, args):
@@ -359,9 +392,14 @@ refusing to trim an image that is already short" % (path, len(past_end)), file=s
         print("image        %s (%.2f GiB), game partition +0x%X" % (path, disc.size / 2**30, disc.part_off))
         print("content      %d entries, last used sector %d (%.2f GiB)" % (
             sum(len(d[3]) for d in dirs), end, keep / 2**30))
-        if os.path.exists(out_path):
-            os.unlink(out_path)
-        with open(out_path, "wb") as out:
+        # Written beside the destination and renamed only once it verifies, so
+        # a failed or interrupted trim can never leave a broken image under the
+        # name the caller asked for, and an existing file there is replaced
+        # only after the new one is known good.
+        tmp_path = out_path + ".part"
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        with open(tmp_path, "wb") as out:
             left = keep
             pos = src_off
             while left:
@@ -372,33 +410,36 @@ refusing to trim an image that is already short" % (path, len(past_end)), file=s
     finally:
         disc.f.close()
 
-    new = Disc(out_path)
+    promoted = False
     try:
-        if not new.locate():
-            print("trimmed image has no readable volume descriptor at +0x0", file=sys.stderr)
-            return 2
-        dirs, past_end = survey(new, args.cap)
-        if past_end or sum(len(d[3]) for d in dirs) != src_entries:
-            print("trimmed image lost content, refusing to keep it", file=sys.stderr)
-            return 2
-        repaired, error = repair_in_place(new, dirs, args)
-        if error:
-            print("  %s, refusing to keep the trimmed image" % error, file=sys.stderr)
-            return 2
-        after = Disc(out_path)
+        new = Disc(tmp_path)
         try:
-            after.locate()
-            dirs, _ = survey(after, args.cap)
+            if not new.locate():
+                print("trimmed image has no readable volume descriptor at +0x0", file=sys.stderr)
+                return 2
+            dirs, past_end = survey(new, args.cap)
+            if past_end or sum(len(d[3]) for d in dirs) != src_entries:
+                print("trimmed image lost content, refusing to keep it", file=sys.stderr)
+                return 2
+            patches, error = table_patches(dirs, args)
+            if error:
+                print("  %s, refusing to keep the trimmed image" % error, file=sys.stderr)
+                return 2
+            repaired = write_patches(tmp_path, new.part_off, patches)
         finally:
-            after.f.close()
+            new.f.close()
+        dirs, _past = survey_image(tmp_path, args.cap) or ([], [])
         worst = max([d[5] for d in dirs] or [0])
+        os.replace(tmp_path, out_path)  # the verified image takes its name here
+        promoted = True
         print("trimmed      %s (%.2f GiB, was %.2f GiB)" % (out_path, os.path.getsize(out_path) / 2**30,
                                                            disc.size / 2**30))
         print("kept         %d entries, partition at +0x0, %d table(s) rebalanced, deepest %d level(s)"
               % (sum(len(d[3]) for d in dirs), repaired, worst))
         return 0
     finally:
-        new.f.close()
+        if not promoted and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 def survey_image(path, cap):
@@ -452,27 +493,25 @@ def process(path, args):
             print("\nre-run with -o fixed.iso, or --in-place --backup, to repair")
             return 0
 
+        patches, error = table_patches(dirs, args)
+        if error:
+            print("  %s, nothing written" % error, file=sys.stderr)
+            return 2
         out_path = path if args.in_place else args.output
-        if args.in_place and args.backup:
-            shutil.copyfile(path, path + ".bak")
-            print("\nbackup       %s.bak" % path)
-        if not args.in_place:
+        if args.in_place:
+            if not args.no_backup:
+                bk = backup_path(path)
+                shutil.copyfile(path, bk)
+                print("\nbackup       %s" % bk)
+        else:
             shutil.copyfile(path, out_path)
             print("\ncopy         %s" % out_path)
 
-        repaired = 0
-        with open(out_path, "r+b") as out:
+        repaired = write_patches(out_path, disc.part_off, patches)
+        if args.verbose:
             for sector, size, table, entries, order, deep, dpath in bad:
-                patch, reason, deep, count = repair_table(table, args.cap)
-                if patch is None:
-                    print("  %s: %s, refusing to write" % (dpath, reason), file=sys.stderr)
-                    return 2
-                out.seek(disc.part_off + sector * SECTOR)
-                out.write(patch)
-                repaired += 1
-                if args.verbose:
-                    print("  %-34s %3d entries: depth %3d -> %d"
-                          % (dpath[:34], count, deep, depth_of(patch, balanced_links(parse_table(patch)[0])[0])))
+                if any(sector == p[0] for p in patches):
+                    print("  %-34s %3d entries: depth %3d -> repaired" % (dpath[:34], len(order), deep))
 
         again, _past = survey_image(out_path, args.cap) or ([], [])
         worst = max([d[5] for d in again] or [0])
@@ -1049,7 +1088,10 @@ def main(argv):
                     help="repair in place and drop the sectors after the last used one")
     ap.add_argument("-o", "--output", help="write the repaired (or created) image here")
     ap.add_argument("--in-place", action="store_true", help="repair each image in place")
-    ap.add_argument("--backup", action="store_true", help="with --in-place, keep <image>.bak")
+    ap.add_argument("--backup", action="store_true",
+                    help="kept for compatibility: --in-place backs up unless --no-backup")
+    ap.add_argument("--no-backup", action="store_true",
+                    help="with --in-place, do not keep <image>.bak (backup is the default)")
     ap.add_argument("--trim", metavar="OUT.iso",
                     help="write a compact copy: the game partition alone, cut to the last used "
                          "sector, tables repaired (loses no file)")
