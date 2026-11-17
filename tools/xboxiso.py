@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""xiso-fix - repair XDVDFS directory tables that bounded readers cannot search.
+"""xboxiso - an all-in-one Xbox disc image tool.
+
+List, extract, create, verify, report and repair Xbox disc images (ISO, XISO,
+XGD), and write a correct trim of a full Redump dump.
 
 An Xbox disc lists each directory as a binary tree of entries: two u16 child
 offsets (in dwords), the file's sector and size, its attributes, its name. A
@@ -13,7 +16,7 @@ hakuX's native core stops at depth 64 (native/core/xdvdfs.c), so a 76-entry
 chain hides its last 11 entries: Burnout 3: Takedown opens Tracks\\tlist.bin,
 gets "not on the disc", and shows its dirty-disc screen.
 
-This tool rewrites only the two child offsets of each entry, so the same
+The repair rewrites only the two child offsets of each entry, so the same
 entries, at the same offsets, in the same order, describe the same files as a
 balanced tree. Nothing else changes: no file data, no entry placement, no
 name, sector, size or attribute, and no offset moves.
@@ -24,18 +27,24 @@ rebuilds over the table's existing in-order sequence instead of sorting it
 again, and refuses to write if that sequence would change. A reader that walks
 the whole tree (hakuX) needs the walk to stay shallow, which it becomes.
 
-    ./xiso-fix.py image.iso                  # report, changes nothing
-    ./xiso-fix.py image.iso -o fixed.iso     # write a repaired copy
-    ./xiso-fix.py image.iso --in-place --backup
-    ./xiso-fix.py roms/xbox/*.iso --in-place --backup   # a library
-    ./xiso-fix.py --self-test
+    ./tools/xboxiso.py ROM.iso                     # report, changes nothing
+    ./tools/xboxiso.py ROM.iso -o fixed.iso        # write a repaired copy
+    ./tools/xboxiso.py ROM.iso --in-place          # repair, keeping ROM.iso.bak
+    ./tools/xboxiso.py roms/xbox/*.iso --in-place  # a library
+    ./tools/xboxiso.py ROM.iso --trim ROM.trim.iso # compact copy, no file lost
+    ./tools/xboxiso.py ROM.iso --rewrite           # repair and drop the tail
+    ./tools/xboxiso.py ROM.iso --extract out/      # extract its files
+    ./tools/xboxiso.py --create tree/ -o new.iso   # build one from a directory
+    ./tools/xboxiso.py ROM.iso --verify            # check entries and extents
+    ./tools/xboxiso.py --self-test
 
-Exit status: 0 nothing to do or repaired, 1 usage or I/O error, 2 an image has
-a directory the repair cannot make safe (and was left untouched), 3 --verify
-found a problem. An in-place repair backs the image up first (<image>.bak,
-rotated to <image>.bak.1 and so on, never overwriting an older one), verifies
-every table before writing any, and --trim writes beside the destination and
-renames only a verified image into place.
+Exit status: 0 nothing to do or repaired, 1 usage or I/O error, 2 an image or
+a source tree has a problem that stops the operation (a directory the repair
+cannot make safe, a tree that cannot be a disc, content past the end of the
+image) and was left untouched, 3 a check found a problem. A repair backs the
+image up first (<image>.bak, rotated to <image>.bak.1 and so on, never
+overwriting an older one) and verifies every table before writing any; --trim
+writes beside the destination and renames only a verified image into place.
 """
 
 import argparse
@@ -54,6 +63,20 @@ PART_OFFSETS = (0, 0x18300000, 0xFD90000, 0x2080000)
 PADDING = (0xFFFF, 0xFFFF, 0xFF)
 # Shallow enough that a reader stopping at 64, or at 32, finds every entry.
 TARGET_DEPTH = 12
+
+
+def _safe_text(text):
+    """Text taken from an image, made safe to print. A name or an XBE title is
+    untrusted input: left raw, a control character moves the cursor, recolours
+    the terminal or hides the line before it. Escaped, it stays readable."""
+    out = []
+    for ch in text:
+        code = ord(ch)
+        if code < 0x20 or 0x7F <= code <= 0x9F:
+            out.append("\\x%02X" % code)
+        else:
+            out.append(ch)
+    return "".join(out)
 
 
 class Entry:
@@ -194,6 +217,34 @@ def walk_lookup(table, name, cap):
     return None
 
 
+def unreachable_within(table, cap):
+    """The names a reader that walks the whole table but stops at a depth
+    cannot reach, in one traversal instead of a full walk per entry (the repair
+    has to prove this for every entry, and a directory can hold thousands).
+    Same answer as walk_lookup(name, cap) is None for each of them."""
+    names = []
+    stack = [(0, 0)]
+    seen = set()
+    while stack:
+        off, depth = stack.pop()
+        if off in seen or off + 14 > len(table):
+            continue
+        seen.add(off)
+        e = table[off:off + 14]
+        left, right = struct.unpack_from("<HH", e, 0)
+        attr, nlen = e[12], e[13]
+        if (left, right, attr) == PADDING:
+            continue
+        if off + 14 + nlen > len(table):
+            continue
+        if depth > cap and off + 14 + nlen <= len(table):
+            names.append(bytes(table[off + 14:off + 14 + nlen]).decode("latin-1"))
+        for child in (right, left):
+            if child and child != 0xFFFF:
+                stack.append((child * 4, depth + 1))
+    return names
+
+
 def descend_lookup(table, name, case_insensitive=True):
     """A reader that searches by descending the tree and comparing names the
     way the Xbox kernel and xemu do, which needs the tree sorted."""
@@ -278,11 +329,13 @@ def repair_table(table, cap):
     touched = apply_links(patch, links, entries)
     if not touched:
         return bytes(table), None, deepest, len(order)
-    if [e.off for e in inorder(parse_table(patch)[0])] != [e.off for e in original]:
+    patched, patched_order, _patched_deep = parse_table(patch)
+    if [e.off for e in inorder(patched)] != [e.off for e in original]:
         return None, "the repair would change the table's order", deepest, len(order)
-    for e in order:
-        if walk_lookup(patch, e.name, cap) is None:
-            return None, "%s would still be unreachable" % e.name, deepest, len(order)
+    too_deep = unreachable_within(patch, cap)
+    if too_deep:
+        return None, "%s would still be unreachable" % too_deep[0], deepest, len(order)
+    for e in patched_order:
         if descend_lookup(patch, e.name) is None:
             return None, "%s would not be found by a descending search" % e.name, deepest, len(order)
     return patch, None, deepest, len(order)
@@ -347,15 +400,6 @@ def write_patches(path, part_off, patches):
     return len(patches)
 
 
-def repair_in_place(disc, dirs, args):
-    """Verify every repair, then write them all: a failed verification leaves
-    the image untouched. Returns (repaired, error)."""
-    patches, error = table_patches(dirs, args)
-    if error:
-        return 0, error
-    return write_patches(disc.path, disc.part_off, patches), None
-
-
 def backup_path(path):
     """A backup name that never overwrites an older one (image.iso.bak,
     image.iso.bak.1, ...), so a second run cannot destroy the last good copy."""
@@ -373,14 +417,18 @@ def trim_image(path, out_path, args):
     XDVDFS at +0x0), cut to the last sector the filesystem uses, with its
     tables repaired. Loses no file, unlike cutting files out."""
     disc = Disc(path)
+    tmp_path = out_path + ".part"
+    promoted = False
+    keep_tmp = False
     try:
         if not disc.locate(args.part_offset):
             print("%s: no XDVDFS volume at any known partition offset" % path, file=sys.stderr)
             return 2
         dirs, past_end = survey(disc, args.cap)
         if past_end:
-            print("%s: %d directory table(s) lie past the end of this image; \
-refusing to trim an image that is already short" % (path, len(past_end)), file=sys.stderr)
+            print("%s: %d directory table(s) lie past the end of this image; "
+                  "refusing to trim an image that is already short"
+                  % (path, len(past_end)), file=sys.stderr)
             return 2
         end = used_end(disc, dirs)
         keep = end * SECTOR
@@ -389,15 +437,19 @@ refusing to trim an image that is already short" % (path, len(past_end)), file=s
         if src_off + keep > disc.size:
             print("%s: last used sector is past the end of the image" % path, file=sys.stderr)
             return 2
-        print("image        %s (%.2f GiB), game partition +0x%X" % (path, disc.size / 2**30, disc.part_off))
-        print("content      %d entries, last used sector %d (%.2f GiB)" % (
-            sum(len(d[3]) for d in dirs), end, keep / 2**30))
+        print("image        %s (%.2f GiB), game partition +0x%X"
+              % (path, disc.size / 2**30, disc.part_off))
+        print("content      %d entries, last used sector %d (%.2f GiB)"
+              % (src_entries, end, keep / 2**30))
         # Written beside the destination and renamed only once it verifies, so
         # a failed or interrupted trim can never leave a broken image under the
         # name the caller asked for, and an existing file there is replaced
         # only after the new one is known good.
-        tmp_path = out_path + ".part"
         if os.path.exists(tmp_path):
+            if os.path.isdir(tmp_path):
+                print("%s: is a directory, so a stray file from an interrupted trim cannot "
+                      "be cleared out of the way" % tmp_path, file=sys.stderr)
+                return 2
             os.unlink(tmp_path)
         with open(tmp_path, "wb") as out:
             left = keep
@@ -407,38 +459,54 @@ refusing to trim an image that is already short" % (path, len(past_end)), file=s
                 out.write(disc.read(pos, chunk))
                 pos += chunk
                 left -= chunk
-    finally:
-        disc.f.close()
-
-    promoted = False
-    try:
         new = Disc(tmp_path)
         try:
             if not new.locate():
                 print("trimmed image has no readable volume descriptor at +0x0", file=sys.stderr)
                 return 2
-            dirs, past_end = survey(new, args.cap)
-            if past_end or sum(len(d[3]) for d in dirs) != src_entries:
+            copied, past_end = survey(new, args.cap)
+            if past_end or sum(len(d[3]) for d in copied) != src_entries:
                 print("trimmed image lost content, refusing to keep it", file=sys.stderr)
                 return 2
-            patches, error = table_patches(dirs, args)
+            patches, error = table_patches(copied, args)
             if error:
                 print("  %s, refusing to keep the trimmed image" % error, file=sys.stderr)
                 return 2
             repaired = write_patches(tmp_path, new.part_off, patches)
         finally:
             new.f.close()
-        dirs, _past = survey_image(tmp_path, args.cap) or ([], [])
-        worst = max([d[5] for d in dirs] or [0])
-        os.replace(tmp_path, out_path)  # the verified image takes its name here
+        # Gated on what the trimmed image is now, never on what it was meant to
+        # become: a readback that cannot even be surveyed is a refusal, not an
+        # empty survey whose zero deepest table reads as success.
+        problems, summary = check_image(tmp_path, args.cap)
+        if summary is None or problems:
+            for line in problems or []:
+                print(line, file=sys.stderr)
+            print("trimmed image does not verify, refusing to keep it", file=sys.stderr)
+            return 2
+        if summary["entries"] != src_entries:
+            print("trimmed image has %d entries, not the %d it copied, refusing to keep it"
+                  % (summary["entries"], src_entries), file=sys.stderr)
+            return 2
+        if summary["deepest"] > TARGET_DEPTH:
+            print("trimmed image still has a table %d level(s) deep, refusing to keep it"
+                  % summary["deepest"], file=sys.stderr)
+            return 2
+        try:
+            os.replace(tmp_path, out_path)  # the verified image takes its name here
+        except OSError as exc:
+            print("%s: %s; the verified image stays at %s" % (out_path, exc, tmp_path), file=sys.stderr)
+            keep_tmp = True
+            return 2
         promoted = True
-        print("trimmed      %s (%.2f GiB, was %.2f GiB)" % (out_path, os.path.getsize(out_path) / 2**30,
-                                                           disc.size / 2**30))
+        print("trimmed      %s (%.2f GiB, was %.2f GiB)"
+              % (out_path, os.path.getsize(out_path) / 2**30, disc.size / 2**30))
         print("kept         %d entries, partition at +0x0, %d table(s) rebalanced, deepest %d level(s)"
-              % (sum(len(d[3]) for d in dirs), repaired, worst))
+              % (summary["entries"], repaired, summary["deepest"]))
         return 0
     finally:
-        if not promoted and os.path.exists(tmp_path):
+        disc.f.close()
+        if not promoted and not keep_tmp and os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
 
@@ -490,7 +558,8 @@ def process(path, args):
                 print("copied unchanged to %s" % args.output)
             return 0
         if not args.output and not args.in_place:
-            print("\nre-run with -o fixed.iso, or --in-place --backup, to repair")
+            print("\nre-run with -o fixed.iso to write a repaired copy, or --in-place to repair it "
+                  "in place (keeping <image>.bak)")
             return 0
 
         patches, error = table_patches(dirs, args)
@@ -498,6 +567,7 @@ def process(path, args):
             print("  %s, nothing written" % error, file=sys.stderr)
             return 2
         out_path = path if args.in_place else args.output
+        bk = None
         if args.in_place:
             if not args.no_backup:
                 bk = backup_path(path)
@@ -507,16 +577,45 @@ def process(path, args):
             shutil.copyfile(path, out_path)
             print("\ncopy         %s" % out_path)
 
-        repaired = write_patches(out_path, disc.part_off, patches)
+        try:
+            repaired = write_patches(out_path, disc.part_off, patches)
+        except (IOError, OSError) as exc:
+            # A write that fails half way leaves some tables patched. Say that,
+            # and name the copy to restore, instead of announcing the backup and
+            # leaving the caller to discover the rest later.
+            print("%s: %s" % (out_path, exc), file=sys.stderr)
+            if bk:
+                print("the image may be partially patched; restore it from %s" % bk, file=sys.stderr)
+            else:
+                print("the image may be partially patched, and no backup was kept", file=sys.stderr)
+            return 2
         if args.verbose:
             for sector, size, table, entries, order, deep, dpath in bad:
                 if any(sector == p[0] for p in patches):
-                    print("  %-34s %3d entries: depth %3d -> repaired" % (dpath[:34], len(order), deep))
+                    print("  %-34s %3d entries: depth %3d -> repaired"
+                          % (_safe_text(dpath)[:34], len(order), deep))
 
-        again, _past = survey_image(out_path, args.cap) or ([], [])
-        worst = max([d[5] for d in again] or [0])
+        # Read the result back and gate the report on it: a repair says what the
+        # image is now, not what it was meant to become. An image that cannot be
+        # surveyed at all is a failure, never an empty survey that passes.
+        problems, summary = check_image(out_path, args.cap)
+        if summary is None or problems:
+            for line in problems or []:
+                print(line, file=sys.stderr)
+            print("%s: the repaired image does not verify%s"
+                  % (out_path, "; restore it from " + bk if bk else ", and no backup was kept"),
+                  file=sys.stderr)
+            return 3
+        # Compare each directory's in-order sequence by its path, never by the
+        # survey's discovery order: rebalancing changes the order the walk finds
+        # subdirectories in, while the sequence that matters is unchanged.
+        orders = {d[6]: [e.off for e in inorder(d[3])] for d in dirs}
+        if {d[6]: [e.off for e in inorder(d[3])] for d in summary["dirs"]} != orders:
+            print("%s: the repaired image's table order differs from the disc's" % out_path,
+                  file=sys.stderr)
+            return 3
         print("\nrepaired     %d table(s) in %d table(s) of the image, deepest is now %d level(s)"
-              % (repaired, len(dirs), worst))
+              % (repaired, len(dirs), summary["deepest"]))
         print("verified     every entry findable by a reader that stops at depth %d" % args.cap)
         print("verified     every entry findable by a reader that descends the tree comparing names")
         print("verified     each table's entry order is the disc's own, unchanged")
@@ -647,6 +746,26 @@ def self_test(args):
         # Idempotent.
         again, reason2, _d, _c = repair_table(patch, args.cap)
         check(again is not None and again == patch, "a repaired table repairs to itself")
+        # The repair now proves reachability in one traversal instead of a walk
+        # per entry, so the bulk answer has to match the per-entry one.
+        walked_missing = [n for n in names if walk_lookup(chain, n, 64) is None]
+        check(sorted(unreachable_within(chain, 64)) == sorted(walked_missing),
+              "the bulk reachability check agrees with a walk per entry (%d)" % len(walked_missing))
+        check(unreachable_within(chain, 4096) == [], "nothing is out of reach without a depth cap")
+        check(unreachable_within(patch, args.cap) == [],
+              "nothing is out of reach in a repaired table")
+
+    # Text and names taken from an image are untrusted: control characters are
+    # escaped before printing, and names that cannot be host paths are refused.
+    check(_safe_text("A\x1b[2JB\x00") == "A\\x1B[2JB\\x00", "control characters are escaped")
+    check(_safe_text("Burnout 3") == "Burnout 3", "ordinary text is untouched")
+    check(_host_name("roms/a.bin") == "roms/a.bin", "a plain disc path is a host path")
+    for bad in ("a:b", "a\x1bb", "a\x00b"):
+        try:
+            _host_name(bad)
+            check(False, "%r is refused as a host name" % bad)
+        except ValueError:
+            check(True, "%r is refused as a host name" % bad)
 
     # A table that is already balanced needs no repair, and stays valid.
     check(walk_lookup(balanced, "target.bin", 64) is not None, "a balanced table is searchable")
@@ -711,6 +830,19 @@ def safe_relpath(path):
     return os.path.join(*parts) if parts else ""
 
 
+def _host_name(rel):
+    """The host path for a disc path, or ValueError for a name that cannot be
+    one: a control character would drive the terminal that prints it, and a
+    colon starts a drive letter on Windows, where the name would leave the
+    destination directory. Both come from the image, so neither is trusted."""
+    for ch in rel:
+        code = ord(ch)
+        if code < 0x20 or code == 0x7F or ch == ":":
+            raise ValueError("%r cannot appear in a name written to disk (%s)"
+                             % (ch, _safe_text(rel)))
+    return rel
+
+
 def cmd_list(path, args):
     disc = Disc(path)
     try:
@@ -725,9 +857,9 @@ def cmd_list(path, args):
         for p in sorted(entries, key=_sort_key):
             e = entries[p]
             if e.is_dir:
-                print("  %-58s      dir" % p)
+                print("  %-58s      dir" % _safe_text(p))
             else:
-                print("  %-58s %9d" % (p, e.size))
+                print("  %-58s %9d" % (_safe_text(p), e.size))
         return 0
     finally:
         disc.f.close()
@@ -747,12 +879,25 @@ def cmd_extract(path, dest, args):
             return 2
         count = 0
         written = 0
+        limit = (disc.size - disc.part_off) // SECTOR
         for p in sorted(entries, key=_sort_key):
             e = entries[p]
             rel = safe_relpath(p)
             if not rel:
                 continue
-            target = os.path.join(dest, rel)
+            try:
+                target = os.path.join(dest, _host_name(rel))
+            except ValueError as exc:
+                print("%s: %s; stopped after %d file(s)" % (path, exc, count), file=sys.stderr)
+                return 2
+            # Say so before makedirs() creates a tree for a file the image
+            # cannot supply, rather than leaning on a short read later.
+            last = e.sector + (e.size + SECTOR - 1) // SECTOR
+            if last > limit:
+                print("%s: %s ends at sector %d, past the end of the image (%d); stopped "
+                      "after %d file(s)" % (path, _safe_text(rel), last, limit, count),
+                      file=sys.stderr)
+                return 2
             try:
                 if e.is_dir:
                     os.makedirs(target, exist_ok=True)
@@ -769,7 +914,7 @@ def cmd_extract(path, dest, args):
                 wrote = os.path.getsize(target)
                 if wrote != e.size:
                     raise IOError("wrote %d of %d bytes" % (wrote, e.size))
-            except (IOError, OSError) as exc:
+            except (OSError, ValueError) as exc:
                 # Leave nothing that looks like a finished file, and say where it
                 # stopped: an extract that fails half way is not a quiet success.
                 try:
@@ -778,7 +923,7 @@ def cmd_extract(path, dest, args):
                 except OSError:
                     pass
                 print("%s: %s; stopped at %s after %d file(s), and its partial copy was removed"
-                      % (path, exc, rel, count), file=sys.stderr)
+                      % (path, exc, _safe_text(rel), count), file=sys.stderr)
                 return 2
             count += 1
             written += wrote
@@ -806,7 +951,10 @@ def xbe_info(disc, entry):
     info = {"base": base, "entry": u32(0x128), "sections": sections, "image": u32(0x10C),
             "tls": u32(0x12C)}
     off = cert - base if cert >= base else cert
-    if 0 <= off and off + 0x8C <= len(head):
+    # The certificate's fields run to +0xAF (version at +0xAC), so the header
+    # must hold that much: a truncated XBE otherwise raises struct.error out of
+    # a function whose whole job is to read untrusted headers.
+    if 0 <= off and off + 0xB0 <= len(head):
         info["title_id"] = u32(off + 0x08)
         words = head[off + 0x0C:off + 0x34].decode("utf-16-le", "replace")
         info["title"] = words.split("\0")[0]
@@ -858,7 +1006,7 @@ def cmd_info(path, args):
             if info is None:
                 print("xbe          default.xbe is not an XBE")
             else:
-                print("title        %s" % info.get("title", "?"))
+                print("title        %s" % _safe_text(info.get("title", "?")))
                 print("title id     %08X" % info.get("title_id", 0))
                 print("regions      %s, disk %d, version %d.%d" % (
                     _regions(info.get("region", 0)), info.get("disk", 0),
@@ -873,52 +1021,64 @@ def cmd_info(path, args):
         disc.f.close()
 
 
-def cmd_verify(path, args):
+def check_image(path, cap):
+    """(problems, summary) for an image read back from disk, or (None, None)
+    when it has no readable volume. Every extent inside the image, no overlaps,
+    every entry reachable within cap and found by a descending search. An empty
+    problems list means it verifies; the summary says what was found."""
     disc = Disc(path)
     try:
-        if not disc.locate(args.part_offset):
-            print("%s: no XDVDFS volume at any known partition offset" % path, file=sys.stderr)
-            return 2
-        dirs, past_end = survey(disc, args.cap)
-        entries, _past = catalog(disc, args.cap)
-        problems = 0
+        if not disc.locate():
+            return None, None
+        dirs, past_end = survey(disc, cap)
+        entries = {}
+        for _sector, _size, _table, _e, order, _deep, dpath in dirs:
+            for e in order:
+                entries[dpath + e.name] = e
+        problems = []
         limit = (disc.size - disc.part_off) // SECTOR
         spans = []
         for p, e in entries.items():
             if e.is_dir:
                 continue
             if e.sector + (e.size + SECTOR - 1) // SECTOR > limit:
-                print("past end     %s: ends past the image" % p, file=sys.stderr)
-                problems += 1
+                problems.append("past end     %s: ends past the image" % _safe_text(p))
             spans.append((e.sector, e.sector + (e.size + SECTOR - 1) // SECTOR, p))
         spans.sort()
         for (s1, e1, n1), (s2, e2, n2) in zip(spans, spans[1:]):
             if s2 < e1:
-                print("overlap      %s and %s share sectors %d..%d" % (n1, n2, s2, min(e1, e2) - 1),
-                      file=sys.stderr)
-                problems += 1
-        for sector, size, table, _entries, order, deep, dpath in dirs:
-            if deep > args.cap:
-                print("deep         %s: deepest entry %d > %d, hidden by a depth-limited reader"
-                      % (dpath, deep, args.cap), file=sys.stderr)
-                problems += 1
+                problems.append("overlap      %s and %s share sectors %d..%d"
+                                % (_safe_text(n1), _safe_text(n2), s2, min(e1, e2) - 1))
+        for _sector, _size, table, _e, order, deep, dpath in dirs:
+            if deep > cap:
+                problems.append("deep         %s: deepest entry %d > %d, hidden by a "
+                                "depth-limited reader" % (_safe_text(dpath), deep, cap))
             for e in order:
-                if walk_lookup(table, e.name, args.cap) is None:
-                    print("unreachable  %s%s" % (dpath, e.name), file=sys.stderr)
-                    problems += 1
+                if walk_lookup(table, e.name, cap) is None:
+                    problems.append("unreachable  %s%s" % (_safe_text(dpath), _safe_text(e.name)))
                 elif descend_lookup(table, e.name) is None:
-                    print("unsorted     %s%s: not found by a descending search" % (dpath, e.name),
-                          file=sys.stderr)
-                    problems += 1
+                    problems.append("unsorted     %s%s: not found by a descending search"
+                                    % (_safe_text(dpath), _safe_text(e.name)))
         if past_end:
-            print("past end     %d table(s) lie beyond the image" % len(past_end), file=sys.stderr)
-            problems += 1
-        print("%s: %d entries, %d table(s), %s"
-              % (path, len(entries), len(dirs), "no problems found" if not problems
-                 else "%d problem(s)" % problems))
-        return 0 if not problems else 3
+            problems.append("past end     %d table(s) lie beyond the image" % len(past_end))
+        summary = {"entries": len(entries), "tables": len(dirs), "dirs": dirs,
+                   "deepest": max([d[5] for d in dirs] or [0])}
+        return problems, summary
     finally:
         disc.f.close()
+
+
+def cmd_verify(path, args):
+    problems, summary = check_image(path, args.cap)
+    if summary is None:
+        print("%s: no XDVDFS volume at any known partition offset" % path, file=sys.stderr)
+        return 2
+    for line in problems:
+        print(line, file=sys.stderr)
+    print("%s: %d entries, %d table(s), %s"
+          % (path, summary["entries"], summary["tables"],
+             "no problems found" if not problems else "%d problem(s)" % len(problems)))
+    return 0 if not problems else 3
 
 
 # --- writing a disc ---------------------------------------------------------
@@ -996,6 +1156,12 @@ def _dir_table(node):
         links[m] = (build(lo, m), build(m + 1, hi))
         return offsets[m] // 4
 
+    # Every reader takes a child offset as a dword number, so every entry has
+    # to start on a 4-byte boundary. _entry_bytes rounds up to hold that, and
+    # this says so where it matters instead of trusting the rounding.
+    for off in offsets:
+        if off % 4:
+            raise ValueError("entry offset %d is not dword-aligned" % off)
     links[0] = (build(1, mid + 1), build(mid + 1, n))
     for i, kid in enumerate(order):
         o = offsets[i]
@@ -1008,9 +1174,21 @@ def _dir_table(node):
     return bytes(table)
 
 
+def _inside(path, root):
+    """True when path lands inside root: an image written into the tree it is
+    built from would try to hold itself."""
+    path = os.path.realpath(path)
+    root = os.path.realpath(root)
+    return path == root or os.path.commonpath([path, root]) == root
+
+
 def cmd_create(src, out_path, args):
     if not os.path.isdir(src):
         print("%s: not a directory" % src, file=sys.stderr)
+        return 2
+    if _inside(out_path, src):
+        print("%s: the image would be written inside its own source tree (%s)"
+              % (out_path, src), file=sys.stderr)
         return 2
     try:
         root = _node(src, "", args.upper)
@@ -1018,43 +1196,66 @@ def cmd_create(src, out_path, args):
         print("%s: %s" % (src, exc), file=sys.stderr)
         return 2
     if not any(c["name"].upper() == "DEFAULT.XBE" for c in root["children"]):
-        print("%s: no default.xbe at the top (the Xbox looks for one when it boots)"
-              % src, file=sys.stderr)
+        # An Xbox boots a disc by its default.xbe. Without one the image cannot
+        # boot, so this is refused before anything is written, instead of
+        # written, warned about, and then reported as a success.
+        print("%s: no default.xbe at the top, so the disc would not boot; put one there "
+              "and try again (the source tree is unchanged)" % src, file=sys.stderr)
+        return 2
     total, dirs, files = _allocate(root)
-    with open(out_path, "wb") as out:
-        out.truncate(total * SECTOR)
-        vd = bytearray(SECTOR)
-        vd[:20] = MAGIC
-        struct.pack_into("<II", vd, 20, root["sector"], root["table"])
-        vd[0x7EC:0x7EC + 20] = MAGIC
-        out.seek(32 * SECTOR)
-        out.write(vd)
-        for node in dirs:
-            out.seek(node["sector"] * SECTOR)
-            out.write(_dir_table(node))
-        for node in files:
-            out.seek(node["sector"] * SECTOR)
-            copied = 0
-            with open(node["src"], "rb") as f:
-                while True:
-                    chunk = f.read(8 << 20)
-                    if not chunk:
-                        break
-                    out.write(chunk)
-                    copied += len(chunk)
-            if copied != node["size"]:
-                print("%s: read %d of %d bytes" % (node["src"], copied, node["size"]), file=sys.stderr)
-                return 2
+    try:
+        with open(out_path, "wb") as out:
+            out.truncate(total * SECTOR)
+            vd = bytearray(SECTOR)
+            vd[:20] = MAGIC
+            struct.pack_into("<II", vd, 20, root["sector"], root["table"])
+            vd[0x7EC:0x7EC + 20] = MAGIC
+            out.seek(32 * SECTOR)
+            out.write(vd)
+            for node in dirs:
+                out.seek(node["sector"] * SECTOR)
+                out.write(_dir_table(node))
+            for node in files:
+                out.seek(node["sector"] * SECTOR)
+                copied = 0
+                with open(node["src"], "rb") as f:
+                    while True:
+                        chunk = f.read(8 << 20)
+                        if not chunk:
+                            break
+                        out.write(chunk)
+                        copied += len(chunk)
+                if copied != node["size"]:
+                    raise IOError("%s: read %d of %d bytes" % (node["src"], copied, node["size"]))
+    except (IOError, OSError) as exc:
+        # A half-written image is not a disc: remove it rather than leave one
+        # under the name that was asked for.
+        print("%s: %s; nothing was kept" % (out_path, exc), file=sys.stderr)
+        _discard(out_path)
+        return 2
     size = os.path.getsize(out_path)
     print("created      %s (%.2f GiB)" % (out_path, size / 2**30))
     print("layout       %d directories, %d files, %d sectors" % (len(dirs), len(files), total))
     status = cmd_verify(out_path, args)
+    if status:
+        print("%s: the image it wrote does not verify; removing it" % out_path, file=sys.stderr)
+        _discard(out_path)
     return status
+
+
+def _discard(path):
+    """Removes a file this run wrote, ignoring a failure to do so."""
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
 
 
 def cmd_rewrite(path, args):
     """Repair the tables, drop the sectors after the last one used when the
-    partition starts at +0x0, then read the result back and report it."""
+    partition starts at +0x0, then read the result back and report it. This
+    rewrites the image and truncates it, so it keeps a backup unless
+    --no-backup is given."""
     disc = Disc(path)
     try:
         if not disc.locate(args.part_offset):
@@ -1066,15 +1267,30 @@ def cmd_rewrite(path, args):
                   % (path, len(past_end)), file=sys.stderr)
             return 2
         end = used_end(disc, dirs)
-        repaired, error = repair_in_place(disc, dirs, args)
+        patches, error = table_patches(dirs, args)
         if error:
             print("  %s, refusing to write" % error, file=sys.stderr)
             return 2
+        bk = None
+        if not args.no_backup:
+            bk = backup_path(path)
+            shutil.copyfile(path, bk)
+            print("backup       %s" % bk)
         shrunk = 0
         keep = disc.part_off + end * SECTOR
-        if disc.part_off == 0 and keep < disc.size:
-            shrunk = disc.size - keep
-            os.truncate(path, keep)
+        try:
+            repaired = write_patches(path, disc.part_off, patches)
+            if disc.part_off == 0 and keep < disc.size:
+                shrunk = disc.size - keep
+                os.truncate(path, keep)
+        except (IOError, OSError) as exc:
+            print("%s: %s" % (path, exc), file=sys.stderr)
+            if bk:
+                print("the image may be partially rewritten; restore it from %s" % bk, file=sys.stderr)
+            else:
+                print("the image may be partially rewritten, and --no-backup kept no copy",
+                      file=sys.stderr)
+            return 2
         print("rewrote      %s: %d table(s) rebalanced, %.2f GiB%s"
               % (path, repaired, os.path.getsize(path) / 2**30,
                  " (dropped %.2f GiB after the last used sector)" % (shrunk / 2**30) if shrunk else ""))
@@ -1116,10 +1332,14 @@ def main(argv):
                     help="repair in place and drop the sectors after the last used one")
     ap.add_argument("-o", "--output", help="write the repaired (or created) image here")
     ap.add_argument("--in-place", action="store_true", help="repair each image in place")
-    ap.add_argument("--backup", action="store_true",
-                    help="kept for compatibility: --in-place backs up unless --no-backup")
-    ap.add_argument("--no-backup", action="store_true",
-                    help="with --in-place, do not keep <image>.bak (backup is the default)")
+    backup = ap.add_mutually_exclusive_group()
+    backup.add_argument("--backup", dest="no_backup", action="store_false",
+                        help="keep <image>.bak (the default)")
+    backup.add_argument("--no-backup", action="store_true",
+                        help="with --in-place or --rewrite, do not keep <image>.bak")
+    # store_false defaults to True, which would silently disable the backup on
+    # every run: pin the default the two flags share.
+    ap.set_defaults(no_backup=False)
     ap.add_argument("--trim", metavar="OUT.iso",
                     help="write a compact copy: the game partition alone, cut to the last used "
                          "sector, tables repaired (loses no file)")
@@ -1160,8 +1380,6 @@ def main(argv):
             status = cmd_verify(path, args)
         elif args.rewrite:
             status = cmd_rewrite(path, args)
-        elif args.in_place:
-            status = process(path, args)
         else:
             status = process(path, args)
         worst = max(worst, status)
