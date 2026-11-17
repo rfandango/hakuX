@@ -572,14 +572,23 @@ def process(path, args):
             return 2
         out_path = path if args.in_place else args.output
         bk = None
-        if args.in_place:
-            if not args.no_backup:
-                bk = backup_path(path)
-                shutil.copyfile(path, bk)
-                print("\nbackup       %s" % bk)
-        else:
-            shutil.copyfile(path, out_path)
-            print("\ncopy         %s" % out_path)
+        try:
+            if args.in_place:
+                if not args.no_backup:
+                    bk = backup_path(path)
+                    shutil.copyfile(path, bk)
+                    print("\nbackup       %s" % bk)
+            else:
+                shutil.copyfile(path, out_path)
+                print("\ncopy         %s" % out_path)
+        except (IOError, OSError) as exc:
+            # A copy that cannot be made (a full disk is the usual reason) has
+            # touched nothing yet: report it with the documented exit status
+            # instead of a traceback out of shutil.
+            print("%s: %s; the image is unchanged" % (path, exc), file=sys.stderr)
+            if bk:
+                _discard(bk)
+            return 2
 
         try:
             repaired = write_patches(out_path, disc.part_off, patches)
@@ -1247,14 +1256,14 @@ def cmd_create(src, out_path, args):
         print("%s: %s; nothing was kept" % (out_path, exc), file=sys.stderr)
         _discard(out_path)
         return 2
-    size = os.path.getsize(out_path)
-    print("created      %s (%.2f GiB)" % (out_path, size / 2**30))
-    print("layout       %d directories, %d files, %d sectors" % (len(dirs), len(files), total))
     status = cmd_verify(out_path, args)
     if status:
         print("%s: the image it wrote does not verify; removing it" % out_path, file=sys.stderr)
         _discard(out_path)
-    return status
+        return status
+    print("created      %s (%.2f GiB)" % (out_path, os.path.getsize(out_path) / 2**30))
+    print("layout       %d directories, %d files, %d sectors" % (len(dirs), len(files), total))
+    return 0
 
 
 def _discard(path):
@@ -1286,10 +1295,16 @@ def cmd_rewrite(path, args):
             print("  %s, refusing to write" % error, file=sys.stderr)
             return 2
         bk = None
-        if not args.no_backup:
-            bk = backup_path(path)
-            shutil.copyfile(path, bk)
-            print("backup       %s" % bk)
+        try:
+            if not args.no_backup:
+                bk = backup_path(path)
+                shutil.copyfile(path, bk)
+                print("backup       %s" % bk)
+        except (IOError, OSError) as exc:
+            print("%s: %s; the image is unchanged" % (path, exc), file=sys.stderr)
+            if bk:
+                _discard(bk)
+            return 2
         shrunk = 0
         keep = disc.part_off + end * SECTOR
         try:
@@ -1367,6 +1382,16 @@ def main(argv):
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
 
+    # One mode at a time: two of them used to be silently decided by the order
+    # of the dispatch chain, so `--info --verify` ran --info and reported
+    # success for a verify nobody performed.
+    modes = [flag for flag, on in (("--list", args.list), ("--extract", args.extract),
+                                   ("--info", args.info), ("--verify", args.verify),
+                                   ("--rewrite", args.rewrite), ("--in-place", args.in_place),
+                                   ("--trim", args.trim), ("--create", args.create)) if on]
+    if len(modes) > 1:
+        ap.error("%s ask for different things; give one at a time" % " and ".join(modes))
+
     if args.self_test:
         return self_test(args)
     if args.create:
@@ -1384,18 +1409,28 @@ def main(argv):
 
     worst = 0
     for path in args.images:
-        if args.list:
-            status = cmd_list(path, args)
-        elif args.extract:
-            status = cmd_extract(path, args.extract, args)
-        elif args.info:
-            status = cmd_info(path, args)
-        elif args.verify:
-            status = cmd_verify(path, args)
-        elif args.rewrite:
-            status = cmd_rewrite(path, args)
+        # A path that is not a file used to raise out of open() as a traceback;
+        # the tool documents exit status 2 for a name it cannot use.
+        if not os.path.isfile(path):
+            print("%s: not a file" % path, file=sys.stderr)
+            status = 2
         else:
-            status = process(path, args)
+            try:
+                if args.list:
+                    status = cmd_list(path, args)
+                elif args.extract:
+                    status = cmd_extract(path, args.extract, args)
+                elif args.info:
+                    status = cmd_info(path, args)
+                elif args.verify:
+                    status = cmd_verify(path, args)
+                elif args.rewrite:
+                    status = cmd_rewrite(path, args)
+                else:
+                    status = process(path, args)
+            except (IOError, OSError) as exc:
+                print("%s: %s" % (path, exc), file=sys.stderr)
+                status = 2
         worst = max(worst, status)
         if status and status != 3:
             break
