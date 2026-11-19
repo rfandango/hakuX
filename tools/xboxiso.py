@@ -31,12 +31,18 @@ the whole tree (hakuX) needs the walk to stay shallow, which it becomes.
     ./tools/xboxiso.py ROM.iso -o fixed.iso        # write a repaired copy
     ./tools/xboxiso.py ROM.iso --in-place          # repair, keeping ROM.iso.bak
     ./tools/xboxiso.py roms/xbox/*.iso --in-place  # a library
-    ./tools/xboxiso.py ROM.iso --trim ROM.trim.iso # compact copy, no file lost
+    ./tools/xboxiso.py ROM.iso --trim              # compact it in place
+    ./tools/xboxiso.py ROM.iso --trim ROM.min.iso  # compact copy, no file lost
     ./tools/xboxiso.py ROM.iso --rewrite           # repair and drop the tail
     ./tools/xboxiso.py ROM.iso --extract out/      # extract its files
     ./tools/xboxiso.py --create tree/ -o new.iso   # build one from a directory
     ./tools/xboxiso.py ROM.iso --verify            # check entries and extents
     ./tools/xboxiso.py --self-test
+
+The image comes first and its flag after it: every mode takes the image as a
+plain argument, never as the flag's value. --trim with no output replaces the
+image itself, hardlinking the original to <image>.bak first, which costs no
+space and no time and is never skipped.
 
 Exit status: 0 nothing to do or repaired, 1 usage or I/O error, 2 an image or
 a source tree has a problem that stops the operation (a directory the repair
@@ -496,15 +502,37 @@ def trim_image(path, out_path, args):
             print("trimmed image still has a table %d level(s) deep, refusing to keep it"
                   % summary["deepest"], file=sys.stderr)
             return 2
+        in_place = os.path.realpath(out_path) == os.path.realpath(path)
+        bk = None
         try:
+            if in_place:
+                # A hardlink, not a copy and not a rename: the original stays
+                # reachable under its own name until the swap lands, keeping it
+                # costs no space and no time, and there is no window in which the
+                # image has no name at all. An in-place trim always has its undo,
+                # which is why --no-backup is refused for it.
+                bk = backup_path(path)
+                try:
+                    os.link(path, bk)
+                except OSError as exc:
+                    print("%s: cannot keep a backup beside it (%s); use --trim OUT.iso to "
+                          "write a copy instead" % (path, exc), file=sys.stderr)
+                    return 2
+                print("backup       %s" % bk)
             os.replace(tmp_path, out_path)  # the verified image takes its name here
         except OSError as exc:
-            print("%s: %s; the verified image stays at %s" % (out_path, exc, tmp_path), file=sys.stderr)
+            print("%s: %s" % (out_path, exc), file=sys.stderr)
+            if bk:
+                print("the original is at %s and the verified trim stays at %s" % (bk, tmp_path),
+                      file=sys.stderr)
+            else:
+                print("the verified image stays at %s" % tmp_path, file=sys.stderr)
             keep_tmp = True
             return 2
         promoted = True
-        print("trimmed      %s (%.2f GiB, was %.2f GiB)"
-              % (out_path, os.path.getsize(out_path) / 2**30, disc.size / 2**30))
+        print("trimmed      %s (%.2f GiB, was %.2f GiB)%s"
+              % (out_path, os.path.getsize(out_path) / 2**30, disc.size / 2**30,
+                 ", in place" if in_place else ""))
         print("kept         %d entries, partition at +0x0, %d table(s) rebalanced, deepest %d level(s)"
               % (summary["entries"], repaired, summary["deepest"]))
         return 0
@@ -1337,8 +1365,10 @@ def cmd_rewrite(path, args):
         print("verified     %d table(s), deepest %d level(s), every entry reachable"
               % (len(after), deepest))
         if disc.part_off != 0:
-            print("note         the partition starts at +0x%X, so the image keeps its front "
-                  "padding; --trim OUT.iso writes one with the partition at +0x0" % disc.part_off)
+            print("note         the partition starts at +0x%X, so this image keeps its front "
+                  "padding and --rewrite cannot drop it; \"%s IMAGE --trim\" replaces it with "
+                  "a compact copy whose partition is at +0x0"
+                  % (disc.part_off, os.path.basename(sys.argv[0]) or "xboxiso"))
         return 0
     finally:
         disc.f.close()
@@ -1348,9 +1378,29 @@ def main(argv):
         prog="xboxiso",
         description="An all-in-one Xbox disc image tool: list, extract, create, verify, info, "
                     "repair directory tables that depth-limited readers cannot search, and write "
-                    "a correct trim of a full disc image.")
+                    "a correct trim of a full disc image.",
+        epilog="The image is a plain argument; its mode follows as a flag:\n"
+               "  xboxiso ROM.iso                     report, change nothing\n"
+               "  xboxiso ROM.iso --verify            check entries and extents\n"
+               "  xboxiso ROM.iso --info              volume and XBE title details\n"
+               "  xboxiso ROM.iso --list              list every file\n"
+               "  xboxiso ROM.iso --trim              replace it with a compact copy\n"
+               "  xboxiso ROM.iso --trim OUT.iso      write the compact copy to OUT.iso\n"
+               "  xboxiso ROM.iso --in-place          repair it, keeping ROM.iso.bak\n"
+               "  xboxiso ROM.iso -o fixed.iso        write a repaired copy\n"
+               "  xboxiso ROM.iso --rewrite           repair and drop the unused tail\n"
+               "  xboxiso ROM.iso --extract out/      extract its files\n"
+               "  xboxiso --create tree/ -o new.iso   build one from a directory\n"
+               "  xboxiso roms/xbox/*.iso --verify    a whole library\n"
+               "\nA trim keeps the game partition and every file, so a full Redump dump\n"
+               "usually halves with nothing lost. An in-place trim keeps the original as\n"
+               "<image>.bak by hardlinking it -- no space, no time -- and never skips\n"
+               "that backup: --no-backup is refused for it. Use --trim OUT.iso to write\n"
+               "a copy instead.\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--version", action="version", version="xboxiso " + VERSION)
-    ap.add_argument("images", nargs="*", help="disc images (ISO, XISO, XGD)")
+    ap.add_argument("images", nargs="*", metavar="IMAGE",
+                    help="disc images (ISO, XISO, XGD); the image comes before its mode flag")
     ap.add_argument("--list", action="store_true", help="list the files on an image")
     ap.add_argument("--extract", metavar="DIR", help="extract an image's files into DIR")
     ap.add_argument("--create", metavar="SRC", help="build an image from a directory")
@@ -1360,7 +1410,8 @@ def main(argv):
     ap.add_argument("--rewrite", action="store_true",
                     help="repair in place and drop the sectors after the last used one")
     ap.add_argument("-o", "--output", help="write the repaired (or created) image here")
-    ap.add_argument("--in-place", action="store_true", help="repair each image in place")
+    ap.add_argument("--in-place", action="store_true",
+                    help="repair each image in place; with --trim, trim it in place")
     backup = ap.add_mutually_exclusive_group()
     backup.add_argument("--backup", dest="no_backup", action="store_false",
                         help="keep <image>.bak (the default)")
@@ -1369,9 +1420,10 @@ def main(argv):
     # store_false defaults to True, which would silently disable the backup on
     # every run: pin the default the two flags share.
     ap.set_defaults(no_backup=False)
-    ap.add_argument("--trim", metavar="OUT.iso",
+    ap.add_argument("--trim", nargs="?", const="", metavar="OUT.iso",
                     help="write a compact copy: the game partition alone, cut to the last used "
-                         "sector, tables repaired (loses no file)")
+                         "sector, tables repaired (loses no file). Without OUT.iso the image is "
+                         "replaced in place, always keeping the original as <image>.bak")
     ap.add_argument("--part-offset", type=lambda s: int(s, 0),
                     help="game partition offset (default: probe the known ones)")
     ap.add_argument("--cap", type=int, default=64,
@@ -1382,33 +1434,66 @@ def main(argv):
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
 
-    # One mode at a time: two of them used to be silently decided by the order
-    # of the dispatch chain, so `--info --verify` ran --info and reported
-    # success for a verify nobody performed.
-    modes = [flag for flag, on in (("--list", args.list), ("--extract", args.extract),
-                                   ("--info", args.info), ("--verify", args.verify),
-                                   ("--rewrite", args.rewrite), ("--in-place", args.in_place),
-                                   ("--trim", args.trim), ("--create", args.create)) if on]
-    if len(modes) > 1:
-        ap.error("%s ask for different things; give one at a time" % " and ".join(modes))
-
     if args.self_test:
         return self_test(args)
     if args.create:
         if args.images or not args.output:
-            ap.error("--create takes a directory and -o OUT.iso")
+            ap.error("--create takes a directory and -o OUT.iso: "
+                     "xboxiso --create tree/ -o new.iso")
         return cmd_create(args.create, args.output, args)
-    if args.trim:
-        if len(args.images) != 1 or args.output or args.in_place:
-            ap.error("--trim takes one image and its own output")
-        return trim_image(args.images[0], args.trim, args)
+
+    # One mode at a time: two of them used to be decided silently by the order of
+    # the dispatch chain, so `--info --verify` ran --info and reported success
+    # for a verify nobody performed. --in-place with a bare --trim is the one
+    # pair that agrees: both mean "replace this image".
+    modes = [flag for flag, on in (("--list", args.list), ("--extract", args.extract),
+                                   ("--info", args.info), ("--verify", args.verify),
+                                   ("--rewrite", args.rewrite), ("--in-place", args.in_place),
+                                   ("--trim", args.trim is not None), ("--create", args.create))
+             if on]
+    if args.in_place and args.trim == "":
+        modes = [m for m in modes if m not in ("--in-place", "--trim")]
+    if len(modes) > 1:
+        ap.error("%s ask for different things; give one at a time" % " and ".join(modes))
+
+    if args.trim is not None:
+        if args.in_place and args.trim:
+            ap.error("--in-place and --trim OUT.iso name different destinations; use --trim "
+                     "alone to replace the image, or --trim OUT.iso to write a copy")
+        if args.no_backup and (args.in_place or not args.trim):
+            ap.error("an in-place trim always keeps the original as <image>.bak, as a hardlink "
+                     "that costs no space; use --trim OUT.iso to write a copy instead")
+        if any((args.output, args.rewrite, args.list, args.extract, args.info, args.verify)):
+            ap.error("--trim takes the image and at most its own output: "
+                     "xboxiso IMAGE --trim [OUT.iso]")
+        if len(args.images) != 1:
+            ap.error("--trim takes one image: xboxiso IMAGE --trim [OUT.iso] "
+                     "(with no OUT.iso the image is replaced in place)")
+        if not os.path.isfile(args.images[0]):
+            print("%s: not a file" % args.images[0], file=sys.stderr)
+            return 2
+        return trim_image(args.images[0], args.trim or args.images[0], args)
+
     if not args.images:
-        ap.error("give at least one image, or --self-test")
+        flag = next((f for f, on in (("--list", args.list), ("--info", args.info),
+                                     ("--verify", args.verify), ("--rewrite", args.rewrite),
+                                     ("--in-place", args.in_place), ("--extract", args.extract))
+                     if on), None)
+        if flag:
+            ap.error("%s needs an image: xboxiso IMAGE %s%s"
+                     % (flag, flag, " DIR" if flag == "--extract" else ""))
+        ap.error("give at least one image, or --self-test: xboxiso IMAGE [mode]")
     if len(args.images) > 1 and (args.extract or args.output or args.info or args.list):
         ap.error("--list, --extract, --info and -o take one image")
 
-    worst = 0
+    # The same image named twice is the same work twice.
+    images = []
     for path in args.images:
+        if path not in images:
+            images.append(path)
+
+    worst = 0
+    for path in images:
         # A path that is not a file used to raise out of open() as a traceback;
         # the tool documents exit status 2 for a name it cannot use.
         if not os.path.isfile(path):
