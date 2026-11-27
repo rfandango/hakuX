@@ -425,6 +425,35 @@ static bool relocate(NcVm *vm, uint32_t q, uint32_t to)
     return true;
 }
 
+/* A virtual page pinned where virtual memory put it (high, under what never
+ * moves) stays in the middle of RAM once that memory is freed or moved, and
+ * splits what is free for good. NFL 2K5 asks for an image page's physical
+ * address while it sizes its heap at boot, the image then at 0x2C96000: the
+ * page stayed at 0x330C000, the heap (all of free memory, asked for in one
+ * piece) came up 1.2 MiB short of the console's, and a match's load ran out
+ * of it and read the disc into a null buffer. So it goes up first, to the
+ * free pages nc_vm_alloc_phys_top moves pages to. */
+uint32_t nc_vm_settle(NcVm *vm, uint32_t pa)
+{
+    const uint32_t p = pa / NC_PAGE;
+    if (pa >= vm->ram_size || !vm->page_used[p] || !movable(vm, p)) {
+        return pa;
+    }
+    const uint32_t ram_pages = vm->ram_size / NC_PAGE;
+    const uint32_t below = NC_TOP_RESERVE / NC_PAGE < ram_pages ? ram_pages - NC_TOP_RESERVE / NC_PAGE : ram_pages;
+    /* below the top reserve first, then in it; only upwards */
+    const uint32_t ranges[2][2] = {{p + 1, below}, {below > p + 1 ? below : p + 1, ram_pages}};
+    for (unsigned r = 0; r < 2; r++) {
+        for (uint32_t to = ranges[r][1]; to > ranges[r][0];) {
+            to--;
+            if (takes_move(vm, to)) {
+                return relocate(vm, p, to) ? to * NC_PAGE | (pa & (NC_PAGE - 1)) : pa;
+            }
+        }
+    }
+    return pa;
+}
+
 uint32_t nc_vm_alloc_phys_compact(NcVm *vm, uint32_t len, uint32_t lo, uint32_t hi, uint32_t align, uint32_t *moved)
 {
     *moved = 0;
