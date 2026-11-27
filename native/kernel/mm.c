@@ -707,6 +707,23 @@ static uint64_t MmQueryAllocationSize(NcKernel *k, NcFrame *f, const uint32_t *a
     return r ? r->size : 0;
 }
 
+/* A page about to be pinned (its address goes out, or DMA locks it), moved
+ * first to where what never moves packs (vm.c, nc_vm_settle) while it still
+ * can; the first moves are logged. Its physical address now. */
+static uint32_t settle(NcKernel *k, NcFrame *f, uint32_t va, uint32_t pa, const char *what)
+{
+    const uint32_t was = pa;
+    pa = nc_vm_settle(k->vm, pa);
+    if (pa != was) {
+        static unsigned s_settled;
+        if (s_settled++ < 16) {
+            nc_log("hakuX-native", "mm: %s(%08x) from %08x: its page moved up, %08x to %08x", what, va,
+                   caller_of(k, f), was & ~(NC_PAGE - 1), pa & ~(NC_PAGE - 1));
+        }
+    }
+    return pa;
+}
+
 /* MmGetPhysicalAddress(BaseAddress) */
 static uint64_t MmGetPhysicalAddress(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
@@ -714,6 +731,7 @@ static uint64_t MmGetPhysicalAddress(NcKernel *k, NcFrame *f, const uint32_t *a)
     if (pa == UINT32_MAX) {
         return 0;
     }
+    pa = settle(k, f, a[0], pa, "MmGetPhysicalAddress");
     nc_vm_pin(k->vm, pa, true, 0); /* the title may keep it: the page stays put */
     return pa;
 }
@@ -725,7 +743,10 @@ static uint64_t MmIsAddressValid(NcKernel *k, NcFrame *f, const uint32_t *a)
 }
 
 /* MmLockUnlockBufferPages(BaseAddress, NumberOfBytes, UnlockPages): locked
- * pages (DMA) are never relocated. */
+ * pages (DMA) are never relocated. A page locked for the first time moves up
+ * first: DirectSound locks a stream packet's pages, then asks for their
+ * addresses (pinned for good then), and NFL 2K5's, in its image, stayed in
+ * the middle of RAM. */
 static uint64_t MmLockUnlockBufferPages(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
     if (!a[1]) {
@@ -733,9 +754,13 @@ static uint64_t MmLockUnlockBufferPages(NcKernel *k, NcFrame *f, const uint32_t 
     }
     const uint64_t end = (uint64_t)a[0] + a[1];
     for (uint64_t va = a[0] & ~(NC_PAGE - 1); va < end; va += NC_PAGE) {
-        const uint32_t pa = nc_vm_phys(k->vm, (uint32_t)va);
+        uint32_t pa = nc_vm_phys(k->vm, (uint32_t)va);
         if (pa != UINT32_MAX) {
-            nc_vm_pin(k->vm, pa, false, a[2] & 0xFF ? -1 : 1);
+            const bool lock = !(a[2] & 0xFF);
+            if (lock) {
+                pa = settle(k, f, (uint32_t)va, pa, "MmLockUnlockBufferPages");
+            }
+            nc_vm_pin(k->vm, pa, false, lock ? 1 : -1);
         }
     }
     return 0;

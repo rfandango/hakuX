@@ -134,6 +134,12 @@ void nc_vm_free_phys(NcVm *vm, uint32_t pa, uint32_t len);
  * (lock > 0) or one less (lock < 0). A pinned page is never relocated. */
 void nc_vm_pin(NcVm *vm, uint32_t pa, bool known, int lock);
 
+/* The page at pa, about to be pinned for good (its address goes out), moved
+ * first to the highest free page above it, where what never moves packs
+ * (below NC_TOP_RESERVE while there is one), if it can move. Its physical
+ * address now, offset kept: pa itself when it stays. */
+uint32_t nc_vm_settle(NcVm *vm, uint32_t pa);
+
 /* Contiguous physical pages when no free run holds them, as the Xbox
  * kernel's MmAllocateContiguousMemory relocates busy pages: the highest
  * window in [lo, hi) whose used pages can all move (virtual pages mapped
